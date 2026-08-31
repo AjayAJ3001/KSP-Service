@@ -1,5 +1,18 @@
 import React, { useState, useEffect } from 'react';
-import { HandCoins, Plus, Edit2, Trash2, Search, Calendar, UserCheck, Briefcase } from 'lucide-react';
+import {
+  HandCoins,
+  Plus,
+  Edit2,
+  Trash2,
+  Search,
+  Calendar,
+  UserCheck,
+  Briefcase,
+  Upload,
+  Image as ImageIcon,
+  Eye,
+  X,
+} from 'lucide-react';
 import { ownerAdvanceService, ownerService, userService } from '../services/adminService';
 import { OwnerAdvance, Owner, User } from '../types';
 import { DataTable, Column } from '../components/Common/DataTable';
@@ -28,10 +41,14 @@ export const OwnerAdvancesPage: React.FC = () => {
     amount: '',
     advance_date: '',
     payment_mode: 'CASH',
+    screenshot_url: '',
     notes: '',
   });
   const [formError, setFormError] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // Screenshot Preview Modal
+  const [previewImage, setPreviewImage] = useState<string | null>(null);
 
   useEffect(() => {
     loadLookups();
@@ -78,6 +95,27 @@ export const OwnerAdvancesPage: React.FC = () => {
     }
   };
 
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (!file.type.startsWith('image/')) {
+      alert('Please select a valid image file (PNG, JPG, JPEG, WEBP).');
+      return;
+    }
+
+    if (file.size > 5 * 1024 * 1024) {
+      alert('File size must be less than 5MB.');
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      setFormData((prev) => ({ ...prev, screenshot_url: reader.result as string }));
+    };
+    reader.readAsDataURL(file);
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!formData.owner_id || !formData.manager_id || !formData.amount) {
@@ -100,6 +138,7 @@ export const OwnerAdvancesPage: React.FC = () => {
         amount: numAmount,
         advance_date: formData.advance_date ? new Date(formData.advance_date).toISOString() : new Date().toISOString(),
         payment_mode: formData.payment_mode || 'CASH',
+        screenshot_url: formData.screenshot_url || undefined,
         notes: formData.notes?.trim() || undefined,
       };
 
@@ -144,6 +183,7 @@ export const OwnerAdvancesPage: React.FC = () => {
       amount: String(item.amount),
       advance_date: item.advance_date,
       payment_mode: item.payment_mode || 'CASH',
+      screenshot_url: item.screenshot_url || '',
       notes: item.notes || '',
     });
     setFormError('');
@@ -157,6 +197,7 @@ export const OwnerAdvancesPage: React.FC = () => {
       amount: '',
       advance_date: '',
       payment_mode: 'CASH',
+      screenshot_url: '',
       notes: '',
     });
     setFormError('');
@@ -246,19 +287,31 @@ export const OwnerAdvancesPage: React.FC = () => {
       header: 'Payment Mode',
       accessor: 'payment_mode',
       render: (r) => (
-        <span
-          style={{
-            fontSize: '11.5px',
-            fontWeight: 700,
-            color: '#475569',
-            background: '#f1f5f9',
-            padding: '3px 8px',
-            borderRadius: '4px',
-            textTransform: 'uppercase',
-          }}
-        >
-          {r.payment_mode || 'CASH'}
-        </span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+          <span
+            style={{
+              fontSize: '11.5px',
+              fontWeight: 700,
+              color: '#475569',
+              background: '#f1f5f9',
+              padding: '3px 8px',
+              borderRadius: '4px',
+              textTransform: 'uppercase',
+            }}
+          >
+            {r.payment_mode || 'CASH'}
+          </span>
+          {r.screenshot_url && (
+            <button
+              onClick={() => setPreviewImage(r.screenshot_url || null)}
+              className="btn btn-outline btn-sm"
+              style={{ padding: '2px 6px', fontSize: '11px', color: '#0284c7', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
+              title="View UPI / Payment Screenshot"
+            >
+              <Eye size={12} /> View Screenshot
+            </button>
+          )}
+        </div>
       ),
     },
     {
@@ -294,7 +347,7 @@ export const OwnerAdvancesPage: React.FC = () => {
             Owner Advances Management
           </h2>
           <p style={{ color: 'var(--text-muted)', fontSize: '13.5px', marginTop: '4px' }}>
-            Record cash advances given by owners and received by managers with automatic date & time tracking
+            Record cash & UPI advances given by owners and received by managers with automatic date & time tracking
           </p>
         </div>
         <button onClick={openCreateModal} className="btn btn-primary">
@@ -571,13 +624,106 @@ export const OwnerAdvancesPage: React.FC = () => {
             </div>
           </div>
 
+          {/* Optional UPI Payment Screenshot Upload */}
+          {(formData.payment_mode === 'UPI / GPAY / PHONEPE' ||
+            formData.payment_mode === 'BANK TRANSFER (NEFT/RTGS)') && (
+            <div
+              className="form-group"
+              style={{
+                background: '#f8fafc',
+                border: '1px dashed #cbd5e1',
+                padding: '14px',
+                borderRadius: '8px',
+                marginBottom: '16px',
+              }}
+            >
+              <label
+                className="form-label"
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  color: '#0369a1',
+                  fontWeight: 700,
+                  marginBottom: '8px',
+                }}
+              >
+                <Upload size={16} /> Upload Payment Screenshot (Optional)
+              </label>
+
+              {formData.screenshot_url ? (
+                <div style={{ position: 'relative', display: 'inline-block', marginTop: '6px' }}>
+                  <img
+                    src={formData.screenshot_url}
+                    alt="Payment Screenshot Preview"
+                    style={{
+                      width: '120px',
+                      height: '120px',
+                      objectFit: 'cover',
+                      borderRadius: '8px',
+                      border: '2px solid #0284c7',
+                    }}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setFormData({ ...formData, screenshot_url: '' })}
+                    style={{
+                      position: 'absolute',
+                      top: '-8px',
+                      right: '-8px',
+                      background: '#ef4444',
+                      color: 'white',
+                      border: 'none',
+                      borderRadius: '50%',
+                      width: '24px',
+                      height: '24px',
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      boxShadow: '0 2px 4px rgba(0,0,0,0.2)',
+                    }}
+                    title="Remove Screenshot"
+                  >
+                    <X size={14} />
+                  </button>
+                </div>
+              ) : (
+                <div>
+                  <input
+                    type="file"
+                    id="upiScreenshotInput"
+                    accept="image/*"
+                    onChange={handleFileChange}
+                    style={{ display: 'none' }}
+                  />
+                  <label
+                    htmlFor="upiScreenshotInput"
+                    className="btn btn-outline btn-sm"
+                    style={{
+                      cursor: 'pointer',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '6px',
+                    }}
+                  >
+                    <ImageIcon size={16} /> Choose Screenshot / Receipt
+                  </label>
+                  <span style={{ fontSize: '12px', color: 'var(--text-muted)', marginLeft: '10px' }}>
+                    JPG, PNG or WEBP (Max 5MB)
+                  </span>
+                </div>
+              )}
+            </div>
+          )}
+
           {/* Notes / Remarks */}
           <div className="form-group">
             <label className="form-label">Notes / Remarks (Optional)</label>
             <textarea
               className="form-control"
               rows={2}
-              placeholder="e.g. Advance for fuel, trip expenses, maintenance funds..."
+              placeholder="e.g. Advance for fuel, trip expenses, maintenance funds, transaction ID..."
               value={formData.notes}
               onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
             />
@@ -593,6 +739,35 @@ export const OwnerAdvancesPage: React.FC = () => {
           </div>
         </form>
       </Modal>
+
+      {/* Screenshot Full Preview Modal */}
+      {previewImage && (
+        <Modal
+          isOpen={Boolean(previewImage)}
+          onClose={() => setPreviewImage(null)}
+          title="Payment Screenshot"
+          maxWidth="650px"
+        >
+          <div style={{ textAlign: 'center', padding: '10px' }}>
+            <img
+              src={previewImage}
+              alt="Full Payment Screenshot"
+              style={{
+                maxWidth: '100%',
+                maxHeight: '70vh',
+                objectFit: 'contain',
+                borderRadius: '8px',
+                boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
+              }}
+            />
+            <div style={{ marginTop: '16px' }}>
+              <button onClick={() => setPreviewImage(null)} className="btn btn-primary">
+                Close Preview
+              </button>
+            </div>
+          </div>
+        </Modal>
+      )}
     </div>
   );
 };

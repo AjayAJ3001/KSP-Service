@@ -63,6 +63,7 @@ export interface OwnerAdvance {
   amount: number;
   advance_date: string;
   payment_mode?: string;
+  screenshot_url?: string;
   notes?: string;
   created_by?: number;
   created_by_name?: string;

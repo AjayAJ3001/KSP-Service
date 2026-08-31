@@ -112,7 +112,7 @@ export const getOwnerAdvanceById = asyncHandler(async (req: AuthRequest, res: Re
 });
 
 export const createOwnerAdvance = asyncHandler(async (req: AuthRequest, res: Response): Promise<void> => {
-  const { owner_id, manager_id, amount, advance_date, payment_mode, notes } = req.body;
+  const { owner_id, manager_id, amount, advance_date, payment_mode, notes, screenshot_url } = req.body;
 
   if (!owner_id || !manager_id || amount === undefined || amount === null) {
     throw new AppError('Owner, Manager and Amount are required.', 400);
@@ -124,8 +124,8 @@ export const createOwnerAdvance = asyncHandler(async (req: AuthRequest, res: Res
   }
 
   const result = await query(
-    `INSERT INTO owner_advances (owner_id, manager_id, amount, advance_date, payment_mode, notes, created_by)
-     VALUES ($1, $2, $3, COALESCE($4::timestamp, NOW()), $5, $6, $7)
+    `INSERT INTO owner_advances (owner_id, manager_id, amount, advance_date, payment_mode, notes, screenshot_url, created_by)
+     VALUES ($1, $2, $3, COALESCE($4::timestamp, NOW()), $5, $6, $7, $8)
      RETURNING *`,
     [
       owner_id,
@@ -134,6 +134,7 @@ export const createOwnerAdvance = asyncHandler(async (req: AuthRequest, res: Res
       advance_date || null,
       payment_mode || 'CASH',
       notes?.trim() || null,
+      screenshot_url || null,
       req.user?.id,
     ]
   );
@@ -148,7 +149,7 @@ export const createOwnerAdvance = asyncHandler(async (req: AuthRequest, res: Res
 });
 
 export const updateOwnerAdvance = asyncHandler(async (req: AuthRequest, res: Response): Promise<void> => {
-  const { owner_id, manager_id, amount, advance_date, payment_mode, notes } = req.body;
+  const { owner_id, manager_id, amount, advance_date, payment_mode, notes, screenshot_url } = req.body;
   const { id } = req.params;
 
   const existing = await query('SELECT id FROM owner_advances WHERE id = $1', [id]);
@@ -166,8 +167,9 @@ export const updateOwnerAdvance = asyncHandler(async (req: AuthRequest, res: Res
          advance_date = COALESCE($4::timestamp, advance_date),
          payment_mode = COALESCE($5, payment_mode),
          notes = COALESCE($6, notes),
+         screenshot_url = COALESCE($7, screenshot_url),
          updated_at = NOW()
-     WHERE id = $7
+     WHERE id = $8
      RETURNING *`,
     [
       owner_id || null,
@@ -176,6 +178,7 @@ export const updateOwnerAdvance = asyncHandler(async (req: AuthRequest, res: Res
       advance_date || null,
       payment_mode || null,
       notes !== undefined ? notes?.trim() : null,
+      screenshot_url !== undefined ? screenshot_url : null,
       id,
     ]
   );

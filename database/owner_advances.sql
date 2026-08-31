@@ -8,6 +8,7 @@ CREATE TABLE IF NOT EXISTS owner_advances (
   amount DECIMAL(12,2) NOT NULL CHECK (amount > 0),
   advance_date TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
   payment_mode VARCHAR(50) DEFAULT 'CASH',
+  screenshot_url TEXT,
   notes TEXT,
   created_by INTEGER REFERENCES users(id),
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),

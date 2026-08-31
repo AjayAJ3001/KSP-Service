@@ -409,6 +409,7 @@ export const ownerAdvanceService = {
     amount: number;
     advance_date?: string;
     payment_mode?: string;
+    screenshot_url?: string;
     notes?: string;
   }): Promise<ApiResponse<OwnerAdvance>> => {
     const res = await api.post('/owner-advances', data);
@@ -422,6 +423,7 @@ export const ownerAdvanceService = {
       amount: number;
       advance_date: string;
       payment_mode: string;
+      screenshot_url: string;
       notes: string;
     }>
   ): Promise<ApiResponse<OwnerAdvance>> => {
