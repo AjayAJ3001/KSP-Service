@@ -16,7 +16,7 @@ export const RoutesPage: React.FC = () => {
 
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [selectedRoute, setSelectedRoute] = useState<Route | null>(null);
-  const [formData, setFormData] = useState({ from_location: '', to_location: '', distance_km: '', status: 'ACTIVE' as 'ACTIVE' | 'INACTIVE' });
+  const [formData, setFormData] = useState({ from_location: 'Erode', to_location: '', distance_km: '', status: 'ACTIVE' as 'ACTIVE' | 'INACTIVE' });
   const [formError, setFormError] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -44,8 +44,8 @@ export const RoutesPage: React.FC = () => {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!formData.from_location.trim() || !formData.to_location.trim()) {
-      setFormError('Both From and To locations are required.');
+    if (!formData.to_location.trim()) {
+      setFormError('Party Unit / Destination name is required.');
       return;
     }
 
@@ -53,7 +53,7 @@ export const RoutesPage: React.FC = () => {
       setIsSubmitting(true);
       setFormError('');
       const payload = {
-        from_location: formData.from_location.trim(),
+        from_location: (formData.from_location || 'Erode').trim(),
         to_location: formData.to_location.trim(),
         distance_km: formData.distance_km ? parseFloat(formData.distance_km) : undefined,
         status: formData.status,
@@ -66,7 +66,7 @@ export const RoutesPage: React.FC = () => {
       }
       setIsModalOpen(false);
       setSelectedRoute(null);
-      setFormData({ from_location: '', to_location: '', distance_km: '', status: 'ACTIVE' });
+      setFormData({ from_location: 'Erode', to_location: '', distance_km: '', status: 'ACTIVE' });
       loadRoutes();
     } catch (err: any) {
       setFormError(err.message || 'Failed to save route.');
@@ -76,7 +76,7 @@ export const RoutesPage: React.FC = () => {
   };
 
   const handleDeleteRoute = async (route: Route) => {
-    if (!confirm(`Are you sure you want to delete route "${route.from_location} → ${route.to_location}"?`)) return;
+    if (!confirm(`Are you sure you want to delete unit/destination "${route.to_location}"?`)) return;
     try {
       await routeService.deleteRoute(route.id);
       loadRoutes();
@@ -87,7 +87,7 @@ export const RoutesPage: React.FC = () => {
 
   const openCreateModal = () => {
     setSelectedRoute(null);
-    setFormData({ from_location: '', to_location: '', distance_km: '', status: 'ACTIVE' });
+    setFormData({ from_location: 'Erode', to_location: '', distance_km: '', status: 'ACTIVE' });
     setFormError('');
     setIsModalOpen(true);
   };
@@ -95,7 +95,7 @@ export const RoutesPage: React.FC = () => {
   const openEditModal = (route: Route) => {
     setSelectedRoute(route);
     setFormData({
-      from_location: route.from_location,
+      from_location: route.from_location || 'Erode',
       to_location: route.to_location,
       distance_km: route.distance_km ? String(route.distance_km) : '',
       status: route.status,
@@ -106,15 +106,26 @@ export const RoutesPage: React.FC = () => {
 
   const columns: Column<Route>[] = [
     {
-      header: 'Route (From → To)',
+      header: 'Party Unit / Destination',
       render: (r) => (
-        <strong>
-          {r.from_location} → {r.to_location}
-        </strong>
+        <span
+          style={{
+            fontWeight: 700,
+            fontSize: '14px',
+            color: '#1e40af',
+            background: '#eff6ff',
+            padding: '4px 10px',
+            borderRadius: '6px',
+          }}
+        >
+          {r.to_location}
+        </span>
       ),
     },
-    { header: 'From Origin', accessor: 'from_location' },
-    { header: 'To Destination', accessor: 'to_location' },
+    {
+      header: 'From Origin',
+      render: () => <span style={{ color: 'var(--text-muted)', fontWeight: 600 }}>Erode</span>,
+    },
     { header: 'Distance (KM)', accessor: (r) => (r.distance_km ? `${r.distance_km} KM` : '—') },
     { header: 'Status', accessor: 'status', render: (r) => <StatusBadge status={r.status} /> },
     {
@@ -140,13 +151,13 @@ export const RoutesPage: React.FC = () => {
     <div>
       <div className="card-header" style={{ marginBottom: '24px' }}>
         <div>
-          <h2 style={{ fontSize: '22px', fontWeight: 800 }}>Route Master</h2>
+          <h2 style={{ fontSize: '22px', fontWeight: 800 }}>Routes & Party Unit Destinations</h2>
           <p style={{ color: 'var(--text-muted)', fontSize: '13.5px' }}>
-            Maintain origin to destination transport routes & distances
+            Origin is fixed to <strong>Erode</strong> — maintain delivery unit addresses & destinations
           </p>
         </div>
         <button onClick={openCreateModal} className="btn btn-primary">
-          <Plus size={18} /> Add New Route
+          <Plus size={18} /> Add Party Unit / Route
         </button>
       </div>
 
@@ -157,7 +168,7 @@ export const RoutesPage: React.FC = () => {
             <input
               type="text"
               className="form-control"
-              placeholder="Search by origin or destination..."
+              placeholder="Search by party unit / destination..."
               value={search}
               onChange={(e) => {
                 setSearch(e.target.value);
@@ -194,7 +205,7 @@ export const RoutesPage: React.FC = () => {
       <Modal
         isOpen={isModalOpen}
         onClose={() => setIsModalOpen(false)}
-        title={selectedRoute ? `Edit Route` : 'Add New Route'}
+        title={selectedRoute ? `Edit Party Unit Destination` : 'Add New Party Unit Destination'}
       >
         {formError && (
           <div style={{ color: '#b91c1c', background: '#fef2f2', padding: '10px', borderRadius: '8px', marginBottom: '16px', fontSize: '13px' }}>
@@ -204,24 +215,26 @@ export const RoutesPage: React.FC = () => {
         <form onSubmit={handleSubmit}>
           <div className="grid-cols-2">
             <div className="form-group">
-              <label className="form-label">From (Origin) *</label>
+              <label className="form-label">From (Origin)</label>
               <input
                 type="text"
                 className="form-control"
-                required
-                placeholder="e.g. Chennai"
-                value={formData.from_location}
-                onChange={(e) => setFormData({ ...formData, from_location: e.target.value })}
+                disabled
+                value="Erode"
+                style={{ background: '#f1f5f9', cursor: 'not-allowed', fontWeight: 600 }}
               />
+              <span style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '3px', display: 'block' }}>
+                Fixed origin for all dispatches
+              </span>
             </div>
 
             <div className="form-group">
-              <label className="form-label">To (Destination) *</label>
+              <label className="form-label">To (Party Unit Name / Destination) *</label>
               <input
                 type="text"
                 className="form-control"
                 required
-                placeholder="e.g. Coimbatore"
+                placeholder="e.g. PALANI, KUNDASAM, NULLANUR"
                 value={formData.to_location}
                 onChange={(e) => setFormData({ ...formData, to_location: e.target.value })}
               />
@@ -230,13 +243,13 @@ export const RoutesPage: React.FC = () => {
 
           <div className="grid-cols-2">
             <div className="form-group">
-              <label className="form-label">Distance (KM)</label>
+              <label className="form-label">Distance (KM) (Optional)</label>
               <input
                 type="number"
                 step="0.1"
                 min="0"
                 className="form-control"
-                placeholder="e.g. 498"
+                placeholder="e.g. 85"
                 value={formData.distance_km}
                 onChange={(e) => setFormData({ ...formData, distance_km: e.target.value })}
               />
@@ -262,7 +275,7 @@ export const RoutesPage: React.FC = () => {
               Cancel
             </button>
             <button type="submit" className="btn btn-primary" disabled={isSubmitting}>
-              {isSubmitting ? 'Saving...' : 'Save Route'}
+              {isSubmitting ? 'Saving...' : 'Save Unit / Destination'}
             </button>
           </div>
         </form>
