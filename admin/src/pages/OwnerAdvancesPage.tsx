@@ -136,12 +136,11 @@ export const OwnerAdvancesPage: React.FC = () => {
 
   const openEditModal = (item: OwnerAdvance) => {
     setSelectedAdvance(item);
-    const dateStr = item.advance_date ? new Date(item.advance_date).toISOString().slice(0, 16) : new Date().toISOString().slice(0, 16);
     setFormData({
       owner_id: String(item.owner_id),
       manager_id: String(item.manager_id),
       amount: String(item.amount),
-      advance_date: dateStr,
+      advance_date: item.advance_date,
       payment_mode: item.payment_mode || 'CASH',
       notes: item.notes || '',
     });
@@ -151,10 +150,10 @@ export const OwnerAdvancesPage: React.FC = () => {
 
   const resetForm = () => {
     setFormData({
-      owner_id: owners.length > 0 ? String(owners[0].id) : '',
-      manager_id: managers.length > 0 ? String(managers[0].id) : '',
+      owner_id: '',
+      manager_id: '',
       amount: '',
-      advance_date: new Date().toISOString().slice(0, 16),
+      advance_date: '',
       payment_mode: 'CASH',
       notes: '',
     });
@@ -293,7 +292,7 @@ export const OwnerAdvancesPage: React.FC = () => {
             Owner Advances Management
           </h2>
           <p style={{ color: 'var(--text-muted)', fontSize: '13.5px', marginTop: '4px' }}>
-            Record cash advances given by owners and received by managers with real-time date & time tracking
+            Record cash advances given by owners and received by managers with automatic date & time tracking
           </p>
         </div>
         <button onClick={openCreateModal} className="btn btn-primary">
@@ -456,7 +455,7 @@ export const OwnerAdvancesPage: React.FC = () => {
         isOpen={isModalOpen}
         onClose={() => setIsModalOpen(false)}
         title={selectedAdvance ? 'Edit Owner Advance' : 'Record New Owner Advance'}
-        maxWidth="600px"
+        maxWidth="550px"
       >
         {formError && (
           <div
@@ -472,6 +471,30 @@ export const OwnerAdvancesPage: React.FC = () => {
             {formError}
           </div>
         )}
+
+        {/* Automatic Timestamp Info Banner */}
+        <div
+          style={{
+            background: '#f0fdf4',
+            border: '1px solid #bbf7d0',
+            padding: '10px 14px',
+            borderRadius: '8px',
+            marginBottom: '18px',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '10px',
+            color: '#15803d',
+            fontSize: '13px',
+          }}
+        >
+          <Calendar size={18} color="#16a34a" />
+          <div>
+            <strong>Date & Time: </strong>
+            {selectedAdvance
+              ? formatDateTime(selectedAdvance.advance_date)
+              : 'Automatically recorded at current time on save'}
+          </div>
+        </div>
 
         <form onSubmit={handleSubmit}>
           {/* Select Owner */}
@@ -514,7 +537,7 @@ export const OwnerAdvancesPage: React.FC = () => {
             </select>
           </div>
 
-          {/* Advance Amount & Date */}
+          {/* Advance Amount & Payment Mode */}
           <div className="grid-cols-2">
             <div className="form-group">
               <label className="form-label">Advance Amount (₹) *</label>
@@ -531,31 +554,19 @@ export const OwnerAdvancesPage: React.FC = () => {
             </div>
 
             <div className="form-group">
-              <label className="form-label">Date & Time *</label>
-              <input
-                type="datetime-local"
-                className="form-control"
-                required
-                value={formData.advance_date}
-                onChange={(e) => setFormData({ ...formData, advance_date: e.target.value })}
-              />
+              <label className="form-label">Payment Mode</label>
+              <select
+                className="form-control form-select"
+                value={formData.payment_mode}
+                onChange={(e) => setFormData({ ...formData, payment_mode: e.target.value })}
+              >
+                <option value="CASH">CASH</option>
+                <option value="UPI / GPAY / PHONEPE">UPI / GPAY / PHONEPE</option>
+                <option value="BANK TRANSFER (NEFT/RTGS)">BANK TRANSFER (NEFT/RTGS)</option>
+                <option value="CHEQUE">CHEQUE</option>
+                <option value="OTHER">OTHER</option>
+              </select>
             </div>
-          </div>
-
-          {/* Payment Mode */}
-          <div className="form-group">
-            <label className="form-label">Payment Mode</label>
-            <select
-              className="form-control form-select"
-              value={formData.payment_mode}
-              onChange={(e) => setFormData({ ...formData, payment_mode: e.target.value })}
-            >
-              <option value="CASH">CASH</option>
-              <option value="UPI / GPAY / PHONEPE">UPI / GPAY / PHONEPE</option>
-              <option value="BANK TRANSFER (NEFT/RTGS)">BANK TRANSFER (NEFT/RTGS)</option>
-              <option value="CHEQUE">CHEQUE</option>
-              <option value="OTHER">OTHER</option>
-            </select>
           </div>
 
           {/* Notes / Remarks */}
