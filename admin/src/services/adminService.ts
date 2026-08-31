@@ -1,6 +1,6 @@
 import api from './api';
 import {
-  User, Driver, Vehicle, Party, Owner, Unit, Route, FreightRate, ExpenseRate, CleaningExpenseRate,
+  User, Driver, Vehicle, Party, Owner, OwnerAdvance, Unit, Route, FreightRate, ExpenseRate, CleaningExpenseRate,
   Trip, TripPayment, DriverExpense, Settlement, AuditLog, DashboardData,
   ApiResponse, PaginatedData
 } from '../types';
@@ -384,5 +384,55 @@ export const cleaningExpenseRateService = {
     return res.data;
   },
 };
+
+// Owner Advance Service
+export const ownerAdvanceService = {
+  getOwnerAdvances: async (params?: {
+    page?: number;
+    limit?: number;
+    owner_id?: number;
+    manager_id?: number;
+    from_date?: string;
+    to_date?: string;
+    search?: string;
+  }): Promise<ApiResponse<{ items: OwnerAdvance[]; total: number; totalAmount: number; page: number; limit: number; totalPages: number }>> => {
+    const res = await api.get('/owner-advances', { params });
+    return res.data;
+  },
+  getOwnerAdvanceById: async (id: number): Promise<ApiResponse<OwnerAdvance>> => {
+    const res = await api.get(`/owner-advances/${id}`);
+    return res.data;
+  },
+  createOwnerAdvance: async (data: {
+    owner_id: number;
+    manager_id: number;
+    amount: number;
+    advance_date?: string;
+    payment_mode?: string;
+    notes?: string;
+  }): Promise<ApiResponse<OwnerAdvance>> => {
+    const res = await api.post('/owner-advances', data);
+    return res.data;
+  },
+  updateOwnerAdvance: async (
+    id: number,
+    data: Partial<{
+      owner_id: number;
+      manager_id: number;
+      amount: number;
+      advance_date: string;
+      payment_mode: string;
+      notes: string;
+    }>
+  ): Promise<ApiResponse<OwnerAdvance>> => {
+    const res = await api.put(`/owner-advances/${id}`, data);
+    return res.data;
+  },
+  deleteOwnerAdvance: async (id: number): Promise<ApiResponse> => {
+    const res = await api.delete(`/owner-advances/${id}`);
+    return res.data;
+  },
+};
+
 
 

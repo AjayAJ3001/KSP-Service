@@ -20,6 +20,7 @@ import {
   LogOut,
   Briefcase,
   Droplets,
+  HandCoins,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 
@@ -59,6 +60,9 @@ export const AdminLayout: React.FC = () => {
           </NavLink>
           <NavLink to="/expenses" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
             <Wallet /> Driver Expenses
+          </NavLink>
+          <NavLink to="/owner-advances" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
+            <HandCoins /> Owner Advances
           </NavLink>
           <NavLink to="/settlements" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
             <FileCheck /> Settlements

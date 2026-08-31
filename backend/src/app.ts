@@ -22,6 +22,7 @@ import auditLogRoutes from './routes/auditLog.routes';
 import dashboardRoutes from './routes/dashboard.routes';
 import ownerRoutes from './routes/owner.routes';
 import cleaningExpenseRoutes from './routes/cleaningExpense.routes';
+import ownerAdvanceRoutes from './routes/ownerAdvance.routes';
 
 import { errorHandler, notFound } from './middleware/errorHandler';
 
@@ -72,6 +73,7 @@ app.use('/api/audit-logs', auditLogRoutes);
 app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/owners', ownerRoutes);
 app.use('/api/cleaning-expense-rates', cleaningExpenseRoutes);
+app.use('/api/owner-advances', ownerAdvanceRoutes);
 
 // Error handling
 app.use(notFound);

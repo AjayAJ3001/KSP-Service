@@ -22,6 +22,7 @@ import { AuditLogsPage } from './pages/AuditLogsPage';
 import { ProfilePage } from './pages/ProfilePage';
 import { OwnersPage } from './pages/OwnersPage';
 import { CleaningExpensesPage } from './pages/CleaningExpensesPage';
+import { OwnerAdvancesPage } from './pages/OwnerAdvancesPage';
 
 // Protected Route Component
 const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -66,6 +67,7 @@ export function App() {
             <Route path="users" element={<UsersPage />} />
             <Route path="drivers" element={<DriversPage />} />
             <Route path="owners" element={<OwnersPage />} />
+            <Route path="owner-advances" element={<OwnerAdvancesPage />} />
             <Route path="vehicles" element={<VehiclesPage />} />
             <Route path="parties" element={<PartiesPage />} />
 

@@ -54,6 +54,22 @@ export interface Owner {
   updated_at: string;
 }
 
+export interface OwnerAdvance {
+  id: number;
+  owner_id: number;
+  owner_name?: string;
+  manager_id: number;
+  manager_name?: string;
+  amount: number;
+  advance_date: string;
+  payment_mode?: string;
+  notes?: string;
+  created_by?: number;
+  created_by_name?: string;
+  created_at: string;
+  updated_at: string;
+}
+
 
 export interface Unit {
   id: number;
