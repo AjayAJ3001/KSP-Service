@@ -69,6 +69,9 @@ export interface Route {
   from_location: string;
   to_location: string;
   distance_km?: number;
+  party_id?: number;
+  party_name?: string;
+  rate_per_unit?: number;
   status: 'ACTIVE' | 'INACTIVE';
   created_at: string;
   updated_at: string;

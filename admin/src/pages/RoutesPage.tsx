@@ -1,16 +1,18 @@
 import React, { useState, useEffect } from 'react';
-import { MapPin, Plus, Edit2, Search, Trash2 } from 'lucide-react';
-import { routeService } from '../services/adminService';
-import { Route } from '../types';
+import { MapPin, Plus, Edit2, Search, Trash2, Building2 } from 'lucide-react';
+import { routeService, partyService } from '../services/adminService';
+import { Route, Party } from '../types';
 import { DataTable, Column } from '../components/Common/DataTable';
 import { Modal } from '../components/Common/Modal';
 import { StatusBadge } from '../components/Common/StatusBadge';
 
 export const RoutesPage: React.FC = () => {
   const [routes, setRoutes] = useState<Route[]>([]);
+  const [parties, setParties] = useState<Party[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState('');
+  const [partyFilter, setPartyFilter] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
   const [isLoading, setIsLoading] = useState(false);
 
@@ -21,8 +23,21 @@ export const RoutesPage: React.FC = () => {
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   useEffect(() => {
+    loadParties();
+  }, []);
+
+  useEffect(() => {
     loadRoutes();
-  }, [page, search, statusFilter]);
+  }, [page, search, partyFilter, statusFilter]);
+
+  const loadParties = async () => {
+    try {
+      const res = await partyService.getParties({ limit: 100, status: 'ACTIVE' });
+      setParties(res.data.items);
+    } catch (err) {
+      console.error('Failed to load parties', err);
+    }
+  };
 
   const loadRoutes = async () => {
     try {
@@ -31,6 +46,7 @@ export const RoutesPage: React.FC = () => {
         page,
         limit: 10,
         search: search || undefined,
+        party_id: partyFilter ? parseInt(partyFilter) : undefined,
         status: statusFilter || undefined,
       });
       setRoutes(res.data.items);
@@ -111,7 +127,7 @@ export const RoutesPage: React.FC = () => {
         <span
           style={{
             fontWeight: 700,
-            fontSize: '14px',
+            fontSize: '14.5px',
             color: '#1e40af',
             background: '#eff6ff',
             padding: '4px 10px',
@@ -120,6 +136,28 @@ export const RoutesPage: React.FC = () => {
         >
           {r.to_location}
         </span>
+      ),
+    },
+    {
+      header: 'Applicable Party',
+      accessor: (r) => (
+        r.party_name ? (
+          <strong style={{ color: 'var(--primary-900)' }}>{r.party_name}</strong>
+        ) : (
+          <span style={{ color: 'var(--text-muted)' }}>Common / All Parties</span>
+        )
+      ),
+    },
+    {
+      header: 'Freight Rate',
+      render: (r) => (
+        r.rate_per_unit ? (
+          <strong style={{ color: '#d97706', fontSize: '14.5px', fontWeight: 800 }}>
+            ₹{parseFloat(String(r.rate_per_unit)).toLocaleString('en-IN')}/Ton
+          </strong>
+        ) : (
+          <span style={{ color: 'var(--text-muted)' }}>—</span>
+        )
       ),
     },
     {
@@ -153,7 +191,7 @@ export const RoutesPage: React.FC = () => {
         <div>
           <h2 style={{ fontSize: '22px', fontWeight: 800 }}>Routes & Party Unit Destinations</h2>
           <p style={{ color: 'var(--text-muted)', fontSize: '13.5px' }}>
-            Origin is fixed to <strong>Erode</strong> — maintain delivery unit addresses & destinations
+            Origin is fixed to <strong>Erode</strong> — filter by party to view their specific delivery unit names
           </p>
         </div>
         <button onClick={openCreateModal} className="btn btn-primary">
@@ -162,33 +200,72 @@ export const RoutesPage: React.FC = () => {
       </div>
 
       <div className="card">
+        {/* Filters */}
         <div className="search-filter-bar" style={{ marginBottom: '16px' }}>
-          <div className="search-input-wrapper">
-            <Search />
-            <input
-              type="text"
-              className="form-control"
-              placeholder="Search by party unit / destination..."
-              value={search}
-              onChange={(e) => {
-                setSearch(e.target.value);
-                setPage(1);
-              }}
-            />
+          <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', alignItems: 'center' }}>
+            <div className="search-input-wrapper" style={{ flex: '1', minWidth: '220px' }}>
+              <Search />
+              <input
+                type="text"
+                className="form-control"
+                placeholder="Search by party unit / destination..."
+                value={search}
+                onChange={(e) => {
+                  setSearch(e.target.value);
+                  setPage(1);
+                }}
+              />
+            </div>
+
+            <div style={{ width: '240px' }}>
+              <select
+                className="form-control form-select"
+                value={partyFilter}
+                onChange={(e) => {
+                  setPartyFilter(e.target.value);
+                  setPage(1);
+                }}
+                style={{ width: '100%' }}
+              >
+                <option value="">All Parties (View All Units)</option>
+                {parties.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div style={{ width: '160px' }}>
+              <select
+                className="form-control form-select"
+                value={statusFilter}
+                onChange={(e) => {
+                  setStatusFilter(e.target.value);
+                  setPage(1);
+                }}
+                style={{ width: '100%' }}
+              >
+                <option value="">All Statuses</option>
+                <option value="ACTIVE">ACTIVE</option>
+                <option value="INACTIVE">INACTIVE</option>
+              </select>
+            </div>
+
+            {(partyFilter || search || statusFilter) && (
+              <button
+                className="btn btn-outline btn-sm"
+                onClick={() => {
+                  setSearch('');
+                  setPartyFilter('');
+                  setStatusFilter('');
+                  setPage(1);
+                }}
+              >
+                Clear Filters
+              </button>
+            )}
           </div>
-          <select
-            className="form-control form-select"
-            style={{ width: '150px' }}
-            value={statusFilter}
-            onChange={(e) => {
-              setStatusFilter(e.target.value);
-              setPage(1);
-            }}
-          >
-            <option value="">All Statuses</option>
-            <option value="ACTIVE">ACTIVE</option>
-            <option value="INACTIVE">INACTIVE</option>
-          </select>
         </div>
 
         <DataTable
@@ -199,6 +276,7 @@ export const RoutesPage: React.FC = () => {
           page={page}
           limit={10}
           onPageChange={setPage}
+          emptyMessage="No unit destinations found for the selected party."
         />
       </div>
 

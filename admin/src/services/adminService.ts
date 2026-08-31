@@ -171,7 +171,7 @@ export const unitService = {
 
 // Route Service
 export const routeService = {
-  getRoutes: async (params?: { page?: number; limit?: number; search?: string; status?: string }): Promise<ApiResponse<PaginatedData<Route>>> => {
+  getRoutes: async (params?: { page?: number; limit?: number; search?: string; party_id?: number; status?: string }): Promise<ApiResponse<PaginatedData<Route>>> => {
     const res = await api.get('/routes', { params });
     return res.data;
   },

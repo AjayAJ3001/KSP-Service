@@ -39,6 +39,7 @@ export const updateUnit = asyncHandler(async (req: AuthRequest, res: Response): 
 export const getRoutes = asyncHandler(async (req: AuthRequest, res: Response): Promise<void> => {
   const search = req.query.search as string;
   const status = req.query.status as string;
+  const party_id = req.query.party_id as string;
   const page = parseInt(req.query.page as string) || 1;
   const limit = parseInt(req.query.limit as string) || 50;
   const offset = (page - 1) * limit;
@@ -47,15 +48,35 @@ export const getRoutes = asyncHandler(async (req: AuthRequest, res: Response): P
   const params: any[] = [];
   let paramIdx = 1;
 
-  if (search) { conditions.push(`(from_location ILIKE $${paramIdx} OR to_location ILIKE $${paramIdx})`); params.push(`%${search}%`); paramIdx++; }
-  if (status) { conditions.push(`status = $${paramIdx}`); params.push(status); paramIdx++; }
+  if (search) {
+    conditions.push(`(r.from_location ILIKE $${paramIdx} OR r.to_location ILIKE $${paramIdx} OR EXISTS (SELECT 1 FROM freight_rates fr JOIN parties p ON fr.party_id = p.id WHERE fr.route_id = r.id AND p.name ILIKE $${paramIdx}))`);
+    params.push(`%${search}%`);
+    paramIdx++;
+  }
+  if (status) {
+    conditions.push(`r.status = $${paramIdx}`);
+    params.push(status);
+    paramIdx++;
+  }
+  if (party_id) {
+    conditions.push(`r.id IN (SELECT route_id FROM freight_rates WHERE party_id = $${paramIdx})`);
+    params.push(party_id);
+    paramIdx++;
+  }
 
   const where = conditions.join(' AND ');
-  const countResult = await query(`SELECT COUNT(*) FROM routes WHERE ${where}`, params);
+  const countResult = await query(`SELECT COUNT(*) FROM routes r WHERE ${where}`, params);
   const total = parseInt(countResult.rows[0].count);
 
   const result = await query(
-    `SELECT * FROM routes WHERE ${where} ORDER BY from_location ASC LIMIT $${paramIdx} OFFSET $${paramIdx + 1}`,
+    `SELECT r.*,
+            (SELECT p.name FROM freight_rates fr JOIN parties p ON fr.party_id = p.id WHERE fr.route_id = r.id LIMIT 1) as party_name,
+            (SELECT fr.party_id FROM freight_rates fr WHERE fr.route_id = r.id LIMIT 1) as party_id,
+            (SELECT fr.rate_per_unit FROM freight_rates fr WHERE fr.route_id = r.id LIMIT 1) as rate_per_unit
+     FROM routes r
+     WHERE ${where}
+     ORDER BY party_name ASC NULLS LAST, r.to_location ASC
+     LIMIT $${paramIdx} OFFSET $${paramIdx + 1}`,
     [...params, limit, offset]
   );
 
