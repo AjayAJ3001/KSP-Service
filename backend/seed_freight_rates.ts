@@ -14,41 +14,41 @@ const data: Array<{
   {
     partyName: 'KRISHI NUTRITION COMPANY',
     routes: [
-      { from: 'SIPCOT', to: 'SIPCOT', rate: 300 },
-      { from: 'SIPCOT', to: 'RGS-VANIKADAI', rate: 300 },
-      { from: 'SIPCOT', to: 'GOBI-SAKTHI FEEDS', rate: 400 },
-      { from: 'SIPCOT', to: 'PALLADAM-PPK HATCHERIES', rate: 500 },
-      { from: 'SIPCOT', to: 'PAPPAMPATTI-VALARMATHI FEEDS', rate: 595 },
-      { from: 'SIPCOT', to: 'NACHIPALAYAM-SULUNA FEEDS', rate: 650 },
-      { from: 'SIPCOT', to: 'NAMAKKAL', rate: 465 },
-      { from: 'SIPCOT', to: 'PUDHUCHATHARAM', rate: 465 },
-      { from: 'SIPCOT', to: 'VENNANTHUR', rate: 445 },
+      { from: 'Erode', to: 'SIPCOT', rate: 300 },
+      { from: 'Erode', to: 'RGS-VAVIKADAI', rate: 300 },
+      { from: 'Erode', to: 'GOBI-SAKTHI FEEDS', rate: 400 },
+      { from: 'Erode', to: 'PALLADAM-PPK HATCHERIES', rate: 500 },
+      { from: 'Erode', to: 'PAPPAMPATTI-VALARMATHI FEEDS', rate: 595 },
+      { from: 'Erode', to: 'NACHIPALAYAM-SUGUNA FEEDS', rate: 650 },
+      { from: 'Erode', to: 'NAMAKKAL', rate: 465 },
+      { from: 'Erode', to: 'PUDHUCHATHARAM', rate: 465 },
+      { from: 'Erode', to: 'VENNANTHUR', rate: 445 },
     ],
   },
   {
     partyName: 'KUPPANNA POULTRY FARM',
     routes: [
-      { from: 'SIPCOT', to: 'NUTHUR', rate: 350 },
-      { from: 'SIPCOT', to: 'VELLAKOOIL', rate: 400 },
-      { from: 'SIPCOT', to: 'NULLANUR', rate: 490 },
+      { from: 'Erode', to: 'MUTHUR', rate: 350 },
+      { from: 'Erode', to: 'VELLAKOOIL', rate: 400 },
+      { from: 'Erode', to: 'MULLANUR', rate: 490 },
     ],
   },
   {
     partyName: 'SWAMI FEEDS',
     routes: [
-      { from: 'SIPCOT', to: 'NULLANUR', rate: 475 },
+      { from: 'Erode', to: 'MULLANUR', rate: 475 },
     ],
   },
   {
     partyName: 'VENKATESHWARA HATCHERIES',
     routes: [
-      { from: 'SIPCOT', to: 'KUNDASAM', rate: 450 },
+      { from: 'Erode', to: 'KUNDADAM', rate: 450 },
     ],
   },
   {
     partyName: 'SENTHIL ANDAVAR FEEDS',
     routes: [
-      { from: 'SIPCOT', to: 'PALANI', rate: 600 },
+      { from: 'Erode', to: 'PALANI', rate: 600 },
     ],
   },
 ];
