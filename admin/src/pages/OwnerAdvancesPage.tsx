@@ -48,12 +48,9 @@ export const OwnerAdvancesPage: React.FC = () => {
         userService.getUsers({ limit: 100, status: 'ACTIVE' }),
       ]);
       setOwners(oRes.data.items);
-      const sortedUsers = [...uRes.data.items].sort((a, b) => {
-        if (a.role === 'MANAGER' && b.role !== 'MANAGER') return -1;
-        if (b.role === 'MANAGER' && a.role !== 'MANAGER') return 1;
-        return a.name.localeCompare(b.name);
-      });
-      setManagers(sortedUsers);
+      // Only show users with role MANAGER
+      const managerUsers = uRes.data.items.filter((u) => u.role === 'MANAGER');
+      setManagers(managerUsers);
     } catch (err) {
       console.error('Failed to load lookups', err);
     }
@@ -533,10 +530,10 @@ export const OwnerAdvancesPage: React.FC = () => {
               value={formData.manager_id}
               onChange={(e) => setFormData({ ...formData, manager_id: e.target.value })}
             >
-              <option value="">-- Choose Manager / Staff --</option>
+              <option value="">-- Choose Manager --</option>
               {managers.map((m) => (
                 <option key={m.id} value={m.id}>
-                  {m.name} ({m.role})
+                  {m.name}
                 </option>
               ))}
             </select>
