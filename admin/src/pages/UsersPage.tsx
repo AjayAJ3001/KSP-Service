@@ -542,35 +542,17 @@ export const UsersPage: React.FC = () => {
             </div>
           </div>
 
-          <div className="grid-cols-2">
-            <div className="form-group">
-              <label className="form-label">Role *</label>
-              <select
-                className="form-control form-select"
-                value={formData.role}
-                onChange={(e) => setFormData({ ...formData, role: e.target.value as any })}
-              >
-                <option value="MANAGER">MANAGER</option>
-                <option value="ADMIN">ADMIN</option>
-                <option value="TRANSPORT_USER">TRANSPORT_USER</option>
-              </select>
-            </div>
-
-            <div className="form-group">
-              <label className="form-label">Assign Driver</label>
-              <select
-                className="form-control form-select"
-                value={formData.driver_id}
-                onChange={(e) => setFormData({ ...formData, driver_id: e.target.value })}
-              >
-                <option value="">None</option>
-                {drivers.map((d) => (
-                  <option key={d.id} value={d.id}>
-                    {d.name}
-                  </option>
-                ))}
-              </select>
-            </div>
+          <div className="form-group">
+            <label className="form-label">Role *</label>
+            <select
+              className="form-control form-select"
+              value={formData.role}
+              onChange={(e) => setFormData({ ...formData, role: e.target.value as any })}
+            >
+              <option value="MANAGER">MANAGER</option>
+              <option value="ADMIN">ADMIN</option>
+              <option value="TRANSPORT_USER">TRANSPORT_USER</option>
+            </select>
           </div>
 
           {/* Optional New Password */}
