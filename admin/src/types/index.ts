@@ -4,7 +4,7 @@ export interface User {
   name: string;
   email?: string;
   mobile_number?: string;
-  role: 'ADMIN' | 'TRANSPORT_USER';
+  role: 'ADMIN' | 'MANAGER' | 'TRANSPORT_USER';
   driver_id?: number;
   driver_name?: string;
   status: 'ACTIVE' | 'INACTIVE';

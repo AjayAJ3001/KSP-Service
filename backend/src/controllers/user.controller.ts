@@ -78,8 +78,8 @@ export const createUser = asyncHandler(async (req: AuthRequest, res: Response): 
     throw new AppError('Username, name, password and role are required.', 400);
   }
   if (password.length < 6) throw new AppError('Password must be at least 6 characters.', 400);
-  if (!['ADMIN', 'TRANSPORT_USER'].includes(role)) {
-    throw new AppError('Invalid role. Must be ADMIN or TRANSPORT_USER.', 400);
+  if (!['ADMIN', 'MANAGER', 'TRANSPORT_USER'].includes(role)) {
+    throw new AppError('Invalid role. Must be ADMIN, MANAGER, or TRANSPORT_USER.', 400);
   }
 
   const existing = await query('SELECT id FROM users WHERE username = $1', [username.trim().toLowerCase()]);

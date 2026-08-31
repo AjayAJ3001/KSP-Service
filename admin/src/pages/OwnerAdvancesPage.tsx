@@ -48,7 +48,12 @@ export const OwnerAdvancesPage: React.FC = () => {
         userService.getUsers({ limit: 100, status: 'ACTIVE' }),
       ]);
       setOwners(oRes.data.items);
-      setManagers(uRes.data.items);
+      const sortedUsers = [...uRes.data.items].sort((a, b) => {
+        if (a.role === 'MANAGER' && b.role !== 'MANAGER') return -1;
+        if (b.role === 'MANAGER' && a.role !== 'MANAGER') return 1;
+        return a.name.localeCompare(b.name);
+      });
+      setManagers(sortedUsers);
     } catch (err) {
       console.error('Failed to load lookups', err);
     }
@@ -149,9 +154,10 @@ export const OwnerAdvancesPage: React.FC = () => {
   };
 
   const resetForm = () => {
+    const defaultManager = managers.find((m) => m.name.toUpperCase().includes('MAGESH') || m.role === 'MANAGER');
     setFormData({
       owner_id: '',
-      manager_id: '',
+      manager_id: defaultManager ? String(defaultManager.id) : '',
       amount: '',
       advance_date: '',
       payment_mode: 'CASH',

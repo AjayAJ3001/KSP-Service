@@ -30,7 +30,7 @@ export const UsersPage: React.FC = () => {
     password: '',
     email: '',
     mobile_number: '',
-    role: 'TRANSPORT_USER' as 'ADMIN' | 'TRANSPORT_USER',
+    role: 'MANAGER' as 'ADMIN' | 'MANAGER' | 'TRANSPORT_USER',
     driver_id: '' as string | number,
   });
 
@@ -222,7 +222,16 @@ export const UsersPage: React.FC = () => {
       header: 'Role',
       accessor: 'role',
       render: (u) => (
-        <span className={`badge ${u.role === 'ADMIN' ? 'badge-primary' : 'badge-info'}`}>
+        <span
+          style={{
+            padding: '3px 8px',
+            borderRadius: '4px',
+            fontSize: '12px',
+            fontWeight: 700,
+            background: u.role === 'ADMIN' ? '#e0e7ff' : u.role === 'MANAGER' ? '#fef3c7' : '#e0f2fe',
+            color: u.role === 'ADMIN' ? '#3730a3' : u.role === 'MANAGER' ? '#92400e' : '#0369a1',
+          }}
+        >
           {u.role}
         </span>
       ),
@@ -317,6 +326,7 @@ export const UsersPage: React.FC = () => {
             >
               <option value="">All Roles</option>
               <option value="ADMIN">ADMIN</option>
+              <option value="MANAGER">MANAGER</option>
               <option value="TRANSPORT_USER">TRANSPORT_USER</option>
             </select>
 
@@ -426,8 +436,9 @@ export const UsersPage: React.FC = () => {
                 value={formData.role}
                 onChange={(e) => setFormData({ ...formData, role: e.target.value as any })}
               >
-                <option value="TRANSPORT_USER">TRANSPORT_USER (Mobile App)</option>
+                <option value="MANAGER">MANAGER (Fleet Manager)</option>
                 <option value="ADMIN">ADMIN (Full Access)</option>
+                <option value="TRANSPORT_USER">TRANSPORT_USER (Mobile App)</option>
               </select>
             </div>
 
@@ -511,8 +522,9 @@ export const UsersPage: React.FC = () => {
                 value={formData.role}
                 onChange={(e) => setFormData({ ...formData, role: e.target.value as any })}
               >
-                <option value="TRANSPORT_USER">TRANSPORT_USER</option>
+                <option value="MANAGER">MANAGER</option>
                 <option value="ADMIN">ADMIN</option>
+                <option value="TRANSPORT_USER">TRANSPORT_USER</option>
               </select>
             </div>
 
