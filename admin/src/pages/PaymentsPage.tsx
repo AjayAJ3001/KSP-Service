@@ -145,7 +145,14 @@ export const PaymentsPage: React.FC = () => {
     { header: 'Trip ID', accessor: (t) => `#${t.id}` },
     { header: 'Date', accessor: (t) => new Date(t.trip_date).toLocaleDateString('en-IN') },
     { header: 'Party Name', accessor: 'party_name', render: (t) => <strong>{t.party_name}</strong> },
-    { header: 'Route', render: (t) => `${t.from_location} → ${t.to_location}` },
+    {
+      header: 'Unit Name',
+      render: (t) => (
+        <span style={{ fontWeight: 600, color: '#1e40af', background: '#eff6ff', padding: '2px 8px', borderRadius: '4px' }}>
+          {t.to_location || t.from_location}
+        </span>
+      ),
+    },
     { header: 'Total Freight', render: (t) => formatCurrency(t.total_freight) },
     {
       header: 'Received Amount',
@@ -259,8 +266,8 @@ export const PaymentsPage: React.FC = () => {
                 <strong>{selectedTrip.party_name}</strong>
               </div>
               <div className="slip-row" style={{ border: 'none' }}>
-                <span>Route:</span>
-                <strong>{selectedTrip.from_location} → {selectedTrip.to_location}</strong>
+                <span>Unit / Destination:</span>
+                <strong>{selectedTrip.to_location || selectedTrip.from_location}</strong>
               </div>
               <div className="slip-row" style={{ border: 'none' }}>
                 <span>Total Freight Billed:</span>

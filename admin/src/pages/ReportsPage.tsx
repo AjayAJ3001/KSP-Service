@@ -249,7 +249,7 @@ export const ReportsPage: React.FC = () => {
                     <th>Date</th>
                     <th>Lorry</th>
                     <th>Party</th>
-                    <th>Route</th>
+                    <th>Unit Name</th>
                     <th>Weight</th>
                     <th>Total Freight</th>
                     <th>Received</th>
@@ -270,7 +270,11 @@ export const ReportsPage: React.FC = () => {
                         <td>{new Date(t.trip_date).toLocaleDateString('en-IN')}</td>
                         <td><strong>{t.lorry_number}</strong></td>
                         <td>{t.party_name}</td>
-                        <td>{t.from_location} → {t.to_location}</td>
+                        <td>
+                          <span style={{ fontWeight: 600, color: '#1e40af', background: '#eff6ff', padding: '2px 8px', borderRadius: '4px' }}>
+                            {t.to_location || t.from_location}
+                          </span>
+                        </td>
                         <td>{t.goods_weight} {t.unit_name || 'Tons'}</td>
                         <td style={{ fontWeight: 700 }}>{formatCurrency(t.total_freight)}</td>
                         <td style={{ color: 'var(--success-700)' }}>{formatCurrency(t.total_received)}</td>
@@ -296,7 +300,7 @@ export const ReportsPage: React.FC = () => {
                 <tr>
                   <th>Payment Date</th>
                   <th>Party</th>
-                  <th>Route</th>
+                  <th>Unit Name</th>
                   <th>Lorry</th>
                   <th>Amount Received</th>
                   <th>Remaining Balance</th>
@@ -316,7 +320,11 @@ export const ReportsPage: React.FC = () => {
                     <tr key={p.id}>
                       <td>{new Date(p.payment_date).toLocaleDateString('en-IN')}</td>
                       <td><strong>{p.party_name}</strong></td>
-                      <td>{p.from_location} → {p.to_location}</td>
+                      <td>
+                        <span style={{ fontWeight: 600, color: '#1e40af', background: '#eff6ff', padding: '2px 8px', borderRadius: '4px' }}>
+                          {p.to_location || p.from_location}
+                        </span>
+                      </td>
                       <td>{p.lorry_number}</td>
                       <td style={{ color: 'var(--success-700)', fontWeight: 700, fontSize: '14px' }}>
                         {formatCurrency(p.received_amount)}
@@ -343,7 +351,7 @@ export const ReportsPage: React.FC = () => {
                   <th>Lorry Number</th>
                   <th>Driver</th>
                   <th>Party</th>
-                  <th>Route</th>
+                  <th>Unit Name</th>
                   <th>Total Freight</th>
                   <th>Advance Paid</th>
                   <th>Balance to Driver</th>
@@ -364,7 +372,11 @@ export const ReportsPage: React.FC = () => {
                       <td><strong>{s.lorry_number}</strong></td>
                       <td>{s.driver_name}</td>
                       <td>{s.party_name}</td>
-                      <td>{s.from_location} → {s.to_location}</td>
+                      <td>
+                        <span style={{ fontWeight: 600, color: '#1e40af', background: '#eff6ff', padding: '2px 8px', borderRadius: '4px' }}>
+                          {s.to_location || s.from_location}
+                        </span>
+                      </td>
                       <td>{formatCurrency(s.total_freight)}</td>
                       <td>{formatCurrency(s.advance_paid)}</td>
                       <td style={{ fontWeight: 700, color: s.balance_to_driver >= 0 ? 'var(--success-700)' : 'var(--danger-700)' }}>

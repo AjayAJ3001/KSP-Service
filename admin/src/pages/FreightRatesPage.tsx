@@ -111,7 +111,7 @@ export const FreightRatesPage: React.FC = () => {
   };
 
   const handleDeleteFreightRate = async (rate: FreightRate) => {
-    if (!confirm(`Are you sure you want to delete this freight rate (${rate.from_location} → ${rate.to_location})?`)) return;
+    if (!confirm(`Are you sure you want to delete this freight rate for "${rate.to_location}" (${rate.party_name || 'All Parties'})?`)) return;
     try {
       await freightRateService.deleteFreightRate(rate.id);
       loadRates();
@@ -144,7 +144,7 @@ export const FreightRatesPage: React.FC = () => {
   const resetForm = () => {
     setFormData({
       route_id: '',
-      unit_id: '',
+      unit_id: units.length > 0 ? String(units[0].id) : '1',
       party_id: '',
       rate_per_unit: '',
       effective_from: new Date().toISOString().split('T')[0],
@@ -156,14 +156,39 @@ export const FreightRatesPage: React.FC = () => {
 
   const columns: Column<FreightRate>[] = [
     {
-      header: 'Route',
-      render: (r) => <strong>{r.from_location} → {r.to_location}</strong>,
+      header: 'Party Name',
+      accessor: (r) => (
+        r.party_name ? (
+          <strong style={{ color: 'var(--primary-900)' }}>{r.party_name}</strong>
+        ) : (
+          <span style={{ color: 'var(--text-light)' }}>All Parties (Default)</span>
+        )
+      ),
     },
-    { header: 'Unit', accessor: (r) => r.unit_name || '—' },
-    { header: 'Applicable Party', accessor: (r) => (r.party_name ? r.party_name : <span style={{ color: 'var(--text-light)' }}>All Parties (Default)</span>) },
+    {
+      header: 'Unit Name',
+      render: (r) => (
+        <span
+          style={{
+            fontWeight: 700,
+            fontSize: '14.5px',
+            color: '#1e40af',
+            background: '#eff6ff',
+            padding: '4px 10px',
+            borderRadius: '6px',
+          }}
+        >
+          {r.to_location || r.from_location}
+        </span>
+      ),
+    },
     {
       header: 'Freight Rate',
-      render: (r) => <strong style={{ color: 'var(--accent-hover)' }}>₹{parseFloat(String(r.rate_per_unit)).toLocaleString('en-IN')}/{r.unit_name}</strong>,
+      render: (r) => (
+        <strong style={{ color: '#d97706', fontSize: '15px', fontWeight: 800 }}>
+          ₹{parseFloat(String(r.rate_per_unit)).toLocaleString('en-IN')}/{r.unit_name || 'Ton'}
+        </strong>
+      ),
     },
     { header: 'Effective From', accessor: (r) => new Date(r.effective_from).toLocaleDateString('en-IN') },
     { header: 'Status', accessor: 'status', render: (r) => <StatusBadge status={r.status} /> },
@@ -190,9 +215,9 @@ export const FreightRatesPage: React.FC = () => {
     <div>
       <div className="card-header" style={{ marginBottom: '24px' }}>
         <div>
-          <h2 style={{ fontSize: '22px', fontWeight: 800 }}>Freight Rate Master</h2>
+          <h2 style={{ fontSize: '22px', fontWeight: 800 }}>Freight Rates (Party Wise Unit Rates)</h2>
           <p style={{ color: 'var(--text-muted)', fontSize: '13.5px' }}>
-            Maintain tariff pricing per route, unit (Tons/Bags) & party-specific contracts
+            Maintain unit names (delivery points) and freight rates (₹/Ton) based on parties
           </p>
         </div>
         <button onClick={openCreateModal} className="btn btn-primary">
@@ -267,17 +292,33 @@ export const FreightRatesPage: React.FC = () => {
         )}
         <form onSubmit={handleSubmit}>
           <div className="form-group">
-            <label className="form-label">Route (From → To) *</label>
+            <label className="form-label">Party Name *</label>
+            <select
+              className="form-control form-select"
+              value={formData.party_id}
+              onChange={(e) => setFormData({ ...formData, party_id: e.target.value })}
+            >
+              <option value="">All Parties (Default Standard Rate)</option>
+              {parties.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="form-group">
+            <label className="form-label">Unit Name / Destination *</label>
             <select
               className="form-control form-select"
               required
               value={formData.route_id}
               onChange={(e) => setFormData({ ...formData, route_id: e.target.value })}
             >
-              <option value="">Select Route</option>
+              <option value="">Select Unit / Destination</option>
               {routes.map((r) => (
                 <option key={r.id} value={r.id}>
-                  {r.from_location} → {r.to_location} ({r.distance_km || 0} KM)
+                  {r.to_location}
                 </option>
               ))}
             </select>
@@ -285,49 +326,14 @@ export const FreightRatesPage: React.FC = () => {
 
           <div className="grid-cols-2">
             <div className="form-group">
-              <label className="form-label">Measurement Unit *</label>
-              <select
-                className="form-control form-select"
-                required
-                value={formData.unit_id}
-                onChange={(e) => setFormData({ ...formData, unit_id: e.target.value })}
-              >
-                <option value="">Select Unit</option>
-                {units.map((u) => (
-                  <option key={u.id} value={u.id}>
-                    {u.name} ({u.abbreviation || ''})
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div className="form-group">
-              <label className="form-label">Party Specific (Optional)</label>
-              <select
-                className="form-control form-select"
-                value={formData.party_id}
-                onChange={(e) => setFormData({ ...formData, party_id: e.target.value })}
-              >
-                <option value="">All Parties (Default Standard Rate)</option>
-                {parties.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-          </div>
-
-          <div className="grid-cols-2">
-            <div className="form-group">
-              <label className="form-label">Rate Per Unit (₹) *</label>
+              <label className="form-label">Freight Rate (₹/Ton) *</label>
               <input
                 type="number"
                 step="0.01"
                 min="0"
                 className="form-control"
                 required
-                placeholder="e.g. 1250.00"
+                placeholder="e.g. 450.00"
                 value={formData.rate_per_unit}
                 onChange={(e) => setFormData({ ...formData, rate_per_unit: e.target.value })}
               />

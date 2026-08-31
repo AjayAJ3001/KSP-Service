@@ -182,7 +182,7 @@ export const ExpensesPage: React.FC = () => {
             <option value="">-- Choose a Trip --</option>
             {trips.map((t) => (
               <option key={t.id} value={t.id}>
-                Trip #{t.id} — {t.lorry_number} ({t.driver_name}) | {t.from_location} → {t.to_location} ({new Date(t.trip_date).toLocaleDateString('en-IN')})
+                Trip #{t.id} — {t.lorry_number} ({t.driver_name}) | {t.to_location || t.from_location} ({new Date(t.trip_date).toLocaleDateString('en-IN')})
               </option>
             ))}
           </select>

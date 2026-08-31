@@ -113,12 +113,13 @@ export const SettlementsPage: React.FC = () => {
       accessor: (s) => <strong>#{s.id}</strong>,
     },
     {
-      header: 'Trip Info',
+      header: 'Trip & Lorry',
+      accessor: 'lorry_number',
       render: (s) => (
         <div>
           <strong>Trip #{s.trip_id}</strong> — {s.lorry_number}
           <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
-            {s.driver_name} | {s.from_location} → {s.to_location}
+            {s.driver_name} | <span style={{ fontWeight: 600, color: '#1e40af' }}>{s.to_location || s.from_location}</span>
           </div>
         </div>
       ),
@@ -284,8 +285,8 @@ export const SettlementsPage: React.FC = () => {
                   <strong>{selectedSettlement.party_name}</strong>
                 </div>
                 <div className="slip-row">
-                  <span>Route:</span>
-                  <strong>{selectedSettlement.from_location} → {selectedSettlement.to_location}</strong>
+                  <span>Unit / Destination:</span>
+                  <strong>{selectedSettlement.to_location || selectedSettlement.from_location}</strong>
                 </div>
                 <div className="slip-row">
                   <span>Lorry Number:</span>

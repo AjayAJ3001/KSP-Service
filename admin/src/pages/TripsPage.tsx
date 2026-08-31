@@ -232,8 +232,21 @@ export const TripsPage: React.FC = () => {
     },
     { header: 'Party Name', accessor: 'party_name' },
     {
-      header: 'Route',
-      render: (t) => `${t.from_location} → ${t.to_location}`,
+      header: 'Unit Name / Destination',
+      render: (t) => (
+        <span
+          style={{
+            fontWeight: 700,
+            color: '#1e40af',
+            background: '#eff6ff',
+            padding: '3px 8px',
+            borderRadius: '6px',
+            fontSize: '13px',
+          }}
+        >
+          {t.to_location || t.from_location}
+        </span>
+      ),
     },
     { header: 'Driver', accessor: 'driver_name' },
     {
@@ -451,17 +464,17 @@ export const TripsPage: React.FC = () => {
 
           <div className="grid-cols-2">
             <div className="form-group">
-              <label className="form-label">Route (From → To) *</label>
+              <label className="form-label">Unit Name / Destination *</label>
               <select
                 className="form-control form-select"
                 required
                 value={formData.route_id}
                 onChange={(e) => handleRouteChange(e.target.value)}
               >
-                <option value="">Select Route</option>
+                <option value="">Select Unit / Destination</option>
                 {routes.map((r) => (
                   <option key={r.id} value={r.id}>
-                    {r.from_location} → {r.to_location}
+                    {r.to_location}
                   </option>
                 ))}
               </select>
@@ -598,8 +611,8 @@ export const TripsPage: React.FC = () => {
                 <strong>{selectedTrip.party_name}</strong>
               </div>
               <div className="slip-row">
-                <span>Route:</span>
-                <strong>{selectedTrip.from_location} → {selectedTrip.to_location}</strong>
+                <span>Unit / Destination:</span>
+                <strong>{selectedTrip.to_location || selectedTrip.from_location}</strong>
               </div>
               <div className="slip-row">
                 <span>Goods Weight:</span>

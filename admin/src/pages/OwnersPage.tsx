@@ -169,7 +169,7 @@ export const OwnersPage: React.FC = () => {
         isOpen={isModalOpen}
         onClose={() => { setIsModalOpen(false); resetForm(); }}
         title={selectedOwner ? 'Edit Owner' : 'Add New Owner'}
-        size="sm"
+        maxWidth="500px"
       >
         <form onSubmit={handleSubmit}>
           {formError && (

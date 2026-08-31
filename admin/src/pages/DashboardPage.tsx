@@ -204,7 +204,7 @@ export const DashboardPage: React.FC = () => {
                 <th>Date</th>
                 <th>Lorry Number</th>
                 <th>Party</th>
-                <th>Route</th>
+                <th>Unit / Destination</th>
                 <th>Driver</th>
                 <th>Total Freight</th>
                 <th>Advance Paid</th>
@@ -224,7 +224,11 @@ export const DashboardPage: React.FC = () => {
                     <td>{new Date(trip.trip_date).toLocaleDateString('en-IN')}</td>
                     <td><strong>{trip.lorry_number}</strong></td>
                     <td>{trip.party_name}</td>
-                    <td>{trip.from_location} → {trip.to_location}</td>
+                    <td>
+                      <span style={{ fontWeight: 600, color: '#1e40af', background: '#eff6ff', padding: '2px 8px', borderRadius: '4px' }}>
+                        {trip.to_location || trip.from_location}
+                      </span>
+                    </td>
                     <td>{trip.driver_name}</td>
                     <td style={{ fontWeight: 700 }}>{formatCurrency(trip.total_freight)}</td>
                     <td>{formatCurrency(trip.advance_paid)}</td>
