@@ -1,0 +1,83 @@
+# ===========================
+# KSP Transport — .gitignore
+# ===========================
+
+# ── Dependencies ────────────────────────────────
+node_modules/
+.pnp
+.pnp.js
+
+# ── Build Outputs ────────────────────────────────
+dist/
+build/
+out/
+.next/
+.nuxt/
+.cache/
+*.tsbuildinfo
+
+# ── Environment / Secrets ────────────────────────
+.env
+.env.*
+!.env.example
+
+# ── Logs ─────────────────────────────────────────
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# ── Runtime / Temp ───────────────────────────────
+*.pid
+*.seed
+*.pid.lock
+tmp/
+temp/
+
+# ── Coverage / Testing ───────────────────────────
+coverage/
+.nyc_output/
+
+# ── Vite / React ─────────────────────────────────
+dist-ssr/
+*.local
+
+# ── TypeScript ───────────────────────────────────
+*.js.map
+*.d.ts.map
+
+# ── Package Manager Locks (keep one) ─────────────
+# Uncomment whichever you are NOT using:
+# yarn.lock
+# pnpm-lock.yaml
+
+# ── OS Files ─────────────────────────────────────
+.DS_Store
+.DS_Store?
+._*
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# ── Editor / IDE ─────────────────────────────────
+.vscode/
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+.gemini/
+
+# ── Database / Backups ───────────────────────────
+*.sql.bak
+*.dump
+*.backup
+
+# ── Mobile (React Native / Expo) ─────────────────
+mobile/.expo/
+mobile/android/
+mobile/ios/
+mobile/.gradle/
