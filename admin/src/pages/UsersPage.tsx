@@ -32,6 +32,7 @@ export const UsersPage: React.FC = () => {
     mobile_number: '',
     role: 'MANAGER' as 'ADMIN' | 'MANAGER' | 'TRANSPORT_USER',
     driver_id: '' as string | number,
+    editPassword: '', // optional new password on edit
   });
 
   const [newPassword, setNewPassword] = useState('');
@@ -106,6 +107,10 @@ export const UsersPage: React.FC = () => {
       setFormError('Full name and role are required.');
       return;
     }
+    if (formData.editPassword && formData.editPassword.length < 6) {
+      setFormError('New password must be at least 6 characters.');
+      return;
+    }
 
     try {
       setIsSubmitting(true);
@@ -117,6 +122,10 @@ export const UsersPage: React.FC = () => {
         role: formData.role,
         driver_id: formData.driver_id ? Number(formData.driver_id) : undefined,
       });
+      // If admin also typed a new password, reset it inline
+      if (formData.editPassword.trim()) {
+        await userService.resetPassword(selectedUser.id, formData.editPassword.trim());
+      }
       setIsEditModalOpen(false);
       setSelectedUser(null);
       resetForm();
@@ -186,6 +195,7 @@ export const UsersPage: React.FC = () => {
       mobile_number: user.mobile_number || '',
       role: user.role,
       driver_id: user.driver_id || '',
+      editPassword: '',
     });
     setFormError('');
     setIsEditModalOpen(true);
@@ -205,8 +215,9 @@ export const UsersPage: React.FC = () => {
       password: '',
       email: '',
       mobile_number: '',
-      role: 'TRANSPORT_USER',
+      role: 'MANAGER',
       driver_id: '',
+      editPassword: '',
     });
     setFormError('');
   };
@@ -482,6 +493,23 @@ export const UsersPage: React.FC = () => {
           </div>
         )}
         <form onSubmit={handleEdit}>
+
+          {/* Username (read-only) */}
+          <div className="form-group">
+            <label className="form-label">Username</label>
+            <input
+              type="text"
+              className="form-control"
+              disabled
+              value={formData.username}
+              style={{ background: '#f1f5f9', cursor: 'not-allowed', fontWeight: 700, color: '#475569' }}
+            />
+            <span style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '3px', display: 'block' }}>
+              Username cannot be changed
+            </span>
+          </div>
+
+          {/* Full Name */}
           <div className="form-group">
             <label className="form-label">Full Name *</label>
             <input
@@ -543,6 +571,21 @@ export const UsersPage: React.FC = () => {
                 ))}
               </select>
             </div>
+          </div>
+
+          {/* Optional New Password */}
+          <div className="form-group">
+            <label className="form-label" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <span>New Password (Optional)</span>
+              <span style={{ fontWeight: 400, fontSize: '11px', color: 'var(--text-muted)' }}>Leave blank to keep existing password</span>
+            </label>
+            <input
+              type="password"
+              className="form-control"
+              placeholder="Enter new password (min 6 characters)"
+              value={formData.editPassword}
+              onChange={(e) => setFormData({ ...formData, editPassword: e.target.value })}
+            />
           </div>
 
           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '20px' }}>
