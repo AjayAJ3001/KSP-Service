@@ -248,7 +248,6 @@ export const UsersPage: React.FC = () => {
       ),
     },
     { header: 'Mobile', accessor: (u) => u.mobile_number || '—' },
-    { header: 'Assigned Driver', accessor: (u) => u.driver_name || '—' },
     {
       header: 'Status',
       accessor: 'status',
