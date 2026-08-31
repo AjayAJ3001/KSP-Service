@@ -26,7 +26,7 @@ export const OwnerAdvancesPage: React.FC = () => {
     owner_id: '',
     manager_id: '',
     amount: '',
-    advance_date: new Date().toISOString().slice(0, 16),
+    advance_date: '',
     payment_mode: 'CASH',
     notes: '',
   });
@@ -154,10 +154,9 @@ export const OwnerAdvancesPage: React.FC = () => {
   };
 
   const resetForm = () => {
-    const defaultManager = managers.find((m) => m.name.toUpperCase().includes('MAGESH') || m.role === 'MANAGER');
     setFormData({
       owner_id: '',
-      manager_id: defaultManager ? String(defaultManager.id) : '',
+      manager_id: '',
       amount: '',
       advance_date: '',
       payment_mode: 'CASH',
