@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import {
   getOwnerAdvances,
+  getMyOwnerAdvances,
   getOwnerAdvanceById,
   createOwnerAdvance,
   updateOwnerAdvance,
@@ -12,6 +13,7 @@ const router = Router();
 router.use(authenticate);
 
 router.get('/', getOwnerAdvances);
+router.get('/mine', getMyOwnerAdvances);           // logged-in manager's own advances
 router.get('/:id', getOwnerAdvanceById);
 router.post('/', authorize('ADMIN'), createOwnerAdvance);
 router.put('/:id', authorize('ADMIN'), updateOwnerAdvance);

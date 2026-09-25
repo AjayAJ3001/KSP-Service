@@ -68,11 +68,12 @@ export const getRoutes = asyncHandler(async (req: AuthRequest, res: Response): P
   const countResult = await query(`SELECT COUNT(*) FROM routes r WHERE ${where}`, params);
   const total = parseInt(countResult.rows[0].count);
 
+  const partyFilterId = party_id ? parseInt(party_id) : null;
   const result = await query(
     `SELECT r.*,
-            (SELECT p.name FROM freight_rates fr JOIN parties p ON fr.party_id = p.id WHERE fr.route_id = r.id LIMIT 1) as party_name,
-            (SELECT fr.party_id FROM freight_rates fr WHERE fr.route_id = r.id LIMIT 1) as party_id,
-            (SELECT fr.rate_per_unit FROM freight_rates fr WHERE fr.route_id = r.id LIMIT 1) as rate_per_unit
+            (SELECT p.name FROM freight_rates fr JOIN parties p ON fr.party_id = p.id WHERE fr.route_id = r.id ${partyFilterId ? `AND fr.party_id = ${partyFilterId}` : ''} LIMIT 1) as party_name,
+            (SELECT fr.party_id FROM freight_rates fr WHERE fr.route_id = r.id ${partyFilterId ? `AND fr.party_id = ${partyFilterId}` : ''} LIMIT 1) as party_id,
+            (SELECT fr.rate_per_unit FROM freight_rates fr WHERE fr.route_id = r.id ${partyFilterId ? `AND fr.party_id = ${partyFilterId}` : ''} LIMIT 1) as rate_per_unit
      FROM routes r
      WHERE ${where}
      ORDER BY party_name ASC NULLS LAST, r.to_location ASC
@@ -84,18 +85,31 @@ export const getRoutes = asyncHandler(async (req: AuthRequest, res: Response): P
 });
 
 export const createRoute = asyncHandler(async (req: AuthRequest, res: Response): Promise<void> => {
-  const { from_location, to_location, distance_km } = req.body;
+  const { from_location, to_location, distance_km, party_id, rate_per_unit } = req.body;
   if (!from_location || !to_location) throw new AppError('From and To locations are required.', 400);
   const result = await query(
     `INSERT INTO routes (from_location, to_location, distance_km) VALUES ($1, $2, $3) RETURNING *`,
     [from_location.trim(), to_location.trim(), distance_km || null]
   );
-  await createAuditLog(req.user?.id, 'CREATE_ROUTE', 'ROUTES', result.rows[0].id, { from_location, to_location });
-  res.status(201).json({ success: true, message: 'Route created.', data: result.rows[0] });
+  const newRoute = result.rows[0];
+
+  if (party_id) {
+    const rateVal = rate_per_unit !== undefined && rate_per_unit !== '' && rate_per_unit !== null ? parseFloat(rate_per_unit) : 0;
+    const unitRes = await query(`SELECT id FROM units WHERE UPPER(name) LIKE '%TON%' OR UPPER(abbreviation) LIKE '%TON%' LIMIT 1`);
+    const unitId = unitRes.rows.length > 0 ? unitRes.rows[0].id : 1;
+    await query(
+      `INSERT INTO freight_rates (route_id, unit_id, party_id, rate_per_unit, effective_from, status)
+       VALUES ($1, $2, $3, $4, CURRENT_DATE, 'ACTIVE')`,
+      [newRoute.id, unitId, party_id, rateVal]
+    );
+  }
+
+  await createAuditLog(req.user?.id, 'CREATE_ROUTE', 'ROUTES', newRoute.id, { from_location, to_location, party_id });
+  res.status(201).json({ success: true, message: 'Route created.', data: newRoute });
 });
 
 export const updateRoute = asyncHandler(async (req: AuthRequest, res: Response): Promise<void> => {
-  const { from_location, to_location, distance_km, status } = req.body;
+  const { from_location, to_location, distance_km, status, party_id, rate_per_unit } = req.body;
   const result = await query(
     `UPDATE routes SET from_location = COALESCE($1, from_location), to_location = COALESCE($2, to_location),
      distance_km = COALESCE($3, distance_km), status = COALESCE($4, status), updated_at = NOW()
@@ -103,6 +117,25 @@ export const updateRoute = asyncHandler(async (req: AuthRequest, res: Response):
     [from_location, to_location, distance_km, status, req.params.id]
   );
   if (result.rows.length === 0) throw new AppError('Route not found.', 404);
+
+  if (party_id !== undefined || rate_per_unit !== undefined) {
+    const existingRate = await query(`SELECT id, party_id, rate_per_unit FROM freight_rates WHERE route_id = $1 LIMIT 1`, [req.params.id]);
+    if (existingRate.rows.length > 0) {
+      await query(
+        `UPDATE freight_rates SET party_id = COALESCE($1, party_id), rate_per_unit = COALESCE($2, rate_per_unit), updated_at = NOW() WHERE id = $3`,
+        [party_id !== undefined ? party_id : existingRate.rows[0].party_id, rate_per_unit !== undefined && rate_per_unit !== '' ? parseFloat(rate_per_unit) : existingRate.rows[0].rate_per_unit, existingRate.rows[0].id]
+      );
+    } else if (party_id) {
+      const unitRes = await query(`SELECT id FROM units WHERE UPPER(name) LIKE '%TON%' OR UPPER(abbreviation) LIKE '%TON%' LIMIT 1`);
+      const unitId = unitRes.rows.length > 0 ? unitRes.rows[0].id : 1;
+      await query(
+        `INSERT INTO freight_rates (route_id, unit_id, party_id, rate_per_unit, effective_from, status)
+         VALUES ($1, $2, $3, $4, CURRENT_DATE, 'ACTIVE')`,
+        [req.params.id, unitId, party_id, rate_per_unit !== undefined && rate_per_unit !== '' ? parseFloat(rate_per_unit) : 0]
+      );
+    }
+  }
+
   await createAuditLog(req.user?.id, 'UPDATE_ROUTE', 'ROUTES', req.params.id, req.body);
   res.json({ success: true, message: 'Route updated.', data: result.rows[0] });
 });

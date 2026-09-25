@@ -9,6 +9,7 @@ import {
   ActivityIndicator,
   Modal,
   FlatList,
+  Alert,
 } from 'react-native';
 import {
   Truck,
@@ -23,12 +24,17 @@ import {
   Search,
   ArrowRight,
   AlertCircle,
+  ShieldAlert,
+  Lock,
 } from 'lucide-react-native';
+import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { mobileLookupService, mobileTripService } from '../services/mobileService';
-import { Vehicle, Driver, Party, Route, Unit, FreightRate } from '../types';
+import { Vehicle, Driver, Party, Route, Unit, FreightRate, RootStackParamList } from '../types';
 import { COLORS, SPACING, RADIUS, SHADOWS } from '../constants/theme';
 
-export const NewTripScreen: React.FC<{ navigation: any }> = ({ navigation }) => {
+type Props = NativeStackScreenProps<RootStackParamList, 'NewTrip'>;
+
+export const NewTripScreen: React.FC<Props> = ({ navigation, route }) => {
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
   const [drivers, setDrivers] = useState<Driver[]>([]);
   const [parties, setParties] = useState<Party[]>([]);
@@ -46,7 +52,9 @@ export const NewTripScreen: React.FC<{ navigation: any }> = ({ navigation }) => 
   const [selectedUnitId, setSelectedUnitId] = useState<number | null>(null);
   const [goodsWeight, setGoodsWeight] = useState('');
   const [freightRate, setFreightRate] = useState('');
-  const [advancePaid, setAdvancePaid] = useState('0');
+  const [advancePaid, setAdvancePaid] = useState(
+    route?.params?.advancePaid ? String(route.params.advancePaid) : '0'
+  );
 
   // Modal Dropdown State
   const [modalVisible, setModalVisible] = useState(false);
@@ -59,9 +67,22 @@ export const NewTripScreen: React.FC<{ navigation: any }> = ({ navigation }) => 
   const [error, setError] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
+  // True when truck was pre-selected from GiveTruckAdvanceScreen — lock it
+  const isTruckLocked = !!(route?.params?.preselectedVehicleId);
+  // True when advance was pre-filled from GiveTruckAdvanceScreen — lock it
+  const isAdvanceLocked = !!(route?.params?.advancePaid);
+
   useEffect(() => {
     loadLookups();
   }, []);
+
+  // Pre-select truck if we came from GiveTruckAdvanceScreen
+  useEffect(() => {
+    const preselectedId = route?.params?.preselectedVehicleId;
+    if (preselectedId && vehicles.length > 0) {
+      setSelectedVehicleId(preselectedId);
+    }
+  }, [vehicles, route?.params?.preselectedVehicleId]);
 
   const loadLookups = async () => {
     try {
@@ -80,6 +101,9 @@ export const NewTripScreen: React.FC<{ navigation: any }> = ({ navigation }) => 
       setParties(pRes.data.items);
       setRoutes(rRes.data.items);
       setUnits(uRes.data);
+      if (uRes.data && uRes.data.length > 0) {
+        setSelectedUnitId(uRes.data[0].id);
+      }
       setFreightRates(frRes.data.items);
 
       // No auto-selection — user must explicitly choose from dropdown
@@ -91,20 +115,209 @@ export const NewTripScreen: React.FC<{ navigation: any }> = ({ navigation }) => 
     }
   };
 
-  // Auto-fill freight rate when route / unit / party changes
+  // Auto-fill freight rate when route or party changes
   useEffect(() => {
-    if (selectedRouteId && selectedUnitId) {
-      let match = freightRates.find(
-        (r) => r.route_id === selectedRouteId && r.unit_id === selectedUnitId && r.party_id === selectedPartyId
-      );
-      if (!match && selectedPartyId) {
-        match = freightRates.find((r) => r.route_id === selectedRouteId && r.unit_id === selectedUnitId && !r.party_id);
-      }
+    if (selectedRouteId && selectedPartyId) {
+      const match = freightRates.find(
+        (r) => r.route_id === selectedRouteId && r.party_id === selectedPartyId
+      ) || freightRates.find((r) => r.route_id === selectedRouteId && !r.party_id);
       if (match) {
         setFreightRate(String(match.rate_per_unit));
+        if (match.unit_id) {
+          setSelectedUnitId(match.unit_id);
+        }
       }
     }
-  }, [selectedRouteId, selectedUnitId, selectedPartyId, freightRates]);
+  }, [selectedRouteId, selectedPartyId, freightRates]);
+
+  const handlePartySelect = (partyId: number) => {
+    setSelectedPartyId(partyId);
+    setError('');
+
+    // Find all freight rates configured for this specific party
+    const partyRates = freightRates.filter((fr) => fr.party_id === partyId);
+
+    if (partyRates.length === 1) {
+      // Auto-select the only route configured for this party
+      const autoRate = partyRates[0];
+      setSelectedRouteId(autoRate.route_id);
+      setFreightRate(String(autoRate.rate_per_unit));
+      if (autoRate.unit_id) {
+        setSelectedUnitId(autoRate.unit_id);
+      }
+    } else if (partyRates.length > 1) {
+      // Check if current route is part of this party's routes
+      const currentValid = partyRates.find((fr) => fr.route_id === selectedRouteId);
+      if (currentValid) {
+        setFreightRate(String(currentValid.rate_per_unit));
+        if (currentValid.unit_id) setSelectedUnitId(currentValid.unit_id);
+      } else {
+        setSelectedRouteId(null);
+        setFreightRate('');
+      }
+    } else {
+      // No specific rates configured for this party yet
+      setSelectedRouteId(null);
+      setFreightRate('');
+    }
+  };
+
+  const getVehicleComplianceAlerts = (v?: Vehicle | null) => {
+    if (!v) return [];
+    const alerts: { name: string; date: string; days: number; isExpired: boolean }[] = [];
+    const checkDoc = (name: string, dateStr?: string) => {
+      if (!dateStr) return;
+      try {
+        const exp = new Date(dateStr);
+        const td = new Date();
+        exp.setHours(0, 0, 0, 0);
+        td.setHours(0, 0, 0, 0);
+        const days = Math.ceil((exp.getTime() - td.getTime()) / (1000 * 60 * 60 * 24));
+        if (days <= 45) {
+          alerts.push({
+            name,
+            date: dateStr.split('T')[0],
+            days,
+            isExpired: days < 0,
+          });
+        }
+      } catch {}
+    };
+
+    checkDoc('Fitness Certificate (FC)', v.fc_expiry_date);
+    checkDoc('Insurance Policy', v.insurance_expiry_date);
+    checkDoc('Road Permit', v.permit_expiry_date);
+    checkDoc('Yearly Road Tax', v.tax_expiry_date);
+    checkDoc('DTS Certificate', v.dts_expiry_date);
+
+    return alerts;
+  };
+
+  const handleVehicleSelect = (vehicleId: number) => {
+    setSelectedVehicleId(vehicleId);
+    setError('');
+    const v = vehicles.find((item) => item.id === vehicleId);
+    if (v) {
+      const alerts = getVehicleComplianceAlerts(v);
+      if (alerts.length > 0) {
+        const hasExpired = alerts.some((a) => a.isExpired);
+        const alertMsg = alerts
+          .map((a) => `• ${a.name}: ${a.isExpired ? 'EXPIRED (' + a.date + ')' : 'Expires in ' + a.days + ' days (' + a.date + ')'}`)
+          .join('\n');
+        Alert.alert(
+          hasExpired ? '⚠️ Truck Compliance Expired!' : '⚠️ Compliance Notice (≤ 45 Days)',
+          `Truck ${v.lorry_number} has ${alerts.length} compliance document(s) requiring attention:\n\n${alertMsg}\n\nPlease inform admin or ensure renewal before dispatch.`,
+          [
+            {
+              text: 'Choose Another Truck',
+              style: 'cancel',
+              onPress: () => setSelectedVehicleId(null),
+            },
+            {
+              text: 'Acknowledge & Proceed',
+              style: 'default',
+            },
+          ]
+        );
+      }
+    }
+  };
+
+  const handleDriverSelect = (driverId: number) => {
+    setSelectedDriverId(driverId);
+    setError('');
+    const selDriver = drivers.find((d) => d.id === driverId);
+    if (selDriver && selDriver.license_expiry_date) {
+      try {
+        const exp = new Date(selDriver.license_expiry_date);
+        const td = new Date();
+        exp.setHours(0, 0, 0, 0);
+        td.setHours(0, 0, 0, 0);
+        const days = Math.ceil((exp.getTime() - td.getTime()) / (1000 * 60 * 60 * 24));
+        if (days <= 45) {
+          const isExp = days < 0;
+          const formattedDate = selDriver.license_expiry_date.split('T')[0];
+          Alert.alert(
+            isExp ? '⚠️ Driving License Expired!' : '⚠️ License Expiring Soon!',
+            `Driver ${selDriver.name}'s license ${
+              isExp
+                ? `expired on ${formattedDate} (${Math.abs(days)} days ago).`
+                : `expires on ${formattedDate} (${days} days remaining).`
+            }\n\nPlease remind the driver to start the renewal process.`,
+            [
+              {
+                text: 'Choose Another Driver',
+                style: 'cancel',
+                onPress: () => setSelectedDriverId(null),
+              },
+              {
+                text: 'Acknowledge & Proceed',
+                style: 'default',
+              },
+            ]
+          );
+        }
+      } catch (e) {
+        console.error('Date error', e);
+      }
+    }
+  };
+
+  const handleRouteDropdownPress = () => {
+    if (!selectedPartyId) {
+      setError('Please select a Party / Client Account first to see their assigned routes.');
+      return;
+    }
+
+    // Filter routes specifically configured for this selected party
+    const partyRates = freightRates.filter((fr) => fr.party_id === selectedPartyId);
+
+    let routeItems: { id: number; label: string; subLabel?: string }[] = [];
+
+    if (partyRates.length > 0) {
+      routeItems = partyRates.map((fr) => {
+        const route = routes.find((r) => r.id === fr.route_id);
+        const fromLoc = route?.from_location || fr.from_location || 'Origin';
+        const toLoc = route?.to_location || fr.to_location || 'Destination';
+        const unit = units.find((u) => u.id === fr.unit_id);
+        const unitName = unit ? unit.name : (fr.unit_name || 'Unit');
+        return {
+          id: fr.route_id,
+          label: `${fromLoc} → ${toLoc}`,
+          subLabel: `Rate: ₹${parseFloat(String(fr.rate_per_unit)).toLocaleString('en-IN')} / ${unitName}${
+            route?.distance_km ? ` • ${route.distance_km} KM` : ''
+          }`,
+        };
+      });
+    } else {
+      // Fallback: If no party-specific rates are created, show all active routes
+      routeItems = routes.map((r) => ({
+        id: r.id,
+        label: `${r.from_location} → ${r.to_location}`,
+        subLabel: r.distance_km ? `${r.distance_km} KM Distance` : undefined,
+      }));
+    }
+
+    openDropdown(
+      `Routes for ${selectedParty?.name || 'Selected Party'}`,
+      routeItems,
+      selectedRouteId,
+      (id) => {
+        setSelectedRouteId(id);
+        setError('');
+        const match = freightRates.find(
+          (fr) => fr.route_id === id && fr.party_id === selectedPartyId
+        ) || freightRates.find((fr) => fr.route_id === id && !fr.party_id) || freightRates.find((fr) => fr.route_id === id);
+
+        if (match) {
+          setFreightRate(String(match.rate_per_unit));
+          if (match.unit_id) {
+            setSelectedUnitId(match.unit_id);
+          }
+        }
+      }
+    );
+  };
 
   const openDropdown = (
     title: string,
@@ -127,8 +340,8 @@ export const NewTripScreen: React.FC<{ navigation: any }> = ({ navigation }) => 
   };
 
   const handleSaveAndContinue = async () => {
-    if (!selectedVehicleId || !selectedDriverId || !selectedPartyId || !selectedRouteId || !selectedUnitId) {
-      setError('Please select Truck Number, Driver Name, Party, Route and Unit.');
+    if (!selectedVehicleId || !selectedDriverId || !selectedPartyId || !selectedRouteId) {
+      setError('Please select Truck Number, Driver Name, Party, and Route.');
       return;
     }
     const weight = parseFloat(goodsWeight);
@@ -145,13 +358,14 @@ export const NewTripScreen: React.FC<{ navigation: any }> = ({ navigation }) => 
     try {
       setIsSubmitting(true);
       setError('');
+      const defaultUnitId = selectedUnitId || (units.length > 0 ? units[0].id : 1);
       const res = await mobileTripService.createTrip({
         trip_date: tripDate,
         vehicle_id: selectedVehicleId,
         driver_id: selectedDriverId,
         party_id: selectedPartyId,
         route_id: selectedRouteId,
-        unit_id: selectedUnitId,
+        unit_id: defaultUnitId,
         freight_rate: rate,
         goods_weight: weight,
         advance_paid: parseFloat(advancePaid) || 0,
@@ -221,34 +435,112 @@ export const NewTripScreen: React.FC<{ navigation: any }> = ({ navigation }) => 
             </View>
           </View>
 
-          {/* Truck Number Dropdown */}
+          {/* Truck Number — locked if pre-selected from advance screen */}
           <View style={styles.formRow}>
             <Text style={styles.fieldLabel}>Truck Number *</Text>
-            <TouchableOpacity
-              style={styles.dropdownBtn}
-              onPress={() =>
-                openDropdown(
-                  'Select Truck Number',
-                  vehicles.map((v) => ({
-                    id: v.id,
-                    label: v.lorry_number,
-                    subLabel: v.goodshed_loading_expense
-                      ? `Goodshed Loading Exp: ₹${parseFloat(String(v.goodshed_loading_expense)).toLocaleString('en-IN')}`
-                      : undefined,
-                  })),
-                  selectedVehicleId,
-                  (id) => setSelectedVehicleId(id)
-                )
-              }
-            >
-              <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1, gap: 10 }}>
-                <Truck size={18} color={COLORS.accent} />
-                <Text style={selectedVehicle ? styles.dropdownSelectedText : styles.dropdownPlaceholder}>
-                  {selectedVehicle ? selectedVehicle.lorry_number : 'Select Truck'}
-                </Text>
+            {isTruckLocked ? (
+              <View style={[styles.dropdownBtn, styles.dropdownLocked]}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1, gap: 10 }}>
+                  <Truck size={18} color={COLORS.accent} />
+                  <Text style={styles.dropdownSelectedText}>
+                    {selectedVehicle ? selectedVehicle.lorry_number : '...'}
+                  </Text>
+                </View>
+                <Lock size={15} color={COLORS.textMuted} />
               </View>
-              <ChevronDown size={18} color={COLORS.textMuted} />
-            </TouchableOpacity>
+            ) : (
+              <TouchableOpacity
+                style={styles.dropdownBtn}
+                onPress={() =>
+                  openDropdown(
+                    'Select Truck Number',
+                    vehicles.map((v) => {
+                      const alerts = getVehicleComplianceAlerts(v);
+                      let sub = v.goodshed_loading_expense
+                        ? `Goodshed Loading Exp: ₹${parseFloat(String(v.goodshed_loading_expense)).toLocaleString('en-IN')}`
+                        : '';
+                      if (alerts.length > 0) {
+                        const expCount = alerts.filter((a) => a.isExpired).length;
+                        const soonCount = alerts.length - expCount;
+                        const alertTag = expCount > 0
+                          ? `⚠️ ${expCount} Expired Doc(s)`
+                          : `⚠️ ${soonCount} Expiring in ≤45d`;
+                        sub = sub ? `${sub} • ${alertTag}` : alertTag;
+                      }
+                      return {
+                        id: v.id,
+                        label: v.lorry_number,
+                        subLabel: sub || undefined,
+                      };
+                    }),
+                    selectedVehicleId,
+                    (id) => handleVehicleSelect(id)
+                  )
+                }
+              >
+                <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1, gap: 10 }}>
+                  <Truck size={18} color={COLORS.accent} />
+                  <Text style={selectedVehicle ? styles.dropdownSelectedText : styles.dropdownPlaceholder}>
+                    {selectedVehicle ? selectedVehicle.lorry_number : 'Select Truck'}
+                  </Text>
+                </View>
+                <ChevronDown size={18} color={COLORS.textMuted} />
+              </TouchableOpacity>
+            )}
+
+            {/* Selected Truck 45-day Compliance Alert Banner */}
+            {selectedVehicle && (() => {
+              const alerts = getVehicleComplianceAlerts(selectedVehicle);
+              if (alerts.length === 0) return null;
+              const hasExpired = alerts.some((a) => a.isExpired);
+              return (
+                <View
+                  style={{
+                    marginTop: 10,
+                    backgroundColor: hasExpired ? '#fef2f2' : '#fffbeb',
+                    borderColor: hasExpired ? '#fca5a5' : '#fde68a',
+                    borderWidth: 1.5,
+                    borderRadius: 10,
+                    padding: 12,
+                  }}
+                >
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 6 }}>
+                    <ShieldAlert size={16} color={hasExpired ? '#dc2626' : '#d97706'} />
+                    <Text
+                      style={{
+                        fontSize: 12.5,
+                        fontWeight: '700',
+                        color: hasExpired ? '#991b1b' : '#92400e',
+                      }}
+                    >
+                      {hasExpired ? '⚠️ Compliance Warning — Expired Documents' : '⚠️ Expiry Notice (Within 45 Days)'}
+                    </Text>
+                  </View>
+                  <Text style={{ fontSize: 11, color: hasExpired ? '#b91c1c' : '#b45309', marginBottom: 6 }}>
+                    Truck {selectedVehicle.lorry_number} has {alerts.length} document(s) needing renewal:
+                  </Text>
+                  {alerts.map((a, idx) => (
+                    <View key={idx} style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 2 }}>
+                      <Text style={{ fontSize: 11, color: a.isExpired ? '#dc2626' : '#d97706' }}>
+                        {a.isExpired ? '❌' : '⏳'}
+                      </Text>
+                      <Text
+                        style={{
+                          fontSize: 11.5,
+                          fontWeight: '600',
+                          color: a.isExpired ? '#991b1b' : '#92400e',
+                        }}
+                      >
+                        {a.name}:{' '}
+                        <Text style={{ fontWeight: 'normal' }}>
+                          {a.isExpired ? `EXPIRED (${a.date})` : a.days === 0 ? `Expires Today (${a.date})` : `Expires in ${a.days}d (${a.date})`}
+                        </Text>
+                      </Text>
+                    </View>
+                  ))}
+                </View>
+              );
+            })()}
           </View>
 
           {/* Driver Name Dropdown */}
@@ -259,13 +551,30 @@ export const NewTripScreen: React.FC<{ navigation: any }> = ({ navigation }) => 
               onPress={() =>
                 openDropdown(
                   'Select Driver Name',
-                  drivers.map((d) => ({
-                    id: d.id,
-                    label: d.name,
-                    subLabel: d.mobile_number ? `Mobile: ${d.mobile_number}` : undefined,
-                  })),
+                  drivers.map((d) => {
+                    let sub = d.mobile_number ? `Mobile: ${d.mobile_number}` : '';
+                    if (d.license_expiry_date) {
+                      try {
+                        const exp = new Date(d.license_expiry_date);
+                        const td = new Date();
+                        exp.setHours(0, 0, 0, 0);
+                        td.setHours(0, 0, 0, 0);
+                        const diff = Math.ceil((exp.getTime() - td.getTime()) / (1000 * 60 * 60 * 24));
+                        if (diff < 0) {
+                          sub += `${sub ? ' • ' : ''}⚠️ EXPIRED (${d.license_expiry_date.split('T')[0]})`;
+                        } else if (diff <= 45) {
+                          sub += `${sub ? ' • ' : ''}⚠️ Expires in ${diff}d (${d.license_expiry_date.split('T')[0]})`;
+                        }
+                      } catch {}
+                    }
+                    return {
+                      id: d.id,
+                      label: d.name,
+                      subLabel: sub || undefined,
+                    };
+                  }),
                   selectedDriverId,
-                  (id) => setSelectedDriverId(id)
+                  (id) => handleDriverSelect(id)
                 )
               }
             >
@@ -277,6 +586,38 @@ export const NewTripScreen: React.FC<{ navigation: any }> = ({ navigation }) => 
               </View>
               <ChevronDown size={18} color={COLORS.textMuted} />
             </TouchableOpacity>
+
+            {(() => {
+              if (selectedDriver && selectedDriver.license_expiry_date) {
+                try {
+                  const exp = new Date(selectedDriver.license_expiry_date);
+                  const td = new Date();
+                  exp.setHours(0, 0, 0, 0);
+                  td.setHours(0, 0, 0, 0);
+                  const diff = Math.ceil((exp.getTime() - td.getTime()) / (1000 * 60 * 60 * 24));
+                  if (diff < 0) {
+                    return (
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 6, backgroundColor: '#fef2f2', padding: 8, borderRadius: 6, borderWidth: 1, borderColor: '#fca5a5' }}>
+                        <AlertCircle size={14} color="#dc2626" />
+                        <Text style={{ fontSize: 12, color: '#dc2626', fontWeight: '700' }}>
+                          License EXPIRED ({selectedDriver.license_expiry_date.split('T')[0]})
+                        </Text>
+                      </View>
+                    );
+                  } else if (diff <= 45) {
+                    return (
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 6, backgroundColor: '#fffbeb', padding: 8, borderRadius: 6, borderWidth: 1, borderColor: '#fde047' }}>
+                        <AlertCircle size={14} color="#d97706" />
+                        <Text style={{ fontSize: 12, color: '#b45309', fontWeight: '700' }}>
+                          License expires in {diff} day{diff === 1 ? '' : 's'} ({selectedDriver.license_expiry_date.split('T')[0]})
+                        </Text>
+                      </View>
+                    );
+                  }
+                } catch {}
+              }
+              return null;
+            })()}
           </View>
 
           {/* Party / Client Name Dropdown */}
@@ -293,7 +634,7 @@ export const NewTripScreen: React.FC<{ navigation: any }> = ({ navigation }) => 
                     subLabel: p.contact_person ? `Contact: ${p.contact_person}` : undefined,
                   })),
                   selectedPartyId,
-                  (id) => setSelectedPartyId(id)
+                  (id) => handlePartySelect(id)
                 )
               }
             >
@@ -307,56 +648,24 @@ export const NewTripScreen: React.FC<{ navigation: any }> = ({ navigation }) => 
             </TouchableOpacity>
           </View>
 
-          {/* Route Dropdown */}
+          {/* Route Dropdown (Filtered to Selected Party) */}
           <View style={styles.formRow}>
             <Text style={styles.fieldLabel}>Route (From → To) *</Text>
             <TouchableOpacity
-              style={styles.dropdownBtn}
-              onPress={() =>
-                openDropdown(
-                  'Select Dispatch Route',
-                  routes.map((r) => ({
-                    id: r.id,
-                    label: `${r.from_location} → ${r.to_location}`,
-                    subLabel: r.distance_km ? `${r.distance_km} KM Distance` : undefined,
-                  })),
-                  selectedRouteId,
-                  (id) => setSelectedRouteId(id)
-                )
-              }
+              style={[
+                styles.dropdownBtn,
+                !selectedPartyId && { backgroundColor: COLORS.surface, borderColor: COLORS.border }
+              ]}
+              onPress={handleRouteDropdownPress}
             >
               <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1, gap: 10 }}>
-                <MapPin size={18} color={COLORS.accent} />
+                <MapPin size={18} color={selectedPartyId ? COLORS.accent : COLORS.textLight} />
                 <Text style={selectedRoute ? styles.dropdownSelectedText : styles.dropdownPlaceholder}>
-                  {selectedRoute ? `${selectedRoute.from_location} → ${selectedRoute.to_location}` : 'Select Route'}
-                </Text>
-              </View>
-              <ChevronDown size={18} color={COLORS.textMuted} />
-            </TouchableOpacity>
-          </View>
-
-          {/* Measurement Unit Dropdown */}
-          <View style={styles.formRow}>
-            <Text style={styles.fieldLabel}>Measurement Unit *</Text>
-            <TouchableOpacity
-              style={styles.dropdownBtn}
-              onPress={() =>
-                openDropdown(
-                  'Select Unit',
-                  units.map((u) => ({
-                    id: u.id,
-                    label: u.name,
-                    subLabel: u.abbreviation ? `(${u.abbreviation})` : undefined,
-                  })),
-                  selectedUnitId,
-                  (id) => setSelectedUnitId(id)
-                )
-              }
-            >
-              <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1, gap: 10 }}>
-                <Scale size={18} color={COLORS.accent} />
-                <Text style={selectedUnit ? styles.dropdownSelectedText : styles.dropdownPlaceholder}>
-                  {selectedUnit ? `${selectedUnit.name} ${selectedUnit.abbreviation ? `(${selectedUnit.abbreviation})` : ''}` : 'Select Unit'}
+                  {selectedRoute
+                    ? `${selectedRoute.from_location} → ${selectedRoute.to_location}`
+                    : selectedPartyId
+                    ? 'Select Route for ' + (selectedParty?.name || 'Party')
+                    : 'Select Party first...'}
                 </Text>
               </View>
               <ChevronDown size={18} color={COLORS.textMuted} />
@@ -366,7 +675,9 @@ export const NewTripScreen: React.FC<{ navigation: any }> = ({ navigation }) => 
           {/* Goods Weight & Freight Rate */}
           <View style={styles.twoCol}>
             <View style={{ flex: 1 }}>
-              <Text style={styles.fieldLabel}>Goods Weight ({selectedUnit?.name || 'Units'}) *</Text>
+              <Text style={styles.fieldLabel}>
+                Goods Weight ({selectedUnit ? selectedUnit.name : 'Tons'}) *
+              </Text>
               <TextInput
                 style={styles.input}
                 placeholder="e.g. 25"
@@ -392,14 +703,22 @@ export const NewTripScreen: React.FC<{ navigation: any }> = ({ navigation }) => 
           {/* Advance to Driver */}
           <View style={styles.formRow}>
             <Text style={styles.fieldLabel}>Advance Paid to Driver (₹)</Text>
-            <TextInput
-              style={styles.input}
-              placeholder="0.00"
-              placeholderTextColor={COLORS.textLight}
-              keyboardType="decimal-pad"
-              value={advancePaid}
-              onChangeText={setAdvancePaid}
-            />
+            {isAdvanceLocked ? (
+              <View style={[styles.input, styles.lockedInput]}>
+                <Lock size={14} color={COLORS.textMuted} style={{ marginRight: 6 }} />
+                <Text style={styles.lockedInputText}>₹{parseFloat(advancePaid).toLocaleString('en-IN')}</Text>
+                <Text style={styles.lockedInputNote}> · Paid via truck advance</Text>
+              </View>
+            ) : (
+              <TextInput
+                style={styles.input}
+                placeholder="0.00"
+                placeholderTextColor={COLORS.textLight}
+                keyboardType="decimal-pad"
+                value={advancePaid}
+                onChangeText={setAdvancePaid}
+              />
+            )}
           </View>
         </View>
 
@@ -408,7 +727,7 @@ export const NewTripScreen: React.FC<{ navigation: any }> = ({ navigation }) => 
           <View>
             <Text style={styles.calcTitle}>TOTAL FREIGHT</Text>
             <Text style={styles.calcFormula}>
-              {goodsWeight || 0} {selectedUnit?.name || 'units'} × ₹{freightRate || 0}
+              {goodsWeight || 0} {selectedUnit ? selectedUnit.name : 'Tons'} × ₹{freightRate || 0}
             </Text>
           </View>
           <Text style={styles.calcValue}>{formatCurrency(calculateTotalFreight())}</Text>
@@ -602,6 +921,30 @@ const styles = StyleSheet.create({
   dropdownPlaceholder: {
     fontSize: 14,
     color: COLORS.textLight,
+  },
+  dropdownLocked: {
+    backgroundColor: COLORS.surface,
+    borderColor: COLORS.border,
+    borderStyle: 'dashed',
+    opacity: 0.85,
+  },
+  lockedInput: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#fef9ec',
+    borderColor: COLORS.accent,
+    borderStyle: 'dashed',
+    opacity: 0.9,
+  },
+  lockedInputText: {
+    fontSize: 15,
+    fontWeight: '800',
+    color: COLORS.primary,
+  },
+  lockedInputNote: {
+    fontSize: 12,
+    color: COLORS.textMuted,
+    fontWeight: '500',
   },
   calculationCard: {
     backgroundColor: COLORS.primary,

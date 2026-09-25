@@ -17,6 +17,8 @@ export interface Driver {
   name: string;
   mobile_number?: string;
   license_number?: string;
+  license_type?: string;
+  license_expiry_date?: string;
   status: 'ACTIVE' | 'INACTIVE';
 }
 
@@ -27,6 +29,29 @@ export interface Vehicle {
   capacity_tons?: number;
   goodshed_loading_expense?: number;
   status: 'ACTIVE' | 'INACTIVE';
+  rc_number?: string;
+  rc_photo_url?: string;
+  fc_number?: string;
+  fc_expiry_date?: string;
+  fc_photo_url?: string;
+  insurance_policy_number?: string;
+  insurance_expiry_date?: string;
+  insurance_photo_url?: string;
+  permit_number?: string;
+  permit_expiry_date?: string;
+  permit_photo_url?: string;
+  tax_expiry_date?: string;
+  tax_photo_url?: string;
+  pan_number?: string;
+  pan_card_url?: string;
+  dts_number?: string;
+  dts_expiry_date?: string;
+  dts_certificate_url?: string;
+  account_number?: string;
+  bank_name?: string;
+  ifsc_code?: string;
+  account_holder_name?: string;
+  account_photo_url?: string;
 }
 
 export interface Party {
@@ -60,6 +85,11 @@ export interface FreightRate {
   party_id?: number;
   rate_per_unit: number;
   effective_from: string;
+  unit_name?: string;
+  unit_abbreviation?: string;
+  party_name?: string;
+  from_location?: string;
+  to_location?: string;
   status: 'ACTIVE' | 'INACTIVE';
 }
 
@@ -108,6 +138,7 @@ export interface Trip {
   to_location?: string;
   unit_name?: string;
   unit_abbreviation?: string;
+  goodshed_loading_expense?: number;
   total_received?: number;
   balance_due?: number;
   created_at: string;
@@ -116,7 +147,7 @@ export interface Trip {
 export interface DriverExpense {
   id: number;
   trip_id: number;
-  expense_type: 'FREIGHT_BASED' | 'LOADING' | 'UNLOADING' | 'TOLL' | 'FOOD' | 'REPAIR' | 'OTHER';
+  expense_type: 'FREIGHT_BASED' | 'LOADING' | 'UNLOADING' | 'DRIVER_BATA' | 'DRIVER_BETA' | 'CLEANING_CHARGE' | 'TOLL' | 'FOOD' | 'REPAIR' | 'OTHER' | string;
   description?: string;
   amount: number;
   created_at: string;
@@ -144,6 +175,43 @@ export interface MobileDashboardData {
   trips_today: number;
   balance_due: number;
   recent_trips: Trip[];
+  owner_advance_credit: number;
+  owner_advance_entries: number;
+  truck_advance_used: number;
+  manager_available_balance: number;
+  owner_advance_breakdown: {
+    owner_name: string;
+    amount: number;
+    advance_date: string;
+    payment_mode: string;
+  }[];
+}
+
+export interface OwnerAdvance {
+  id: number;
+  owner_id: number;
+  manager_id: number;
+  amount: number;
+  advance_date: string;
+  payment_mode: string;
+  notes?: string;
+  screenshot_url?: string;
+  owner_name?: string;
+  manager_name?: string;
+  created_at: string;
+}
+
+export interface TruckAdvance {
+  id: number;
+  vehicle_id: number;
+  manager_id: number;
+  amount: number;
+  advance_date: string;
+  notes?: string;
+  lorry_number?: string;
+  vehicle_type?: string;
+  manager_name?: string;
+  created_at: string;
 }
 
 export interface ApiResponse<T = any> {
@@ -157,7 +225,8 @@ export type RootStackParamList = {
   Splash: undefined;
   Login: undefined;
   MainTabs: undefined;
-  NewTrip: undefined;
+  NewTrip: { preselectedVehicleId?: number; advancePaid?: number } | undefined;
+  GiveTruckAdvance: { availableBalance: number };
   PartyPayment: { trip: Trip };
   DriverExpenses: { trip: Trip };
   SettlementReceipt: { trip: Trip; settlement?: Settlement };

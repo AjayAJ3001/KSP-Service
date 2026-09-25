@@ -23,6 +23,9 @@ import { ProfilePage } from './pages/ProfilePage';
 import { OwnersPage } from './pages/OwnersPage';
 import { CleaningExpensesPage } from './pages/CleaningExpensesPage';
 import { OwnerAdvancesPage } from './pages/OwnerAdvancesPage';
+import { UnloadingRatesPage } from './pages/UnloadingRatesPage';
+import { DriverBataPage } from './pages/DriverBataPage';
+import { OtherExpenseLimitPage } from './pages/OtherExpenseLimitPage';
 
 // Protected Route Component
 const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -70,11 +73,13 @@ export function App() {
             <Route path="owner-advances" element={<OwnerAdvancesPage />} />
             <Route path="vehicles" element={<VehiclesPage />} />
             <Route path="parties" element={<PartiesPage />} />
-
-            <Route path="routes" element={<RoutesPage />} />
+            <Route path="routes" element={<Navigate to="/parties" replace />} />
             <Route path="freight-rates" element={<FreightRatesPage />} />
             <Route path="expense-rates" element={<ExpenseRatesPage />} />
             <Route path="cleaning-expenses" element={<CleaningExpensesPage />} />
+            <Route path="unloading-rates" element={<UnloadingRatesPage />} />
+            <Route path="driver-bata" element={<DriverBataPage />} />
+            <Route path="other-expense-limit" element={<OtherExpenseLimitPage />} />
             <Route path="reports" element={<ReportsPage />} />
             <Route path="audit-logs" element={<AuditLogsPage />} />
             <Route path="profile" element={<ProfilePage />} />

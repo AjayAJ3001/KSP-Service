@@ -93,6 +93,47 @@ export const getOwnerAdvances = asyncHandler(async (req: AuthRequest, res: Respo
   });
 });
 
+// GET /owner-advances/mine — returns only advances for the logged-in manager
+export const getMyOwnerAdvances = asyncHandler(async (req: AuthRequest, res: Response): Promise<void> => {
+  const managerId = req.user?.id;
+  const page = parseInt(req.query.page as string) || 1;
+  const limit = parseInt(req.query.limit as string) || 50;
+  const offset = (page - 1) * limit;
+
+  const countResult = await query(
+    `SELECT COUNT(*) as total_count, COALESCE(SUM(amount), 0) as total_amount
+     FROM owner_advances
+     WHERE manager_id = $1`,
+    [managerId]
+  );
+
+  const result = await query(
+    `SELECT oa.*,
+            o.name as owner_name,
+            u.name as manager_name
+     FROM owner_advances oa
+     JOIN owners o ON oa.owner_id = o.id
+     JOIN users u ON oa.manager_id = u.id
+     WHERE oa.manager_id = $1
+     ORDER BY oa.advance_date DESC, oa.created_at DESC
+     LIMIT $2 OFFSET $3`,
+    [managerId, limit, offset]
+  );
+
+  res.json({
+    success: true,
+    message: 'Your advance credit records retrieved.',
+    data: {
+      items: result.rows,
+      total: parseInt(countResult.rows[0].total_count),
+      totalAmount: parseFloat(countResult.rows[0].total_amount),
+      page,
+      limit,
+      totalPages: Math.ceil(parseInt(countResult.rows[0].total_count) / limit),
+    },
+  });
+});
+
 export const getOwnerAdvanceById = asyncHandler(async (req: AuthRequest, res: Response): Promise<void> => {
   const result = await query(
     `SELECT oa.*,

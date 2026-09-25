@@ -28,6 +28,29 @@ export interface Vehicle {
   vehicle_type?: string;
   capacity_tons?: number;
   goodshed_loading_expense?: number;
+  rc_number?: string;
+  rc_photo_url?: string;
+  account_number?: string;
+  bank_name?: string;
+  ifsc_code?: string;
+  account_holder_name?: string;
+  account_photo_url?: string;
+  pan_number?: string;
+  pan_card_url?: string;
+  dts_number?: string;
+  dts_expiry_date?: string;
+  dts_certificate_url?: string;
+  insurance_policy_number?: string;
+  insurance_expiry_date?: string;
+  insurance_photo_url?: string;
+  permit_number?: string;
+  permit_expiry_date?: string;
+  permit_photo_url?: string;
+  fc_number?: string;
+  fc_expiry_date?: string;
+  fc_photo_url?: string;
+  tax_expiry_date?: string;
+  tax_photo_url?: string;
   status: 'ACTIVE' | 'INACTIVE';
   created_at: Date;
   updated_at: Date;
@@ -123,7 +146,7 @@ export interface TripPayment {
 export interface DriverExpense {
   id: number;
   trip_id: number;
-  expense_type: 'FREIGHT_BASED' | 'LOADING' | 'UNLOADING' | 'TOLL' | 'FOOD' | 'REPAIR' | 'OTHER';
+  expense_type: 'FREIGHT_BASED' | 'LOADING' | 'UNLOADING' | 'TOLL' | 'FOOD' | 'REPAIR' | 'CLEANING' | 'CLEANING_CHARGE' | 'DRIVER_BETA' | 'DRIVER_BATA' | 'OTHER';
   description?: string;
   amount: number;
   created_by: number;
@@ -179,4 +202,43 @@ export interface PaginatedResponse<T> {
     limit: number;
     totalPages: number;
   };
+}
+
+export interface UnloadingRate {
+  id: number;
+  party_id: number;
+  party_name?: string;
+  unit_number?: number;
+  unit_name: string;
+  route_id?: number;
+  from_location?: string;
+  to_location?: string;
+  rate_per_ton: number;
+  description?: string;
+  status: 'ACTIVE' | 'INACTIVE';
+  created_at: Date;
+  updated_at: Date;
+}
+
+export interface DriverBataRate {
+  id: number;
+  party_id?: number | null;
+  party_name?: string;
+  rate_percentage: number;
+  rate_multiplier: number;
+  description?: string;
+  status: 'ACTIVE' | 'INACTIVE';
+  created_at: Date;
+  updated_at: Date;
+}
+
+export interface OtherExpenseLimit {
+  id: number;
+  party_id?: number | null;
+  party_name?: string;
+  max_amount: number;
+  description?: string;
+  status: 'active' | 'inactive';
+  created_at: Date;
+  updated_at: Date;
 }

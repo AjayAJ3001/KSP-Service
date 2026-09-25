@@ -115,6 +115,11 @@ export const generateSettlement = asyncHandler(async (req: AuthRequest, res: Res
     // Update trip status to SETTLED
     await client.query(`UPDATE trips SET status = 'SETTLED', updated_at = NOW() WHERE id = $1`, [trip_id]);
 
+    const expensesResult = await client.query(
+      `SELECT expense_type, description, amount FROM driver_expenses WHERE trip_id = $1 ORDER BY id ASC`,
+      [trip_id]
+    );
+
     await client.query('COMMIT');
 
     await createAuditLog(req.user?.id, 'GENERATE_SETTLEMENT', 'SETTLEMENTS', settlementResult.rows[0].id, { trip_id, balance_to_driver });
@@ -122,7 +127,7 @@ export const generateSettlement = asyncHandler(async (req: AuthRequest, res: Res
     res.status(201).json({
       success: true,
       message: 'Settlement generated successfully.',
-      data: { ...settlementResult.rows[0], ...trip },
+      data: { ...settlementResult.rows[0], ...trip, expense_items: expensesResult.rows },
     });
   } catch (error) {
     await client.query('ROLLBACK');

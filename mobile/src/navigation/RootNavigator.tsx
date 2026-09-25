@@ -8,6 +8,7 @@ import { NewTripScreen } from '../screens/NewTripScreen';
 import { PartyPaymentScreen } from '../screens/PartyPaymentScreen';
 import { DriverExpensesScreen } from '../screens/DriverExpensesScreen';
 import { SettlementReceiptScreen } from '../screens/SettlementReceiptScreen';
+import { GiveTruckAdvanceScreen } from '../screens/GiveTruckAdvanceScreen';
 import { RootStackParamList } from '../types';
 import { COLORS } from '../constants/theme';
 
@@ -49,9 +50,14 @@ export const RootNavigator: React.FC = () => {
         options={{ title: 'New Trip Entry' }}
       />
       <Stack.Screen
+        name="GiveTruckAdvance"
+        component={GiveTruckAdvanceScreen}
+        options={{ title: 'Give Truck Advance' }}
+      />
+      <Stack.Screen
         name="PartyPayment"
         component={PartyPaymentScreen}
-        options={{ title: 'Party Payment' }}
+        options={{ title: 'Payment Details' }}
       />
       <Stack.Screen
         name="DriverExpenses"

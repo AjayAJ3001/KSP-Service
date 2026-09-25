@@ -1,11 +1,12 @@
 import { Router } from 'express';
-import { getVehicles, getVehicleById, createVehicle, updateVehicle, updateVehicleStatus, deleteVehicle } from '../controllers/master.controller';
+import { getVehicles, getVehicleById, getExpiringVehicles, createVehicle, updateVehicle, updateVehicleStatus, deleteVehicle } from '../controllers/master.controller';
 import { authenticate, authorize } from '../middleware/auth';
 
 const router = Router();
 router.use(authenticate);
 
 router.get('/', getVehicles);
+router.get('/expiring', getExpiringVehicles);
 router.get('/:id', getVehicleById);
 router.post('/', authorize('ADMIN'), createVehicle);
 router.put('/:id', authorize('ADMIN'), updateVehicle);

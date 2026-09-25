@@ -255,7 +255,7 @@ export const UsersPage: React.FC = () => {
     },
     {
       header: 'Last Login',
-      accessor: (u) => (u.last_login ? new Date(u.last_login).toLocaleString('en-IN') : 'Never'),
+      accessor: (u) => (u.last_login ? new Date(u.last_login).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' }) : 'Never'),
     },
     {
       header: 'Actions',

@@ -3,8 +3,11 @@
   "version": "1.0.0",
   "main": "index.js",
   "scripts": {
-    "start": "expo start --dev-client --localhost",
-    "dev": "expo run:android",
+    "start": "adb reverse tcp:8081 tcp:8081 && adb reverse tcp:5000 tcp:5000 && expo start --dev-client -c",
+    "dev": "expo start --dev-client -c",
+    "android": "adb reverse tcp:8081 tcp:8081 && adb reverse tcp:5000 tcp:5000 && expo run:android",
+    "install:apk": "adb push android/app/build/outputs/apk/debug/app-debug.apk /data/local/tmp/app.apk && adb shell pm install -r --user 0 /data/local/tmp/app.apk",
+    "rebuild:apk": "npm run build && cd android && .\\gradlew.bat assembleDebug && cd .. && npm run install:apk",
     "ios": "expo run:ios",
     "web": "expo start --web",
     "build": "tsc --noEmit"

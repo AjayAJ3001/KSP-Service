@@ -23,6 +23,10 @@ import dashboardRoutes from './routes/dashboard.routes';
 import ownerRoutes from './routes/owner.routes';
 import cleaningExpenseRoutes from './routes/cleaningExpense.routes';
 import ownerAdvanceRoutes from './routes/ownerAdvance.routes';
+import truckAdvanceRoutes from './routes/truckAdvance.routes';
+import unloadingRateRoutes from './routes/unloadingRate.routes';
+import driverBataRateRoutes from './routes/driverBataRate.routes';
+import otherExpenseLimitRoutes from './routes/otherExpenseLimit.routes';
 
 import { errorHandler, notFound } from './middleware/errorHandler';
 
@@ -74,6 +78,10 @@ app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/owners', ownerRoutes);
 app.use('/api/cleaning-expense-rates', cleaningExpenseRoutes);
 app.use('/api/owner-advances', ownerAdvanceRoutes);
+app.use('/api/truck-advances', truckAdvanceRoutes);
+app.use('/api/unloading-rates', unloadingRateRoutes);
+app.use('/api/driver-bata-rates', driverBataRateRoutes);
+app.use('/api/other-expense-limits', otherExpenseLimitRoutes);
 
 // Error handling
 app.use(notFound);

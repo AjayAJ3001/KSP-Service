@@ -40,7 +40,7 @@ export const getTrips = asyncHandler(async (req: AuthRequest, res: Response): Pr
 
   const result = await query(
     `SELECT t.*, 
-            v.lorry_number, d.name as driver_name, p.name as party_name,
+            v.lorry_number, v.goodshed_loading_expense, d.name as driver_name, p.name as party_name,
             r.from_location, r.to_location, u.name as unit_name,
             u.abbreviation as unit_abbreviation,
             (SELECT COALESCE(SUM(received_amount), 0) FROM trip_payments WHERE trip_id = t.id) as total_received,
@@ -63,7 +63,7 @@ export const getTrips = asyncHandler(async (req: AuthRequest, res: Response): Pr
 export const getTripById = asyncHandler(async (req: AuthRequest, res: Response): Promise<void> => {
   const result = await query(
     `SELECT t.*, 
-            v.lorry_number, d.name as driver_name, d.mobile_number as driver_mobile,
+            v.lorry_number, v.goodshed_loading_expense, d.name as driver_name, d.mobile_number as driver_mobile,
             p.name as party_name, p.mobile_number as party_mobile,
             r.from_location, r.to_location, u.name as unit_name, u.abbreviation as unit_abbreviation,
             (SELECT COALESCE(SUM(received_amount), 0) FROM trip_payments WHERE trip_id = t.id) as total_received,
@@ -91,12 +91,18 @@ export const getTripById = asyncHandler(async (req: AuthRequest, res: Response):
 export const createTrip = asyncHandler(async (req: AuthRequest, res: Response): Promise<void> => {
   const { vehicle_id, driver_id, party_id, route_id, unit_id, freight_rate_id, freight_rate, goods_weight, advance_paid, trip_date } = req.body;
 
-  if (!vehicle_id || !driver_id || !party_id || !route_id || !unit_id || !freight_rate || !goods_weight || !trip_date) {
-    throw new AppError('Vehicle, driver, party, route, unit, freight rate, weight and date are required.', 400);
+  if (!vehicle_id || !driver_id || !party_id || !route_id || !freight_rate || !goods_weight || !trip_date) {
+    throw new AppError('Vehicle, driver, party, route, freight rate, weight and date are required.', 400);
   }
   if (goods_weight <= 0) throw new AppError('Goods weight must be greater than 0.', 400);
   if (freight_rate < 0) throw new AppError('Freight rate must be >= 0.', 400);
   if ((advance_paid || 0) < 0) throw new AppError('Advance paid must be >= 0.', 400);
+
+  let effectiveUnitId = unit_id;
+  if (!effectiveUnitId) {
+    const unitRes = await query(`SELECT id FROM units WHERE status = 'ACTIVE' ORDER BY id ASC LIMIT 1`);
+    effectiveUnitId = unitRes.rows[0]?.id || 1;
+  }
 
   // Backend calculates total freight — never trust frontend
   const total_freight = parseFloat(goods_weight) * parseFloat(freight_rate);
@@ -106,7 +112,7 @@ export const createTrip = asyncHandler(async (req: AuthRequest, res: Response): 
      freight_rate, goods_weight, total_freight, advance_paid, trip_date, status, created_by)
      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 'PAYMENT_PENDING', $12)
      RETURNING *`,
-    [vehicle_id, driver_id, party_id, route_id, unit_id, freight_rate_id || null,
+    [vehicle_id, driver_id, party_id, route_id, effectiveUnitId, freight_rate_id || null,
      freight_rate, goods_weight, total_freight, advance_paid || 0, trip_date, req.user?.id]
   );
 

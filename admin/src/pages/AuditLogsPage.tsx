@@ -48,7 +48,7 @@ export const AuditLogsPage: React.FC = () => {
   const columns: Column<AuditLog>[] = [
     {
       header: 'Timestamp',
-      accessor: (l) => new Date(l.created_at).toLocaleString('en-IN'),
+      accessor: (l) => new Date(l.created_at).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' }),
     },
     {
       header: 'Performed By',
@@ -174,7 +174,7 @@ export const AuditLogsPage: React.FC = () => {
             <div style={{ marginBottom: '16px' }}>
               <div><strong>Module:</strong> {selectedLog.module}</div>
               <div><strong>User:</strong> {selectedLog.username || 'System'}</div>
-              <div><strong>Timestamp:</strong> {new Date(selectedLog.created_at).toLocaleString('en-IN')}</div>
+              <div><strong>Timestamp:</strong> {new Date(selectedLog.created_at).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })}</div>
               {selectedLog.record_id && <div><strong>Record ID:</strong> {selectedLog.record_id}</div>}
             </div>
 

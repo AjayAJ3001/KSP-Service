@@ -10,13 +10,13 @@ import {
 } from 'react-native';
 import {
   Truck,
-  PlusCircle,
   TrendingUp,
   CreditCard,
   MapPin,
   Calendar,
   ChevronRight,
   User,
+  HandCoins,
 } from 'lucide-react-native';
 import { useAuth } from '../context/AuthContext';
 import { mobileDashboardService } from '../services/mobileService';
@@ -59,7 +59,18 @@ export const HomeScreen: React.FC<{ navigation: any }> = ({ navigation }) => {
 
   const formatCurrency = (val: number | string) => {
     const num = parseFloat(String(val)) || 0;
-    return `₹${num.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    return `\u20B9${num.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  };
+
+  const formatDate = (dateStr?: string) => {
+    if (!dateStr) return '';
+    try {
+      const d = new Date(dateStr);
+      if (isNaN(d.getTime())) return String(dateStr);
+      return d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
+    } catch {
+      return String(dateStr);
+    }
   };
 
   const getStatusStyle = (status: string) => {
@@ -97,6 +108,9 @@ export const HomeScreen: React.FC<{ navigation: any }> = ({ navigation }) => {
           <View>
             <Text style={styles.greetingText}>{getGreeting()},</Text>
             <Text style={styles.userNameText}>{user?.name || 'Operator'}</Text>
+            {user?.username ? (
+              <Text style={styles.userHandleText}>@{user.username}</Text>
+            ) : null}
           </View>
           <TouchableOpacity
             style={styles.profileBadge}
@@ -122,14 +136,72 @@ export const HomeScreen: React.FC<{ navigation: any }> = ({ navigation }) => {
         </View>
       </View>
 
-      {/* Action Button: + New Trip Entry */}
-      <TouchableOpacity
-        style={styles.newTripBtn}
-        onPress={() => navigation.navigate('NewTrip')}
-      >
-        <PlusCircle size={24} color={COLORS.white} />
-        <Text style={styles.newTripBtnText}>+ NEW TRIP ENTRY</Text>
-      </TouchableOpacity>
+      {/* Owner Advance Credit — per-owner breakdown */}
+      {(data?.owner_advance_credit ?? 0) > 0 && (
+        <View style={styles.creditBanner}>
+          <View style={styles.creditBannerTop}>
+            <View style={styles.creditBannerLeft}>
+              <View style={styles.creditIconCircle}>
+                <HandCoins size={22} color="#15803d" />
+              </View>
+              <View style={styles.creditTextCol}>
+                <Text style={styles.creditBannerLabel}>Owner Advance Credit</Text>
+                <Text style={styles.creditBannerSub}>
+                  Available Balance: ₹{(data?.manager_available_balance ?? 0).toLocaleString('en-IN', { minimumFractionDigits: 0 })}
+                </Text>
+              </View>
+            </View>
+            <View style={{ alignItems: 'flex-end' }}>
+              <Text style={styles.creditTotalLabel}>TOTAL ADVANCE</Text>
+              <Text style={styles.creditBannerAmount}>{formatCurrency(data?.owner_advance_credit ?? 0)}</Text>
+            </View>
+          </View>
+
+          {/* Per-owner breakdown rows */}
+          {(data?.owner_advance_breakdown ?? []).length > 0 && (
+            <View style={styles.ownerBreakdownList}>
+              <Text style={styles.breakdownHeading}>Received From Owner</Text>
+              {data!.owner_advance_breakdown.map((entry, i) => (
+                <View key={i} style={styles.ownerBreakdownRow}>
+                  <View style={{ flex: 1, marginRight: 10 }}>
+                    <View style={styles.ownerNameRow}>
+                      <User size={14} color="#15803d" />
+                      <Text style={styles.ownerNameText}>{entry.owner_name}</Text>
+                    </View>
+                    <View style={styles.ownerMetaRow}>
+                      <Calendar size={12} color="#166534" />
+                      <Text style={styles.ownerDateText}>
+                        {formatDate(entry.advance_date)}
+                      </Text>
+                      {entry.payment_mode ? (
+                        <View style={styles.paymentModeBadge}>
+                          <Text style={styles.paymentModeText}>{entry.payment_mode}</Text>
+                        </View>
+                      ) : null}
+                    </View>
+                  </View>
+                  <Text style={styles.ownerAmountText}>{formatCurrency(entry.amount)}</Text>
+                </View>
+              ))}
+            </View>
+          )}
+        </View>
+      )}
+
+      {/* Give Truck Advance Button — only when balance > 0 */}
+      {(data?.manager_available_balance ?? 0) > 0 && (
+        <TouchableOpacity
+          style={styles.truckAdvanceBtn}
+          onPress={() => navigation.navigate('GiveTruckAdvance', {
+            availableBalance: data?.manager_available_balance ?? 0,
+          })}
+        >
+          <Truck size={20} color={COLORS.white} />
+          <Text style={styles.truckAdvanceBtnText}>Give Advance to Truck</Text>
+          <ChevronRight size={18} color={COLORS.white} />
+        </TouchableOpacity>
+      )}
+
 
       {/* Recent Trips Header */}
       <View style={styles.sectionHeader}>
@@ -220,6 +292,7 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.primary,
     borderRadius: RADIUS.xl,
     padding: SPACING.lg,
+    marginBottom: SPACING.md,
     ...SHADOWS.md,
   },
   headerRow: {
@@ -237,6 +310,13 @@ const styles = StyleSheet.create({
     fontSize: 22,
     fontWeight: '800',
     marginTop: 2,
+  },
+  userHandleText: {
+    color: 'rgba(255,255,255,0.55)',
+    fontSize: 12,
+    fontWeight: '500',
+    marginTop: 2,
+    letterSpacing: 0.3,
   },
   profileBadge: {
     width: 40,
@@ -277,7 +357,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: 8,
-    marginVertical: SPACING.lg,
+    marginBottom: SPACING.lg,
     ...SHADOWS.md,
   },
   newTripBtnText: {
@@ -394,5 +474,143 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '700',
     color: COLORS.accent,
+  },
+  creditBanner: {
+    backgroundColor: '#f0fdf4',
+    borderRadius: RADIUS.lg,
+    borderWidth: 1,
+    borderColor: '#bbf7d0',
+    paddingVertical: 14,
+    paddingHorizontal: 14,
+    marginBottom: SPACING.md,
+    ...SHADOWS.sm,
+  },
+  creditBannerTop: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  creditBannerLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+    marginRight: 10,
+  },
+  creditIconCircle: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: '#dcfce7',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 10,
+  },
+  creditTextCol: {
+    flex: 1,
+  },
+  creditBannerLabel: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#15803d',
+  },
+  creditBannerSub: {
+    fontSize: 11,
+    color: '#16a34a',
+    marginTop: 2,
+    fontWeight: '500',
+  },
+  creditBannerAmount: {
+    fontSize: 16,
+    fontWeight: '800',
+    color: '#15803d',
+  },
+  creditTotalLabel: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: '#16a34a',
+    letterSpacing: 0.5,
+    marginBottom: 2,
+  },
+  ownerBreakdownList: {
+    marginTop: 12,
+    paddingTop: 10,
+    borderTopWidth: 1,
+    borderTopColor: '#bbf7d0',
+    gap: 8,
+  },
+  breakdownHeading: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#166534',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+    marginBottom: 2,
+  },
+  ownerBreakdownRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#dcfce7',
+    borderRadius: RADIUS.md,
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+    borderWidth: 1,
+    borderColor: '#bbf7d0',
+  },
+  ownerNameRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  ownerNameText: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#14532d',
+  },
+  ownerMetaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    marginTop: 4,
+  },
+  ownerDateText: {
+    fontSize: 12,
+    color: '#166534',
+    fontWeight: '600',
+  },
+  paymentModeBadge: {
+    backgroundColor: '#bbf7d0',
+    borderRadius: RADIUS.full,
+    paddingHorizontal: 6,
+    paddingVertical: 1,
+    marginLeft: 4,
+  },
+  paymentModeText: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: '#15803d',
+    textTransform: 'uppercase',
+  },
+  ownerAmountText: {
+    fontSize: 15,
+    fontWeight: '800',
+    color: '#15803d',
+  },
+  truckAdvanceBtn: {
+    backgroundColor: '#15803d',
+    borderRadius: RADIUS.lg,
+    paddingVertical: 13,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    marginBottom: SPACING.md,
+    ...SHADOWS.sm,
+  },
+  truckAdvanceBtnText: {
+    color: COLORS.white,
+    fontSize: 15,
+    fontWeight: '800',
+    letterSpacing: 0.4,
   },
 });

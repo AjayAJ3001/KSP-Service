@@ -1,6 +1,6 @@
 import api from './api';
 import {
-  User, Driver, Vehicle, Party, Owner, OwnerAdvance, Unit, Route, FreightRate, ExpenseRate, CleaningExpenseRate,
+  User, Driver, Vehicle, Party, Owner, OwnerAdvance, Unit, Route, FreightRate, ExpenseRate, CleaningExpenseRate, UnloadingRate, DriverBataRate, OtherExpenseLimit,
   Trip, TripPayment, DriverExpense, Settlement, AuditLog, DashboardData,
   ApiResponse, PaginatedData
 } from '../types';
@@ -71,6 +71,10 @@ export const driverService = {
     const res = await api.get('/drivers', { params });
     return res.data;
   },
+  getExpiringDrivers: async (days: number = 45): Promise<ApiResponse<Driver[]>> => {
+    const res = await api.get('/drivers/expiring', { params: { days } });
+    return res.data;
+  },
   getDriverById: async (id: number): Promise<ApiResponse<Driver>> => {
     const res = await api.get(`/drivers/${id}`);
     return res.data;
@@ -117,6 +121,10 @@ export const vehicleService = {
   },
   deleteVehicle: async (id: number): Promise<ApiResponse> => {
     const res = await api.delete(`/vehicles/${id}`);
+    return res.data;
+  },
+  getExpiringVehicles: async (days: number = 45): Promise<ApiResponse<Vehicle[]>> => {
+    const res = await api.get('/vehicles/expiring', { params: { days } });
     return res.data;
   },
 };
@@ -175,11 +183,11 @@ export const routeService = {
     const res = await api.get('/routes', { params });
     return res.data;
   },
-  createRoute: async (data: Partial<Route>): Promise<ApiResponse<Route>> => {
+  createRoute: async (data: Partial<Route> & { party_id?: number; rate_per_unit?: number | string }): Promise<ApiResponse<Route>> => {
     const res = await api.post('/routes', data);
     return res.data;
   },
-  updateRoute: async (id: number, data: Partial<Route>): Promise<ApiResponse<Route>> => {
+  updateRoute: async (id: number, data: Partial<Route> & { party_id?: number; rate_per_unit?: number | string }): Promise<ApiResponse<Route>> => {
     const res = await api.put(`/routes/${id}`, data);
     return res.data;
   },
@@ -385,6 +393,30 @@ export const cleaningExpenseRateService = {
   },
 };
 
+// Unloading Rate Service
+export const unloadingRateService = {
+  getUnloadingRates: async (params?: { status?: string; party_id?: number; search?: string }): Promise<ApiResponse<UnloadingRate[]>> => {
+    const res = await api.get('/unloading-rates', { params });
+    return res.data;
+  },
+  getUnloadingRateById: async (id: number): Promise<ApiResponse<UnloadingRate>> => {
+    const res = await api.get(`/unloading-rates/${id}`);
+    return res.data;
+  },
+  createUnloadingRate: async (data: Partial<UnloadingRate>): Promise<ApiResponse<UnloadingRate>> => {
+    const res = await api.post('/unloading-rates', data);
+    return res.data;
+  },
+  updateUnloadingRate: async (id: number, data: Partial<UnloadingRate>): Promise<ApiResponse<UnloadingRate>> => {
+    const res = await api.put(`/unloading-rates/${id}`, data);
+    return res.data;
+  },
+  deleteUnloadingRate: async (id: number): Promise<ApiResponse> => {
+    const res = await api.delete(`/unloading-rates/${id}`);
+    return res.data;
+  },
+};
+
 // Owner Advance Service
 export const ownerAdvanceService = {
   getOwnerAdvances: async (params?: {
@@ -435,6 +467,55 @@ export const ownerAdvanceService = {
     return res.data;
   },
 };
+
+// Driver Bata Rate Service
+export const driverBataRateService = {
+  getDriverBataRates: async (params?: { status?: string; party_id?: string }): Promise<ApiResponse<DriverBataRate[]>> => {
+    const res = await api.get('/driver-bata-rates', { params });
+    return res.data;
+  },
+  getEffectiveBataRate: async (params?: { party_id?: number }): Promise<ApiResponse<DriverBataRate>> => {
+    const res = await api.get('/driver-bata-rates/effective', { params });
+    return res.data;
+  },
+  createDriverBataRate: async (data: Partial<DriverBataRate>): Promise<ApiResponse<DriverBataRate>> => {
+    const res = await api.post('/driver-bata-rates', data);
+    return res.data;
+  },
+  updateDriverBataRate: async (id: number, data: Partial<DriverBataRate>): Promise<ApiResponse<DriverBataRate>> => {
+    const res = await api.put(`/driver-bata-rates/${id}`, data);
+    return res.data;
+  },
+  deleteDriverBataRate: async (id: number): Promise<ApiResponse> => {
+    const res = await api.delete(`/driver-bata-rates/${id}`);
+    return res.data;
+  },
+};
+
+// Other Expense Limit Service
+export const otherExpenseLimitService = {
+  getOtherExpenseLimits: async (params?: { status?: string; party_id?: string }): Promise<ApiResponse<OtherExpenseLimit[]>> => {
+    const res = await api.get('/other-expense-limits', { params });
+    return res.data;
+  },
+  getEffectiveLimit: async (params?: { party_id?: number }): Promise<ApiResponse<OtherExpenseLimit>> => {
+    const res = await api.get('/other-expense-limits/effective', { params });
+    return res.data;
+  },
+  createOtherExpenseLimit: async (data: Partial<OtherExpenseLimit>): Promise<ApiResponse<OtherExpenseLimit>> => {
+    const res = await api.post('/other-expense-limits', data);
+    return res.data;
+  },
+  updateOtherExpenseLimit: async (id: number, data: Partial<OtherExpenseLimit>): Promise<ApiResponse<OtherExpenseLimit>> => {
+    const res = await api.put(`/other-expense-limits/${id}`, data);
+    return res.data;
+  },
+  deleteOtherExpenseLimit: async (id: number): Promise<ApiResponse> => {
+    const res = await api.delete(`/other-expense-limits/${id}`);
+    return res.data;
+  },
+};
+
 
 
 

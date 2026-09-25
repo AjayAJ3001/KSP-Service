@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { NavLink, Outlet, useNavigate } from 'react-router-dom';
 import {
   LayoutDashboard,
@@ -21,12 +21,34 @@ import {
   Briefcase,
   Droplets,
   HandCoins,
+  ArrowDownCircle,
+  Percent,
+  ShieldAlert,
+  AlertTriangle,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
+import { LicenseExpiryAlertModal } from '../Common/LicenseExpiryAlertModal';
+import { VehicleExpiryAlertModal } from '../Common/VehicleExpiryAlertModal';
+import { driverService, vehicleService } from '../../services/adminService';
 
 export const AdminLayout: React.FC = () => {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
+  const [showExpiryModal, setShowExpiryModal] = useState(false);
+  const [showVehicleExpiryModal, setShowVehicleExpiryModal] = useState(false);
+  const [expiringCount, setExpiringCount] = useState(0);
+  const [expiringVehicleCount, setExpiringVehicleCount] = useState(0);
+
+  useEffect(() => {
+    // Driver license expiry count
+    driverService.getExpiringDrivers(45).then((res) => {
+      if (res.data) setExpiringCount(res.data.length);
+    }).catch(() => {});
+    // Vehicle compliance expiry count
+    vehicleService.getExpiringVehicles(45).then((res) => {
+      if (res.data) setExpiringVehicleCount(res.data.length);
+    }).catch(() => {});
+  }, []);
 
   const handleLogout = async () => {
     await logout();
@@ -82,11 +104,7 @@ export const AdminLayout: React.FC = () => {
             <Truck /> Vehicles / Lorries
           </NavLink>
           <NavLink to="/parties" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
-            <Building2 /> Parties
-          </NavLink>
-
-          <NavLink to="/routes" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
-            <MapPin /> Routes
+            <Building2 /> Parties and Units
           </NavLink>
           <NavLink to="/freight-rates" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
             <CircleDollarSign /> Freight Rates
@@ -96,6 +114,15 @@ export const AdminLayout: React.FC = () => {
           </NavLink>
           <NavLink to="/cleaning-expenses" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
             <Droplets /> Cleaning Expenses
+          </NavLink>
+          <NavLink to="/unloading-rates" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
+            <ArrowDownCircle /> Unloading Rates
+          </NavLink>
+          <NavLink to="/driver-bata" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
+            <Percent /> Driver Bata
+          </NavLink>
+          <NavLink to="/other-expense-limit" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
+            <ShieldAlert /> Other Expense Limit
           </NavLink>
 
           <div className="nav-section-title">Analytics & Security</div>
@@ -116,6 +143,55 @@ export const AdminLayout: React.FC = () => {
         <header className="header">
           <div className="page-title">KSP Transport Management System</div>
           <div className="header-actions">
+            {expiringCount > 0 && (
+              <button
+                onClick={() => setShowExpiryModal(true)}
+                className="btn btn-sm"
+                style={{
+                  background: '#fef2f2',
+                  borderColor: '#fca5a5',
+                  color: '#dc2626',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  fontWeight: 700,
+                  fontSize: '12px',
+                  padding: '6px 12px',
+                  borderRadius: '20px',
+                  cursor: 'pointer',
+                  boxShadow: '0 2px 5px rgba(220, 38, 38, 0.15)',
+                }}
+                title={`${expiringCount} driver(s) have licenses expiring within 45 days`}
+              >
+                <AlertTriangle size={15} color="#dc2626" />
+                <span>{expiringCount} License Alert{expiringCount === 1 ? '' : 's'}</span>
+              </button>
+            )}
+            {expiringVehicleCount > 0 && (
+              <button
+                onClick={() => setShowVehicleExpiryModal(true)}
+                className="btn btn-sm"
+                style={{
+                  background: '#fffbeb',
+                  borderColor: '#fde68a',
+                  color: '#b45309',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  fontWeight: 700,
+                  fontSize: '12px',
+                  padding: '6px 12px',
+                  borderRadius: '20px',
+                  cursor: 'pointer',
+                  boxShadow: '0 2px 5px rgba(217, 119, 6, 0.15)',
+                }}
+                title={`${expiringVehicleCount} vehicle(s) have compliance documents expiring within 45 days`}
+              >
+                <AlertTriangle size={15} color="#d97706" />
+                <span>{expiringVehicleCount} Fleet Alert{expiringVehicleCount === 1 ? '' : 's'}</span>
+              </button>
+            )}
+
             <div className="user-badge">
               <div className="user-avatar">{user?.name ? user.name.charAt(0).toUpperCase() : 'A'}</div>
               <div>
@@ -133,6 +209,17 @@ export const AdminLayout: React.FC = () => {
           <Outlet />
         </main>
       </div>
+
+      {/* Driver License Expiry Alert Modal */}
+      <LicenseExpiryAlertModal
+        isOpenManually={showExpiryModal}
+        onCloseManual={() => setShowExpiryModal(false)}
+      />
+      {/* Vehicle Compliance Expiry Alert Modal */}
+      <VehicleExpiryAlertModal
+        isOpenManually={showVehicleExpiryModal}
+        onCloseManual={() => setShowVehicleExpiryModal(false)}
+      />
     </div>
   );
 };

@@ -5,7 +5,7 @@ import { Platform } from 'react-native';
 // Default to PC Wi-Fi IP (192.168.7.6) so it works on Wi-Fi without USB cable,
 // or localhost:5000 when ADB reverse is active.
 const getBaseUrl = () => {
-  return 'http://192.168.7.6:5000/api';
+  return 'http://localhost:5000/api';
 };
 
 const api = axios.create({

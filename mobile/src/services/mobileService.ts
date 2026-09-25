@@ -60,6 +60,14 @@ export const mobileLookupService = {
     const res = await api.get('/expense-rates', { params: { status: 'ACTIVE' } });
     return res.data;
   },
+  getEffectiveDriverBataRate: async (partyId?: number): Promise<ApiResponse<{ rate_percentage: number; rate_multiplier: number }>> => {
+    const res = await api.get('/driver-bata-rates/effective', { params: { party_id: partyId } });
+    return res.data;
+  },
+  getEffectiveOtherExpenseLimit: async (partyId?: number): Promise<ApiResponse<{ id: number; party_id: number | null; max_amount: number; description?: string }>> => {
+    const res = await api.get('/other-expense-limits/effective', { params: { party_id: partyId } });
+    return res.data;
+  },
 };
 
 export const mobileTripService = {
@@ -110,6 +118,32 @@ export const mobileExpenseService = {
   },
   deleteExpense: async (id: number): Promise<ApiResponse> => {
     const res = await api.delete(`/expenses/${id}`);
+    return res.data;
+  },
+};
+
+export const mobileOwnerAdvanceService = {
+  // Fetch only the advances received by the logged-in manager (server filters by JWT user)
+  getMyAdvances: async (params?: { page?: number; limit?: number }): Promise<ApiResponse<{ items: any[]; total: number; totalAmount: number }>> => {
+    const res = await api.get('/owner-advances/mine', { params: { limit: params?.limit ?? 50, page: params?.page ?? 1 } });
+    return res.data;
+  },
+};
+
+export const mobileTruckAdvanceService = {
+  // Manager gives advance to a specific truck/vehicle
+  giveAdvance: async (data: {
+    vehicle_id: number;
+    amount: number;
+    advance_date?: string;
+    notes?: string;
+  }): Promise<ApiResponse<any>> => {
+    const res = await api.post('/truck-advances', data);
+    return res.data;
+  },
+  // Fetch advances given by this manager
+  getMyAdvances: async (params?: { page?: number; limit?: number }): Promise<ApiResponse<{ items: any[]; total: number; totalAmount: number }>> => {
+    const res = await api.get('/truck-advances/mine', { params: { limit: params?.limit ?? 50, page: params?.page ?? 1 } });
     return res.data;
   },
 };

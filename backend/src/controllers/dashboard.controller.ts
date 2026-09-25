@@ -66,7 +66,7 @@ export const getMobileDashboard = asyncHandler(async (req: AuthRequest, res: Res
   const today = new Date().toISOString().split('T')[0];
   const userId = req.user?.id;
 
-  const [todayTripsResult, balanceDueResult, recentTripsResult] = await Promise.all([
+  const [todayTripsResult, balanceDueResult, recentTripsResult, advanceCreditSummaryResult, truckAdvanceUsedResult, advanceCreditResult] = await Promise.all([
     query(
       `SELECT COUNT(*) as total FROM trips WHERE created_by = $1 AND trip_date = $2`,
       [userId, today]
@@ -94,7 +94,35 @@ export const getMobileDashboard = asyncHandler(async (req: AuthRequest, res: Res
        ORDER BY t.created_at DESC LIMIT 10`,
       [userId]
     ),
+    // Total owner advance credit received by this manager
+    query(
+      `SELECT COALESCE(SUM(amount), 0) as total_credit,
+              COUNT(*) as total_entries
+       FROM owner_advances
+       WHERE manager_id = $1`,
+      [userId]
+    ),
+    // Total advances finalized/used from developed settlement statements by this manager
+    query(
+      `SELECT COALESCE(SUM(s.advance_paid), 0) as total_used
+       FROM settlements s
+       JOIN trips t ON s.trip_id = t.id
+       WHERE t.created_by = $1`,
+      [userId]
+    ),
+    // Per-owner breakdown of advances received by this manager
+    query(
+      `SELECT oa.id, oa.amount, oa.advance_date, oa.payment_mode, oa.notes,
+              COALESCE(o.name, 'Owner') as owner_name
+       FROM owner_advances oa
+       LEFT JOIN owners o ON oa.owner_id = o.id
+       WHERE oa.manager_id = $1
+       ORDER BY oa.advance_date DESC, oa.created_at DESC`,
+      [userId]
+    ),
   ]);
+
+  const ownerAdvanceBreakdown = advanceCreditResult.rows;
 
   res.json({
     success: true,
@@ -103,6 +131,13 @@ export const getMobileDashboard = asyncHandler(async (req: AuthRequest, res: Res
       trips_today: parseInt(todayTripsResult.rows[0].total),
       balance_due: parseFloat(balanceDueResult.rows[0].balance_due),
       recent_trips: recentTripsResult.rows,
+      owner_advance_credit: parseFloat(advanceCreditSummaryResult.rows[0].total_credit),
+      owner_advance_entries: parseInt(advanceCreditSummaryResult.rows[0].total_entries),
+      truck_advance_used: parseFloat(truckAdvanceUsedResult.rows[0].total_used),
+      manager_available_balance:
+        parseFloat(advanceCreditSummaryResult.rows[0].total_credit) -
+        parseFloat(truckAdvanceUsedResult.rows[0].total_used),
+      owner_advance_breakdown: ownerAdvanceBreakdown,
     },
   });
 });

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Navigation, Plus, Eye, CheckCircle, Search, Filter, Trash2 } from 'lucide-react';
+import { Navigation, Plus, Eye, CheckCircle, Search, Filter, Trash2, AlertTriangle, Calendar } from 'lucide-react';
 import { tripService, vehicleService, driverService, partyService, routeService, unitService, freightRateService } from '../services/adminService';
 import { Trip, Vehicle, Driver, Party, Route, Unit, FreightRate } from '../types';
 import { DataTable, Column } from '../components/Common/DataTable';
@@ -45,6 +45,41 @@ export const TripsPage: React.FC = () => {
 
   const [formError, setFormError] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // Driver License Expiry Alert state for manager selecting driver
+  const [driverAlertInfo, setDriverAlertInfo] = useState<{
+    driver: Driver;
+    days: number;
+    isExpired: boolean;
+  } | null>(null);
+
+  const getDaysDifference = (expiryDateStr: string): number => {
+    try {
+      const expiry = new Date(expiryDateStr);
+      const today = new Date();
+      expiry.setHours(0, 0, 0, 0);
+      today.setHours(0, 0, 0, 0);
+      return Math.ceil((expiry.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+    } catch {
+      return 999;
+    }
+  };
+
+  const handleDriverChange = (driverId: string) => {
+    setFormData((prev) => ({ ...prev, driver_id: driverId }));
+    if (!driverId) return;
+    const selDriver = drivers.find((d) => d.id === Number(driverId));
+    if (selDriver && selDriver.license_expiry_date) {
+      const days = getDaysDifference(selDriver.license_expiry_date);
+      if (days <= 45) {
+        setDriverAlertInfo({
+          driver: selDriver,
+          days,
+          isExpired: days < 0,
+        });
+      }
+    }
+  };
 
   useEffect(() => {
     loadTrips();
@@ -433,15 +468,45 @@ export const TripsPage: React.FC = () => {
                 className="form-control form-select"
                 required
                 value={formData.driver_id}
-                onChange={(e) => setFormData({ ...formData, driver_id: e.target.value })}
+                onChange={(e) => handleDriverChange(e.target.value)}
               >
                 <option value="">Select Driver</option>
-                {drivers.map((d) => (
-                  <option key={d.id} value={d.id}>
-                    {d.name} ({d.mobile_number || 'No Mobile'})
-                  </option>
-                ))}
+                {drivers.map((d) => {
+                  const days = d.license_expiry_date ? getDaysDifference(d.license_expiry_date) : null;
+                  const isExp = days !== null && days < 0;
+                  const isSoon = days !== null && days >= 0 && days <= 45;
+                  const expBadge = isExp ? ' [⚠️ EXPIRED]' : isSoon ? ` [⚠️ Exp in ${days}d]` : '';
+                  const typeBadge = d.license_type === 'REGULAR' ? ' [🚗 Regular]' : ' [🚛 Heavy]';
+                  return (
+                    <option key={d.id} value={d.id}>
+                      {d.name} ({d.mobile_number || 'No Mobile'}){typeBadge}{expBadge}
+                    </option>
+                  );
+                })}
               </select>
+
+              {(() => {
+                const selDriver = drivers.find((d) => d.id === Number(formData.driver_id));
+                if (selDriver && selDriver.license_expiry_date) {
+                  const days = getDaysDifference(selDriver.license_expiry_date);
+                  if (days < 0) {
+                    return (
+                      <div style={{ marginTop: '6px', fontSize: '12px', color: '#b91c1c', background: '#fef2f2', padding: '6px 10px', borderRadius: '6px', border: '1px solid #fecaca', display: 'flex', alignItems: 'center', gap: '6px', fontWeight: 600 }}>
+                        <AlertTriangle size={14} color="#dc2626" />
+                        <span>Driver license EXPIRED ({selDriver.license_expiry_date.split('T')[0]})</span>
+                      </div>
+                    );
+                  } else if (days <= 45) {
+                    return (
+                      <div style={{ marginTop: '6px', fontSize: '12px', color: '#b45309', background: '#fffbeb', padding: '6px 10px', borderRadius: '6px', border: '1px solid #fde047', display: 'flex', alignItems: 'center', gap: '6px', fontWeight: 600 }}>
+                        <AlertTriangle size={14} color="#d97706" />
+                        <span>Driver license expires in ${days} day${days === 1 ? '' : 's'} (${selDriver.license_expiry_date.split('T')[0]})</span>
+                      </div>
+                    );
+                  }
+                }
+                return null;
+              })()}
             </div>
 
             <div className="form-group">
@@ -651,6 +716,163 @@ export const TripsPage: React.FC = () => {
           </div>
         )}
       </Modal>
+
+      {/* Driver License Expiry Alert Popup for Manager */}
+      {driverAlertInfo && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            zIndex: 10005,
+            background: 'rgba(15, 23, 42, 0.7)',
+            backdropFilter: 'blur(5px)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: '16px',
+            animation: 'fadeIn 0.2s ease',
+          }}
+        >
+          <div
+            style={{
+              background: '#ffffff',
+              borderRadius: '16px',
+              width: '100%',
+              maxWidth: '520px',
+              boxShadow: '0 25px 60px rgba(0, 0, 0, 0.35)',
+              border: `1px solid ${driverAlertInfo.isExpired ? '#fca5a5' : '#fde047'}`,
+              overflow: 'hidden',
+              animation: 'slideUp 0.25s ease',
+            }}
+          >
+            <div
+              style={{
+                background: driverAlertInfo.isExpired
+                  ? 'linear-gradient(135deg, #b91c1c, #dc2626)'
+                  : 'linear-gradient(135deg, #d97706, #f59e0b)',
+                padding: '18px 22px',
+                color: '#ffffff',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '12px',
+              }}
+            >
+              <div
+                style={{
+                  width: '40px',
+                  height: '40px',
+                  borderRadius: '10px',
+                  background: 'rgba(255, 255, 255, 0.2)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  flexShrink: 0,
+                }}
+              >
+                <AlertTriangle size={24} color="#ffffff" />
+              </div>
+              <div>
+                <div style={{ fontSize: '11px', textTransform: 'uppercase', letterSpacing: '1px', opacity: 0.9, fontWeight: 700 }}>
+                  Driver License Expiry Alert
+                </div>
+                <h3 style={{ margin: 0, fontSize: '18px', fontWeight: 800, color: '#ffffff' }}>
+                  {driverAlertInfo.isExpired ? 'Driving License Has Expired!' : 'License Expiring Soon (Within 45 Days)'}
+                </h3>
+              </div>
+            </div>
+
+            <div style={{ padding: '20px 22px' }}>
+              <p style={{ margin: '0 0 16px', fontSize: '13.5px', color: '#334155', lineHeight: 1.5 }}>
+                You have selected driver <strong>{driverAlertInfo.driver.name}</strong> for this trip. The system detected an active license expiry warning:
+              </p>
+
+              <div
+                style={{
+                  background: driverAlertInfo.isExpired ? '#fef2f2' : '#fffbeb',
+                  border: `1px solid ${driverAlertInfo.isExpired ? '#fecaca' : '#fef08a'}`,
+                  borderRadius: '10px',
+                  padding: '14px',
+                  marginBottom: '18px',
+                }}
+              >
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', fontSize: '13px' }}>
+                  <div>
+                    <span style={{ color: '#64748b', fontSize: '11px', textTransform: 'uppercase', fontWeight: 700, display: 'block', marginBottom: '2px' }}>
+                      Driver Name
+                    </span>
+                    <strong>{driverAlertInfo.driver.name}</strong>
+                  </div>
+                  <div>
+                    <span style={{ color: '#64748b', fontSize: '11px', textTransform: 'uppercase', fontWeight: 700, display: 'block', marginBottom: '2px' }}>
+                      Phone Number
+                    </span>
+                    <strong>{driverAlertInfo.driver.mobile_number || 'N/A'}</strong>
+                  </div>
+                  <div>
+                    <span style={{ color: '#64748b', fontSize: '11px', textTransform: 'uppercase', fontWeight: 700, display: 'block', marginBottom: '2px' }}>
+                      License Expiry
+                    </span>
+                    <strong style={{ color: driverAlertInfo.isExpired ? '#dc2626' : '#d97706' }}>
+                      {driverAlertInfo.driver.license_expiry_date?.split('T')[0]}
+                    </strong>
+                  </div>
+                  <div>
+                    <span style={{ color: '#64748b', fontSize: '11px', textTransform: 'uppercase', fontWeight: 700, display: 'block', marginBottom: '2px' }}>
+                      Status
+                    </span>
+                    <strong style={{ color: driverAlertInfo.isExpired ? '#dc2626' : '#d97706' }}>
+                      {driverAlertInfo.isExpired
+                        ? `Expired ${Math.abs(driverAlertInfo.days)} days ago`
+                        : driverAlertInfo.days === 0
+                        ? 'Expires today'
+                        : `Expires in ${driverAlertInfo.days} days`}
+                    </strong>
+                  </div>
+                </div>
+              </div>
+
+              <p style={{ margin: 0, fontSize: '12px', color: '#64748b', lineHeight: 1.4 }}>
+                {driverAlertInfo.isExpired
+                  ? 'Dispatching a driver with an expired license poses legal and insurance compliance risks. Please ensure renewal before trip.'
+                  : 'Please notify the driver to start the license renewal process with the RTO before expiry.'}
+              </p>
+            </div>
+
+            <div
+              style={{
+                padding: '14px 22px',
+                background: '#f8fafc',
+                borderTop: '1px solid #e2e8f0',
+                display: 'flex',
+                justifyContent: 'flex-end',
+                gap: '10px',
+              }}
+            >
+              <button
+                type="button"
+                onClick={() => {
+                  setFormData((prev) => ({ ...prev, driver_id: '' }));
+                  setDriverAlertInfo(null);
+                }}
+                className="btn btn-outline"
+              >
+                Choose Another Driver
+              </button>
+              <button
+                type="button"
+                onClick={() => setDriverAlertInfo(null)}
+                className="btn btn-primary"
+                style={{
+                  background: driverAlertInfo.isExpired ? '#dc2626' : '#d97706',
+                  borderColor: driverAlertInfo.isExpired ? '#dc2626' : '#d97706',
+                }}
+              >
+                Acknowledge & Proceed
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

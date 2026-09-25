@@ -46,7 +46,7 @@ export const addExpense = asyncHandler(async (req: AuthRequest, res: Response): 
   }
   if (parseFloat(amount) < 0) throw new AppError('Amount must be >= 0.', 400);
 
-  const validTypes = ['FREIGHT_BASED', 'LOADING', 'UNLOADING', 'TOLL', 'FOOD', 'REPAIR', 'OTHER'];
+  const validTypes = ['FREIGHT_BASED', 'LOADING', 'UNLOADING', 'TOLL', 'FOOD', 'REPAIR', 'CLEANING', 'CLEANING_CHARGE', 'DRIVER_BETA', 'DRIVER_BATA', 'OTHER'];
   if (!validTypes.includes(expense_type)) {
     throw new AppError('Invalid expense type.', 400);
   }
