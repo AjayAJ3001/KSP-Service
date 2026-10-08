@@ -112,8 +112,16 @@ export const generateSettlement = asyncHandler(async (req: AuthRequest, res: Res
       [trip_id, trip.total_freight, total_expenses, advance_paid, balance_to_driver, req.user?.id]
     );
 
-    // Update trip status to SETTLED
-    await client.query(`UPDATE trips SET status = 'SETTLED', updated_at = NOW() WHERE id = $1`, [trip_id]);
+    // Update trip status to SETTLED only if freight payment has also been fully received
+    const pmtSum = await client.query(
+      `SELECT COALESCE(SUM(received_amount), 0) as total_received FROM trip_payments WHERE trip_id = $1`,
+      [trip_id]
+    );
+    const totalRecv = parseFloat(pmtSum.rows[0].total_received);
+    const totalFr = parseFloat(trip.total_freight);
+    if (totalRecv >= totalFr) {
+      await client.query(`UPDATE trips SET status = 'SETTLED', updated_at = NOW() WHERE id = $1`, [trip_id]);
+    }
 
     const expensesResult = await client.query(
       `SELECT expense_type, description, amount FROM driver_expenses WHERE trip_id = $1 ORDER BY id ASC`,

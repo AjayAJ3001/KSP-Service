@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { formatDateDMY } from '../utils/dateUtils';
 import {
   View,
   Text,
@@ -39,6 +40,7 @@ import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { mobileLookupService, mobileTruckAdvanceService } from '../services/mobileService';
 import { Vehicle, RootStackParamList } from '../types';
 import { COLORS, SPACING, RADIUS, SHADOWS } from '../constants/theme';
+import { ComplianceAlertModal, ComplianceDoc } from '../components/ComplianceAlertModal';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'GiveTruckAdvance'>;
 
@@ -54,6 +56,22 @@ export const GiveTruckAdvanceScreen: React.FC<Props> = ({ navigation, route }) =
   const [amount, setAmount] = useState('');
   const [notes, setNotes] = useState('');
   const [error, setError] = useState('');
+
+  // Compliance Alert Modal State
+  const [complianceModal, setComplianceModal] = useState<{
+    visible: boolean;
+    entityName: string;
+    documents: ComplianceDoc[];
+    notice?: string;
+    onProceed: () => void;
+    onCancel: () => void;
+  }>({
+    visible: false,
+    entityName: '',
+    documents: [],
+    onProceed: () => {},
+    onCancel: () => {},
+  });
 
   // Modals state
   const [vehicleModalVisible, setVehicleModalVisible] = useState(false);
@@ -144,10 +162,10 @@ export const GiveTruckAdvanceScreen: React.FC<Props> = ({ navigation, route }) =
         exp.setHours(0, 0, 0, 0);
         td.setHours(0, 0, 0, 0);
         const days = Math.ceil((exp.getTime() - td.getTime()) / (1000 * 60 * 60 * 24));
-        if (days <= 45) {
+        if (days <= 30) {
           alerts.push({
             name,
-            date: dateStr.split('T')[0],
+            date: formatDateDMY(dateStr),
             days,
             isExpired: days < 0,
           });
@@ -159,6 +177,7 @@ export const GiveTruckAdvanceScreen: React.FC<Props> = ({ navigation, route }) =
     checkDoc('Insurance Policy', v.insurance_expiry_date);
     checkDoc('Road Permit', v.permit_expiry_date);
     checkDoc('Yearly Road Tax', v.tax_expiry_date);
+    checkDoc('RC (Registration)', v.rc_expiry_date);
     checkDoc('DTS Certificate', v.dts_expiry_date);
 
     return alerts;
@@ -170,18 +189,19 @@ export const GiveTruckAdvanceScreen: React.FC<Props> = ({ navigation, route }) =
     setError('');
     const alerts = getVehicleComplianceAlerts(item);
     if (alerts.length > 0) {
-      const hasExpired = alerts.some((a) => a.isExpired);
-      const alertMsg = alerts
-        .map((a) => `• ${a.name}: ${a.isExpired ? 'EXPIRED (' + a.date + ')' : 'Expires in ' + a.days + ' days (' + a.date + ')'}`)
-        .join('\n');
-      Alert.alert(
-        hasExpired ? '⚠️ Truck Compliance Expired!' : '⚠️ Compliance Notice (≤ 45 Days)',
-        `Truck ${item.lorry_number} has ${alerts.length} compliance document(s) requiring attention:\n\n${alertMsg}\n\nPlease verify renewals before dispatching or authorizing advance.`,
-        [
-          { text: 'Choose Another', style: 'cancel', onPress: () => setSelectedVehicle(null) },
-          { text: 'Acknowledge & Continue', style: 'default' },
-        ]
-      );
+      setComplianceModal({
+        visible: true,
+        entityName: item.lorry_number,
+        documents: alerts,
+        notice: 'Please verify document renewals before dispatching or authorizing truck advance.',
+        onProceed: () => {
+          setComplianceModal((prev) => ({ ...prev, visible: false }));
+        },
+        onCancel: () => {
+          setSelectedVehicle(null);
+          setComplianceModal((prev) => ({ ...prev, visible: false }));
+        },
+      });
     }
   };
 
@@ -211,7 +231,7 @@ export const GiveTruckAdvanceScreen: React.FC<Props> = ({ navigation, route }) =
 
     const now = new Date();
     const timeStr = now.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-    const dateStr = now.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
+    const dateStr = formatDateDMY(now);
     setConfirmTimestamp(`${dateStr} • ${timeStr}`);
 
     setConfirmModalVisible(true);
@@ -262,7 +282,7 @@ export const GiveTruckAdvanceScreen: React.FC<Props> = ({ navigation, route }) =
         lorry_number: selectedVehicle.lorry_number,
         vehicle_id: selectedVehicle.id,
         remainingBalance: remainingBal,
-        date: new Date().toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }),
+        date: formatDateDMY(new Date()),
       };
 
       setCreatedAdvance(advanceData);
@@ -516,7 +536,7 @@ export const GiveTruckAdvanceScreen: React.FC<Props> = ({ navigation, route }) =
                       color: hasExpired ? '#991b1b' : '#92400e',
                     }}
                   >
-                    {hasExpired ? '⚠️ Compliance Warning — Documents Expired' : '⚠️ Expiry Notice (Within 45 Days)'}
+                    {hasExpired ? '⚠️ Compliance Warning — Documents Expired' : '⚠️ Expiry Notice (Within 30 Days)'}
                   </Text>
                 </View>
                 {alerts.map((a, idx) => (
@@ -916,7 +936,7 @@ export const GiveTruckAdvanceScreen: React.FC<Props> = ({ navigation, route }) =
                               marginTop: 2,
                             }}
                           >
-                            {hasExp ? `⚠️ ${alerts.length} Expired Doc(s)` : `⚠️ ${alerts.length} Expiring Soon (≤45d)`}
+                            {hasExp ? `⚠️ ${alerts.length} Expired Doc(s)` : `⚠️ ${alerts.length} Expiring Soon (≤30d)`}
                           </Text>
                         );
                       })()}
@@ -936,6 +956,19 @@ export const GiveTruckAdvanceScreen: React.FC<Props> = ({ navigation, route }) =
           </View>
         </View>
       </Modal>
+
+      {/* Professional Compliance Alert Modal */}
+      <ComplianceAlertModal
+        visible={complianceModal.visible}
+        type="VEHICLE"
+        entityName={complianceModal.entityName}
+        documents={complianceModal.documents}
+        notice={complianceModal.notice}
+        onProceed={complianceModal.onProceed}
+        onCancel={complianceModal.onCancel}
+        proceedText="Acknowledge & Continue"
+        cancelText="Choose Another Truck"
+      />
     </View>
   );
 };

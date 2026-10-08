@@ -8,10 +8,11 @@ import {
   RefreshControl,
   ActivityIndicator,
 } from 'react-native';
-import { MapPin, Calendar, Truck, ChevronRight } from 'lucide-react-native';
+import { MapPin, Calendar, Truck, ChevronRight, Plus } from 'lucide-react-native';
 import { mobileTripService } from '../services/mobileService';
 import { Trip } from '../types';
 import { COLORS, SPACING, RADIUS, SHADOWS } from '../constants/theme';
+import { formatDateDMY } from '../utils/dateUtils';
 
 export const TripHistoryScreen: React.FC<{ navigation: any }> = ({ navigation }) => {
   const [trips, setTrips] = useState<Trip[]>([]);
@@ -106,10 +107,15 @@ export const TripHistoryScreen: React.FC<{ navigation: any }> = ({ navigation })
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={[COLORS.accent]} />}
         >
           {trips.length === 0 ? (
-            <View style={styles.emptyCard}>
-              <Truck size={36} color={COLORS.textLight} />
+            <TouchableOpacity
+              style={styles.emptyCard}
+              onPress={() => navigation.navigate('NewTrip')}
+              activeOpacity={0.7}
+            >
+              <Truck size={36} color={COLORS.accent} />
               <Text style={styles.emptyText}>No trips found for this filter.</Text>
-            </View>
+              <Text style={styles.emptySubText}>Tap here to dispatch a new trip</Text>
+            </TouchableOpacity>
           ) : (
             trips.map((trip) => {
               const st = getStatusStyle(trip.status);
@@ -139,7 +145,7 @@ export const TripHistoryScreen: React.FC<{ navigation: any }> = ({ navigation })
                       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 2 }}>
                         <Calendar size={13} color={COLORS.textLight} />
                         <Text style={styles.dateText}>
-                          {new Date(trip.trip_date).toLocaleDateString('en-IN')}
+                          {formatDateDMY(trip.trip_date)}
                         </Text>
                       </View>
                     </View>
@@ -163,6 +169,16 @@ export const TripHistoryScreen: React.FC<{ navigation: any }> = ({ navigation })
           )}
         </ScrollView>
       )}
+
+      {/* Floating Action Button for New Trip */}
+      <TouchableOpacity
+        style={styles.fab}
+        onPress={() => navigation.navigate('NewTrip')}
+        activeOpacity={0.85}
+      >
+        <Plus size={20} color={COLORS.white} />
+        <Text style={styles.fabText}>New Trip</Text>
+      </TouchableOpacity>
     </View>
   );
 };
@@ -292,5 +308,30 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '700',
     color: COLORS.accent,
+  },
+  emptySubText: {
+    fontSize: 12,
+    color: COLORS.textMuted,
+    marginTop: 4,
+  },
+  fab: {
+    position: 'absolute',
+    bottom: 24,
+    right: 20,
+    backgroundColor: COLORS.accent,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingVertical: 12,
+    paddingHorizontal: 20,
+    borderRadius: RADIUS.full,
+    ...SHADOWS.lg,
+    elevation: 6,
+  },
+  fabText: {
+    color: COLORS.white,
+    fontSize: 14,
+    fontWeight: '800',
+    letterSpacing: 0.5,
   },
 });

@@ -41,7 +41,7 @@ app.use(cors({
     ? process.env.ALLOWED_ORIGINS?.split(',') 
     : '*',
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'],
-  allowedHeaders: ['Content-Type', 'Authorization'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'x-client-platform', 'X-Client-Platform'],
 }));
 
 // Parsing middleware

@@ -5,6 +5,7 @@ import { Settlement, Trip } from '../types';
 import { DataTable, Column } from '../components/Common/DataTable';
 import { Modal } from '../components/Common/Modal';
 import { StatusBadge } from '../components/Common/StatusBadge';
+import { formatDateDMY } from '../utils/dateUtils';
 
 export const SettlementsPage: React.FC = () => {
   const [settlements, setSettlements] = useState<Settlement[]>([]);
@@ -126,7 +127,7 @@ export const SettlementsPage: React.FC = () => {
     },
     {
       header: 'Trip Date',
-      accessor: (s) => (s.trip_date ? new Date(s.trip_date).toLocaleDateString('en-IN') : '—'),
+      accessor: (s) => (s.trip_date ? formatDateDMY(s.trip_date) : '—'),
     },
     { header: 'Total Freight', render: (s) => formatCurrency(s.total_freight) },
     { header: 'Total Expenses', render: (s) => formatCurrency(s.total_expenses) },
@@ -270,7 +271,7 @@ export const SettlementsPage: React.FC = () => {
               {/* Status Header */}
               <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '16px' }}>
                 <div>
-                  <strong>Trip Date:</strong> {selectedSettlement.trip_date ? new Date(selectedSettlement.trip_date).toLocaleDateString('en-IN') : '—'}
+                  <strong>Trip Date:</strong> {selectedSettlement.trip_date ? formatDateDMY(selectedSettlement.trip_date) : '—'}
                 </div>
                 <div>
                   <strong>Settlement Status: </strong>

@@ -1,4 +1,5 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
+import { formatDateDMY } from '../utils/dateUtils';
 import {
   View,
   Text,
@@ -7,6 +8,7 @@ import {
   TouchableOpacity,
   RefreshControl,
   ActivityIndicator,
+  Alert,
 } from 'react-native';
 import {
   Truck,
@@ -17,17 +19,50 @@ import {
   ChevronRight,
   User,
   HandCoins,
+  ShieldAlert,
+  PlusCircle,
 } from 'lucide-react-native';
 import { useAuth } from '../context/AuthContext';
-import { mobileDashboardService } from '../services/mobileService';
-import { MobileDashboardData, Trip } from '../types';
+import { mobileDashboardService, mobileLookupService } from '../services/mobileService';
+import { MobileDashboardData, Trip, Vehicle } from '../types';
 import { COLORS, SPACING, RADIUS, SHADOWS } from '../constants/theme';
+
+const getDaysDifference = (expiryDateStr?: string) => {
+  if (!expiryDateStr) return null;
+  try {
+    const expiry = new Date(expiryDateStr);
+    const today = new Date();
+    expiry.setHours(0, 0, 0, 0);
+    today.setHours(0, 0, 0, 0);
+    return Math.ceil((expiry.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+  } catch {
+    return null;
+  }
+};
+
+const getVehicleDocAlerts = (v: Vehicle) => {
+  const docs: { name: string; date?: string }[] = [
+    { name: 'Insurance', date: v.insurance_expiry_date },
+    { name: 'Permit', date: v.permit_expiry_date },
+    { name: 'Yearly Tax', date: v.tax_expiry_date },
+    { name: 'RC', date: v.rc_expiry_date },
+  ];
+  return docs
+    .map((d) => {
+      const days = getDaysDifference(d.date);
+      if (days === null || days > 30 || !d.date) return null;
+      return { name: d.name, date: formatDateDMY(d.date), days, isExpired: days < 0 };
+    })
+    .filter((x): x is { name: string; date: string; days: number; isExpired: boolean } => x !== null);
+};
 
 export const HomeScreen: React.FC<{ navigation: any }> = ({ navigation }) => {
   const { user } = useAuth();
   const [data, setData] = useState<MobileDashboardData | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [expiringVehicles, setExpiringVehicles] = useState<Vehicle[]>([]);
+  const expiryAlertShown = useRef(false);
 
   useEffect(() => {
     loadDashboard();
@@ -42,6 +77,32 @@ export const HomeScreen: React.FC<{ navigation: any }> = ({ navigation }) => {
     } finally {
       setIsLoading(false);
       setRefreshing(false);
+    }
+
+    try {
+      const expRes = await mobileLookupService.getExpiringVehicles(30);
+      const items = (expRes.data || []).filter((v) => getVehicleDocAlerts(v).length > 0);
+      setExpiringVehicles(items);
+      if (items.length > 0 && !expiryAlertShown.current) {
+        expiryAlertShown.current = true;
+        const summary = items
+          .slice(0, 5)
+          .map((v) => {
+            const alerts = getVehicleDocAlerts(v);
+            const names = alerts.map((a) => a.name).join(', ');
+            return `• ${v.lorry_number}: ${names}`;
+          })
+          .join('\n');
+        Alert.alert(
+          '⚠️ Truck Documents — Within 30 Days',
+          `${items.length} truck(s) have insurance, permit, yearly tax or RC expiring soon or already expired.\n\n${summary}${
+            items.length > 5 ? '\n• …' : ''
+          }\n\nPlease inform admin and renew before dispatch.`,
+          [{ text: 'OK' }]
+        );
+      }
+    } catch (error) {
+      console.error('Failed to load expiring vehicles', error);
     }
   };
 
@@ -63,14 +124,7 @@ export const HomeScreen: React.FC<{ navigation: any }> = ({ navigation }) => {
   };
 
   const formatDate = (dateStr?: string) => {
-    if (!dateStr) return '';
-    try {
-      const d = new Date(dateStr);
-      if (isNaN(d.getTime())) return String(dateStr);
-      return d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
-    } catch {
-      return String(dateStr);
-    }
+    return formatDateDMY(dateStr);
   };
 
   const getStatusStyle = (status: string) => {
@@ -135,6 +189,39 @@ export const HomeScreen: React.FC<{ navigation: any }> = ({ navigation }) => {
           </View>
         </View>
       </View>
+
+      {expiringVehicles.length > 0 && (
+        <View style={styles.expiryBanner}>
+          <View style={styles.expiryBannerTop}>
+            <View style={styles.expiryIconCircle}>
+              <ShieldAlert size={20} color="#b45309" />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.expiryBannerTitle}>Fleet document alerts (≤ 30 days)</Text>
+              <Text style={styles.expiryBannerSub}>
+                {expiringVehicles.length} truck{expiringVehicles.length === 1 ? '' : 's'} — insurance, permit, yearly tax or RC
+              </Text>
+            </View>
+          </View>
+          {expiringVehicles.slice(0, 4).map((v) => {
+            const alerts = getVehicleDocAlerts(v);
+            const urgent = alerts[0];
+            if (!urgent) return null;
+            return (
+              <View key={v.id} style={styles.expiryRow}>
+                <Truck size={14} color="#92400e" />
+                <Text style={styles.expiryLorry}>{v.lorry_number}</Text>
+                <Text style={styles.expiryDoc}>
+                  {urgent.isExpired
+                    ? `${urgent.name} expired`
+                    : `${urgent.name} in ${urgent.days}d`}
+                  {alerts.length > 1 ? ` +${alerts.length - 1}` : ''}
+                </Text>
+              </View>
+            );
+          })}
+        </View>
+      )}
 
       {/* Owner Advance Credit — per-owner breakdown */}
       {(data?.owner_advance_credit ?? 0) > 0 && (
@@ -203,6 +290,16 @@ export const HomeScreen: React.FC<{ navigation: any }> = ({ navigation }) => {
       )}
 
 
+      {/* Action Button: + Start New Trip */}
+      <TouchableOpacity
+        style={styles.newTripBtn}
+        onPress={() => navigation.navigate('NewTrip')}
+        activeOpacity={0.85}
+      >
+        <PlusCircle size={22} color={COLORS.white} />
+        <Text style={styles.newTripBtnText}>+ START NEW TRIP</Text>
+      </TouchableOpacity>
+
       {/* Recent Trips Header */}
       <View style={styles.sectionHeader}>
         <Text style={styles.sectionTitle}>Recent Trips</Text>
@@ -213,11 +310,19 @@ export const HomeScreen: React.FC<{ navigation: any }> = ({ navigation }) => {
 
       {/* Recent Trips List */}
       {(!data?.recent_trips || data.recent_trips.length === 0) ? (
-        <View style={styles.emptyCard}>
-          <Truck size={36} color={COLORS.textLight} />
+        <TouchableOpacity
+          style={styles.emptyCard}
+          onPress={() => navigation.navigate('NewTrip')}
+          activeOpacity={0.7}
+        >
+          <Truck size={38} color={COLORS.accent} />
           <Text style={styles.emptyText}>No recent trips found.</Text>
-          <Text style={styles.emptySubText}>Tap "+ New Trip Entry" to start dispatching</Text>
-        </View>
+          <Text style={styles.emptySubText}>Tap here to dispatch a new trip</Text>
+          <View style={styles.emptyActionBadge}>
+            <PlusCircle size={15} color={COLORS.white} />
+            <Text style={styles.emptyActionText}>Start Trip</Text>
+          </View>
+        </TouchableOpacity>
       ) : (
         data.recent_trips.map((trip: Trip) => {
           const st = getStatusStyle(trip.status);
@@ -245,7 +350,7 @@ export const HomeScreen: React.FC<{ navigation: any }> = ({ navigation }) => {
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 2 }}>
                     <Calendar size={13} color={COLORS.textLight} />
                     <Text style={styles.dateText}>
-                      {new Date(trip.trip_date).toLocaleDateString('en-IN')}
+                      {formatDateDMY(trip.trip_date)}
                     </Text>
                   </View>
                 </View>
@@ -401,6 +506,22 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: COLORS.textMuted,
     marginTop: 2,
+    marginBottom: SPACING.md,
+  },
+  emptyActionBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: COLORS.accent,
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    borderRadius: RADIUS.full,
+    ...SHADOWS.sm,
+  },
+  emptyActionText: {
+    color: COLORS.white,
+    fontSize: 13,
+    fontWeight: '800',
   },
   tripCard: {
     backgroundColor: COLORS.card,
@@ -612,5 +733,56 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: '800',
     letterSpacing: 0.4,
+  },
+  expiryBanner: {
+    backgroundColor: '#fffbeb',
+    borderWidth: 1,
+    borderColor: '#fde68a',
+    borderRadius: RADIUS.lg,
+    padding: SPACING.md,
+    marginBottom: SPACING.md,
+  },
+  expiryBannerTop: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    marginBottom: 10,
+  },
+  expiryIconCircle: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: '#fef3c7',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  expiryBannerTitle: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: '#92400e',
+  },
+  expiryBannerSub: {
+    fontSize: 12,
+    color: '#b45309',
+    marginTop: 2,
+  },
+  expiryRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingVertical: 6,
+    borderTopWidth: 1,
+    borderTopColor: '#fde68a',
+  },
+  expiryLorry: {
+    fontWeight: '800',
+    fontSize: 13,
+    color: '#0f172a',
+    flex: 1,
+  },
+  expiryDoc: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#b45309',
   },
 });

@@ -17,6 +17,8 @@ import { ownerAdvanceService, ownerService, userService } from '../services/admi
 import { OwnerAdvance, Owner, User } from '../types';
 import { DataTable, Column } from '../components/Common/DataTable';
 import { Modal } from '../components/Common/Modal';
+import { formatIST } from '../utils/dateUtils';
+import { DateField } from '../components/Common/DateField';
 
 export const OwnerAdvancesPage: React.FC = () => {
   const [advances, setAdvances] = useState<OwnerAdvance[]>([]);
@@ -208,19 +210,8 @@ export const OwnerAdvancesPage: React.FC = () => {
     return `₹${num.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
   };
 
-  const formatDateTime = (dateStr?: string) => {
-    if (!dateStr) return '—';
-    const d = new Date(dateStr);
-    return d.toLocaleString('en-IN', {
-      day: '2-digit',
-      month: '2-digit',
-      year: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit',
-      hour12: true,
-      timeZone: 'Asia/Kolkata',
-    });
-  };
+  const formatDateTime = (dateStr?: string) => formatIST(dateStr);
+
 
   const columns: Column<OwnerAdvance>[] = [
     {
@@ -448,10 +439,8 @@ export const OwnerAdvancesPage: React.FC = () => {
 
           <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
             <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>From:</span>
-            <input
-              type="date"
-              className="form-control"
-              style={{ width: '140px' }}
+            <DateField
+              style={{ width: '155px' }}
               value={fromDate}
               onChange={(e) => {
                 setFromDate(e.target.value);
@@ -462,10 +451,8 @@ export const OwnerAdvancesPage: React.FC = () => {
 
           <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
             <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>To:</span>
-            <input
-              type="date"
-              className="form-control"
-              style={{ width: '140px' }}
+            <DateField
+              style={{ width: '155px' }}
               value={toDate}
               onChange={(e) => {
                 setToDate(e.target.value);
@@ -619,8 +606,6 @@ export const OwnerAdvancesPage: React.FC = () => {
                 <option value="CASH">CASH</option>
                 <option value="UPI / GPAY / PHONEPE">UPI / GPAY / PHONEPE</option>
                 <option value="BANK TRANSFER (NEFT/RTGS)">BANK TRANSFER (NEFT/RTGS)</option>
-                <option value="CHEQUE">CHEQUE</option>
-                <option value="OTHER">OTHER</option>
               </select>
             </div>
           </div>

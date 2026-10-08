@@ -5,6 +5,7 @@ import { User, Driver } from '../types';
 import { DataTable, Column } from '../components/Common/DataTable';
 import { Modal } from '../components/Common/Modal';
 import { StatusBadge } from '../components/Common/StatusBadge';
+import { formatIST } from '../utils/dateUtils';
 
 export const UsersPage: React.FC = () => {
   const [users, setUsers] = useState<User[]>([]);
@@ -255,7 +256,7 @@ export const UsersPage: React.FC = () => {
     },
     {
       header: 'Last Login',
-      accessor: (u) => (u.last_login ? new Date(u.last_login).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' }) : 'Never'),
+      accessor: (u) => (u.last_login ? formatIST(u.last_login) : 'Never'),
     },
     {
       header: 'Actions',

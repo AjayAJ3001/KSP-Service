@@ -14,17 +14,10 @@ const getDaysDifference = (expiryDateStr: string) => {
   return Math.ceil(diffTime / (1000 * 60 * 60 * 24));
 };
 
+import { formatDateDMY } from '../../utils/dateUtils';
+
 const formatDate = (dateStr: string) => {
-  try {
-    return new Date(dateStr).toLocaleDateString('en-IN', {
-      day: '2-digit',
-      month: 'short',
-      year: 'numeric',
-      timeZone: 'Asia/Kolkata',
-    });
-  } catch {
-    return dateStr;
-  }
+  return formatDateDMY(dateStr);
 };
 
 interface Props {
@@ -51,7 +44,7 @@ export const LicenseExpiryAlertModal: React.FC<Props> = ({ isOpenManually, onClo
   const checkExpiringLicenses = async () => {
     try {
       setIsLoading(true);
-      const res = await driverService.getExpiringDrivers(45);
+      const res = await driverService.getExpiringDrivers(30);
       if (res.data && res.data.length > 0) {
         setExpiringDrivers(res.data);
 
@@ -174,7 +167,7 @@ export const LicenseExpiryAlertModal: React.FC<Props> = ({ isOpenManually, onClo
                 Immediate Attention Required
               </div>
               <h3 style={{ margin: 0, fontSize: '20px', fontWeight: 800, color: '#ffffff' }}>
-                Driver License Expiry Alert (Within 45 Days)
+                Driver License Expiry Alert (Within 30 Days)
               </h3>
             </div>
           </div>
@@ -183,7 +176,7 @@ export const LicenseExpiryAlertModal: React.FC<Props> = ({ isOpenManually, onClo
         {/* Modal Body */}
         <div style={{ padding: '20px 24px', flex: 1, overflowY: 'auto' }}>
           <p style={{ margin: '0 0 16px', fontSize: '13.5px', color: '#475569', lineHeight: 1.5 }}>
-            The following <strong>{expiringDrivers.length} active driver(s)</strong> have driving licenses that are already expired or will expire within the next 45 days. Please contact them for timely license renewal.
+            The following <strong>{expiringDrivers.length} active driver(s)</strong> have driving licenses that are already expired or will expire within the next 30 days. Please contact them for timely license renewal.
           </p>
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginBottom: '20px' }}>

@@ -1,10 +1,12 @@
 import React, { useState, useEffect } from 'react';
-import { Navigation, Plus, Eye, CheckCircle, Search, Filter, Trash2, AlertTriangle, Calendar } from 'lucide-react';
+import { Navigation, Plus, Eye, CheckCircle, Search, Filter, Trash2, AlertTriangle, Calendar, Truck } from 'lucide-react';
 import { tripService, vehicleService, driverService, partyService, routeService, unitService, freightRateService } from '../services/adminService';
 import { Trip, Vehicle, Driver, Party, Route, Unit, FreightRate } from '../types';
 import { DataTable, Column } from '../components/Common/DataTable';
 import { Modal } from '../components/Common/Modal';
 import { StatusBadge } from '../components/Common/StatusBadge';
+import { formatDateDMY } from '../utils/dateUtils';
+import { DateField } from '../components/Common/DateField';
 
 export const TripsPage: React.FC = () => {
   const [trips, setTrips] = useState<Trip[]>([]);
@@ -53,6 +55,11 @@ export const TripsPage: React.FC = () => {
     isExpired: boolean;
   } | null>(null);
 
+  const [vehicleAlertInfo, setVehicleAlertInfo] = useState<{
+    vehicle: Vehicle;
+    alerts: { name: string; date: string; days: number; isExpired: boolean }[];
+  } | null>(null);
+
   const getDaysDifference = (expiryDateStr: string): number => {
     try {
       const expiry = new Date(expiryDateStr);
@@ -65,13 +72,52 @@ export const TripsPage: React.FC = () => {
     }
   };
 
+  const getVehicleDocAlerts = (v: Vehicle) => {
+    const docs: { name: string; date?: string }[] = [
+      { name: 'Insurance Policy', date: v.insurance_expiry_date },
+      { name: 'Road Permit', date: v.permit_expiry_date },
+      { name: 'Yearly Road Tax', date: v.tax_expiry_date },
+      { name: 'RC (Registration)', date: v.rc_expiry_date },
+    ];
+    const alerts: { name: string; date: string; days: number; isExpired: boolean }[] = [];
+    for (const doc of docs) {
+      if (!doc.date) continue;
+      const days = getDaysDifference(doc.date);
+      if (days <= 30) {
+        alerts.push({
+          name: doc.name,
+          date: formatDateDMY(doc.date),
+          days,
+          isExpired: days < 0,
+        });
+      }
+    }
+    return alerts.sort((a, b) => a.days - b.days);
+  };
+
+  const handleVehicleChange = (vehicleId: string) => {
+    setFormData((prev) => ({ ...prev, vehicle_id: vehicleId }));
+    if (!vehicleId) {
+      setVehicleAlertInfo(null);
+      return;
+    }
+    const selVehicle = vehicles.find((v) => v.id === Number(vehicleId));
+    if (!selVehicle) return;
+    const alerts = getVehicleDocAlerts(selVehicle);
+    if (alerts.length > 0) {
+      setVehicleAlertInfo({ vehicle: selVehicle, alerts });
+    } else {
+      setVehicleAlertInfo(null);
+    }
+  };
+
   const handleDriverChange = (driverId: string) => {
     setFormData((prev) => ({ ...prev, driver_id: driverId }));
     if (!driverId) return;
     const selDriver = drivers.find((d) => d.id === Number(driverId));
     if (selDriver && selDriver.license_expiry_date) {
       const days = getDaysDifference(selDriver.license_expiry_date);
-      if (days <= 45) {
+      if (days <= 30) {
         setDriverAlertInfo({
           driver: selDriver,
           days,
@@ -153,15 +199,15 @@ export const TripsPage: React.FC = () => {
   };
 
   const findAndApplyRate = (routeId: string, unitId: string, partyId: string) => {
-    if (!routeId || !unitId) return;
+    if (!routeId) return;
     const rId = Number(routeId);
-    const uId = Number(unitId);
+    const uId = unitId ? Number(unitId) : null;
     const pId = partyId ? Number(partyId) : null;
 
     // Find party-specific rate first, then generic rate
-    let match = freightRates.find((r) => r.route_id === rId && r.unit_id === uId && r.party_id === pId);
+    let match = freightRates.find((r) => r.route_id === rId && (!uId || r.unit_id === uId) && r.party_id === pId);
     if (!match && pId) {
-      match = freightRates.find((r) => r.route_id === rId && r.unit_id === uId && !r.party_id);
+      match = freightRates.find((r) => r.route_id === rId && (!uId || r.unit_id === uId) && !r.party_id);
     }
 
     if (match) {
@@ -170,6 +216,15 @@ export const TripsPage: React.FC = () => {
         freight_rate_id: String(match.id),
         freight_rate: String(match.rate_per_unit),
       }));
+    } else {
+      // Fallback directly to the unit/destination configured under Parties and Units
+      const selRoute = routes.find((r) => r.id === rId);
+      if (selRoute && selRoute.rate_per_unit) {
+        setFormData((prev) => ({
+          ...prev,
+          freight_rate: String(selRoute.rate_per_unit),
+        }));
+      }
     }
   };
 
@@ -258,7 +313,7 @@ export const TripsPage: React.FC = () => {
   const columns: Column<Trip>[] = [
     {
       header: 'Trip Date',
-      accessor: (t) => new Date(t.trip_date).toLocaleDateString('en-IN'),
+      accessor: (t) => formatDateDMY(t.trip_date),
     },
     {
       header: 'Lorry Number',
@@ -379,10 +434,8 @@ export const TripsPage: React.FC = () => {
 
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
               <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>From:</span>
-              <input
-                type="date"
-                className="form-control"
-                style={{ width: '150px' }}
+              <DateField
+                style={{ width: '155px' }}
                 value={fromDate}
                 onChange={(e) => {
                   setFromDate(e.target.value);
@@ -393,10 +446,8 @@ export const TripsPage: React.FC = () => {
 
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
               <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>To:</span>
-              <input
-                type="date"
-                className="form-control"
-                style={{ width: '150px' }}
+              <DateField
+                style={{ width: '155px' }}
                 value={toDate}
                 onChange={(e) => {
                   setToDate(e.target.value);
@@ -434,9 +485,7 @@ export const TripsPage: React.FC = () => {
           <div className="grid-cols-2">
             <div className="form-group">
               <label className="form-label">Trip Date *</label>
-              <input
-                type="date"
-                className="form-control"
+              <DateField
                 required
                 value={formData.trip_date}
                 onChange={(e) => setFormData({ ...formData, trip_date: e.target.value })}
@@ -449,15 +498,59 @@ export const TripsPage: React.FC = () => {
                 className="form-control form-select"
                 required
                 value={formData.vehicle_id}
-                onChange={(e) => setFormData({ ...formData, vehicle_id: e.target.value })}
+                onChange={(e) => handleVehicleChange(e.target.value)}
               >
                 <option value="">Select Vehicle / Lorry</option>
-                {vehicles.map((v) => (
-                  <option key={v.id} value={v.id}>
-                    {v.lorry_number} ({v.capacity_tons || 0} Tons)
-                  </option>
-                ))}
+                {vehicles.map((v) => {
+                  const alerts = getVehicleDocAlerts(v);
+                  const hasExpired = alerts.some((a) => a.isExpired);
+                  const expBadge = hasExpired
+                    ? ' [⚠️ DOC EXPIRED]'
+                    : alerts.length > 0
+                    ? ` [⚠️ ${alerts.length} doc${alerts.length === 1 ? '' : 's'} ≤30d]`
+                    : '';
+                  return (
+                    <option key={v.id} value={v.id}>
+                      {v.lorry_number} ({v.capacity_tons || 0} Tons){expBadge}
+                    </option>
+                  );
+                })}
               </select>
+              {(() => {
+                const selVehicle = vehicles.find((v) => v.id === Number(formData.vehicle_id));
+                if (!selVehicle) return null;
+                const alerts = getVehicleDocAlerts(selVehicle);
+                if (alerts.length === 0) return null;
+                const hasExpired = alerts.some((a) => a.isExpired);
+                return (
+                  <div
+                    style={{
+                      marginTop: '6px',
+                      fontSize: '12px',
+                      color: hasExpired ? '#b91c1c' : '#b45309',
+                      background: hasExpired ? '#fef2f2' : '#fffbeb',
+                      padding: '6px 10px',
+                      borderRadius: '6px',
+                      border: `1px solid ${hasExpired ? '#fecaca' : '#fde047'}`,
+                      fontWeight: 600,
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '4px' }}>
+                      <AlertTriangle size={14} color={hasExpired ? '#dc2626' : '#d97706'} />
+                      <span>
+                        {hasExpired
+                          ? 'Truck documents EXPIRED or expiring within 30 days'
+                          : 'Truck documents expiring within 30 days'}
+                      </span>
+                    </div>
+                    {alerts.map((a) => (
+                      <div key={a.name} style={{ fontWeight: 500, marginLeft: '20px' }}>
+                        • {a.name}: {a.isExpired ? `EXPIRED (${a.date})` : a.days === 0 ? `Today (${a.date})` : `${a.days}d left (${a.date})`}
+                      </div>
+                    ))}
+                  </div>
+                );
+              })()}
             </div>
           </div>
 
@@ -474,7 +567,7 @@ export const TripsPage: React.FC = () => {
                 {drivers.map((d) => {
                   const days = d.license_expiry_date ? getDaysDifference(d.license_expiry_date) : null;
                   const isExp = days !== null && days < 0;
-                  const isSoon = days !== null && days >= 0 && days <= 45;
+                  const isSoon = days !== null && days >= 0 && days <= 30;
                   const expBadge = isExp ? ' [⚠️ EXPIRED]' : isSoon ? ` [⚠️ Exp in ${days}d]` : '';
                   const typeBadge = d.license_type === 'REGULAR' ? ' [🚗 Regular]' : ' [🚛 Heavy]';
                   return (
@@ -493,14 +586,14 @@ export const TripsPage: React.FC = () => {
                     return (
                       <div style={{ marginTop: '6px', fontSize: '12px', color: '#b91c1c', background: '#fef2f2', padding: '6px 10px', borderRadius: '6px', border: '1px solid #fecaca', display: 'flex', alignItems: 'center', gap: '6px', fontWeight: 600 }}>
                         <AlertTriangle size={14} color="#dc2626" />
-                        <span>Driver license EXPIRED ({selDriver.license_expiry_date.split('T')[0]})</span>
+                        <span>Driver license EXPIRED ({formatDateDMY(selDriver.license_expiry_date)})</span>
                       </div>
                     );
-                  } else if (days <= 45) {
+                  } else if (days <= 30) {
                     return (
                       <div style={{ marginTop: '6px', fontSize: '12px', color: '#b45309', background: '#fffbeb', padding: '6px 10px', borderRadius: '6px', border: '1px solid #fde047', display: 'flex', alignItems: 'center', gap: '6px', fontWeight: 600 }}>
                         <AlertTriangle size={14} color="#d97706" />
-                        <span>Driver license expires in ${days} day${days === 1 ? '' : 's'} (${selDriver.license_expiry_date.split('T')[0]})</span>
+                        <span>Driver license expires in ${days} day${days === 1 ? '' : 's'} (${formatDateDMY(selDriver.license_expiry_date)})</span>
                       </div>
                     );
                   }
@@ -658,7 +751,7 @@ export const TripsPage: React.FC = () => {
                 <StatusBadge status={selectedTrip.status} />
               </div>
               <div style={{ fontSize: '13px', color: 'var(--text-muted)' }}>
-                Date: <strong>{new Date(selectedTrip.trip_date).toLocaleDateString('en-IN')}</strong>
+                Date: <strong>{formatDateDMY(selectedTrip.trip_date)}</strong>
               </div>
             </div>
 
@@ -776,7 +869,7 @@ export const TripsPage: React.FC = () => {
                   Driver License Expiry Alert
                 </div>
                 <h3 style={{ margin: 0, fontSize: '18px', fontWeight: 800, color: '#ffffff' }}>
-                  {driverAlertInfo.isExpired ? 'Driving License Has Expired!' : 'License Expiring Soon (Within 45 Days)'}
+                  {driverAlertInfo.isExpired ? 'Driving License Has Expired!' : 'License Expiring Soon (Within 30 Days)'}
                 </h3>
               </div>
             </div>
@@ -813,7 +906,7 @@ export const TripsPage: React.FC = () => {
                       License Expiry
                     </span>
                     <strong style={{ color: driverAlertInfo.isExpired ? '#dc2626' : '#d97706' }}>
-                      {driverAlertInfo.driver.license_expiry_date?.split('T')[0]}
+                      {formatDateDMY(driverAlertInfo.driver.license_expiry_date)}
                     </strong>
                   </div>
                   <div>
@@ -865,6 +958,138 @@ export const TripsPage: React.FC = () => {
                 style={{
                   background: driverAlertInfo.isExpired ? '#dc2626' : '#d97706',
                   borderColor: driverAlertInfo.isExpired ? '#dc2626' : '#d97706',
+                }}
+              >
+                Acknowledge & Proceed
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {vehicleAlertInfo && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            zIndex: 11000,
+            background: 'rgba(15, 23, 42, 0.72)',
+            backdropFilter: 'blur(5px)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: '16px',
+          }}
+        >
+          <div
+            style={{
+              background: '#ffffff',
+              borderRadius: '16px',
+              width: '100%',
+              maxWidth: '560px',
+              overflow: 'hidden',
+              boxShadow: '0 24px 60px rgba(0,0,0,0.3)',
+            }}
+          >
+            <div
+              style={{
+                background: vehicleAlertInfo.alerts.some((a) => a.isExpired)
+                  ? 'linear-gradient(135deg, #b91c1c, #dc2626)'
+                  : 'linear-gradient(135deg, #d97706, #f59e0b)',
+                padding: '18px 22px',
+                color: '#ffffff',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '12px',
+              }}
+            >
+              <div
+                style={{
+                  width: '40px',
+                  height: '40px',
+                  borderRadius: '10px',
+                  background: 'rgba(255, 255, 255, 0.2)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  flexShrink: 0,
+                }}
+              >
+                <Truck size={22} color="#ffffff" />
+              </div>
+              <div>
+                <div style={{ fontSize: '11px', textTransform: 'uppercase', letterSpacing: '1px', opacity: 0.9, fontWeight: 700 }}>
+                  Truck / Lorry Compliance Alert
+                </div>
+                <h3 style={{ margin: 0, fontSize: '18px', fontWeight: 800, color: '#ffffff' }}>
+                  {vehicleAlertInfo.alerts.some((a) => a.isExpired)
+                    ? 'Documents Expired or Due Within 30 Days'
+                    : 'Insurance / Permit / Tax / RC — Within 30 Days'}
+                </h3>
+              </div>
+            </div>
+
+            <div style={{ padding: '20px 22px' }}>
+              <p style={{ margin: '0 0 16px', fontSize: '13.5px', color: '#334155', lineHeight: 1.5 }}>
+                You selected lorry <strong>{vehicleAlertInfo.vehicle.lorry_number}</strong>. Please review these documents before dispatch:
+              </p>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '16px' }}>
+                {vehicleAlertInfo.alerts.map((a) => (
+                  <div
+                    key={a.name}
+                    style={{
+                      background: a.isExpired ? '#fef2f2' : '#fffbeb',
+                      border: `1px solid ${a.isExpired ? '#fecaca' : '#fef08a'}`,
+                      borderRadius: '10px',
+                      padding: '12px 14px',
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                      gap: '10px',
+                    }}
+                  >
+                    <strong style={{ fontSize: '13px', color: '#1e293b' }}>{a.name}</strong>
+                    <span style={{ fontSize: '12px', fontWeight: 700, color: a.isExpired ? '#dc2626' : '#d97706' }}>
+                      {a.isExpired
+                        ? `Expired ${Math.abs(a.days)} days ago (${a.date})`
+                        : a.days === 0
+                        ? `Expires today (${a.date})`
+                        : `Expires in ${a.days} days (${a.date})`}
+                    </span>
+                  </div>
+                ))}
+              </div>
+              <p style={{ margin: 0, fontSize: '12px', color: '#64748b', lineHeight: 1.4 }}>
+                Renew insurance, permit, yearly tax, and RC before expiry to avoid legal and dispatch issues.
+              </p>
+            </div>
+
+            <div
+              style={{
+                padding: '14px 22px',
+                background: '#f8fafc',
+                borderTop: '1px solid #e2e8f0',
+                display: 'flex',
+                justifyContent: 'flex-end',
+                gap: '10px',
+              }}
+            >
+              <button
+                type="button"
+                onClick={() => {
+                  setFormData((prev) => ({ ...prev, vehicle_id: '' }));
+                  setVehicleAlertInfo(null);
+                }}
+                className="btn btn-outline"
+              >
+                Choose Another Truck
+              </button>
+              <button
+                type="button"
+                onClick={() => setVehicleAlertInfo(null)}
+                className="btn btn-primary"
+                style={{
+                  background: vehicleAlertInfo.alerts.some((a) => a.isExpired) ? '#dc2626' : '#d97706',
+                  borderColor: vehicleAlertInfo.alerts.some((a) => a.isExpired) ? '#dc2626' : '#d97706',
                 }}
               >
                 Acknowledge & Proceed

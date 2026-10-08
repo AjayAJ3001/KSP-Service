@@ -23,7 +23,7 @@
       }
     },
     "extra": {
-      "apiBaseUrl": "http://localhost:5000/api"
+      "apiBaseUrl": "http://10.180.228.146:5000/api"
     },
     "plugins": [
       "expo-asset",

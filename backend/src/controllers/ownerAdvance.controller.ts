@@ -166,7 +166,7 @@ export const createOwnerAdvance = asyncHandler(async (req: AuthRequest, res: Res
 
   const result = await query(
     `INSERT INTO owner_advances (owner_id, manager_id, amount, advance_date, payment_mode, notes, screenshot_url, created_by)
-     VALUES ($1, $2, $3, COALESCE($4::timestamp, NOW()), $5, $6, $7, $8)
+     VALUES ($1, $2, $3, COALESCE($4::timestamptz, NOW()), $5, $6, $7, $8)
      RETURNING *`,
     [
       owner_id,
@@ -205,7 +205,7 @@ export const updateOwnerAdvance = asyncHandler(async (req: AuthRequest, res: Res
      SET owner_id = COALESCE($1, owner_id),
          manager_id = COALESCE($2, manager_id),
          amount = COALESCE($3, amount),
-         advance_date = COALESCE($4::timestamp, advance_date),
+         advance_date = COALESCE($4::timestamptz, advance_date),
          payment_mode = COALESCE($5, payment_mode),
          notes = COALESCE($6, notes),
          screenshot_url = COALESCE($7, screenshot_url),

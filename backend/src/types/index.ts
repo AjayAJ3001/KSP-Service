@@ -25,11 +25,13 @@ export interface Driver {
 export interface Vehicle {
   id: number;
   lorry_number: string;
+  truck_image_url?: string;
   vehicle_type?: string;
   capacity_tons?: number;
   goodshed_loading_expense?: number;
   rc_number?: string;
   rc_photo_url?: string;
+  rc_expiry_date?: string;
   account_number?: string;
   bank_name?: string;
   ifsc_code?: string;

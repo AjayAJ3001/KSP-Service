@@ -1,19 +1,58 @@
-import React, { useState, useEffect } from 'react';
-import { CreditCard, Plus, Eye, CheckCircle2, History, Search, Trash2 } from 'lucide-react';
-import { tripService, paymentService, partyService } from '../services/adminService';
-import { Trip, TripPayment, Party } from '../types';
+﻿import React, { useState, useEffect, useCallback } from 'react';
+import { CreditCard, History, Trash2, Download, Printer, Calendar, RefreshCw } from 'lucide-react';
+import { tripService, paymentService, partyService, vehicleService, unitService } from '../services/adminService';
+import { Trip, TripPayment, Party, Vehicle, Unit } from '../types';
 import { DataTable, Column } from '../components/Common/DataTable';
 import { Modal } from '../components/Common/Modal';
 import { StatusBadge } from '../components/Common/StatusBadge';
+import { formatDateDMY } from '../utils/dateUtils';
+import { DateField } from '../components/Common/DateField';
+
+function downloadCSV(filename: string, headers: string[], rows: (string | number)[][]) {
+  const escape = (v: any) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+  const lines = [headers.map(escape).join(','), ...rows.map(r => r.map(escape).join(','))];
+  const blob = new Blob(['\uFEFF' + lines.join('\r\n')], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+function getThisWeekRange() {
+  const today = new Date();
+  const day = today.getDay(); // 0 is Sun, 1 is Mon...
+  const diffToMonday = (day === 0 ? -6 : 1) - day;
+  const start = new Date(today);
+  start.setDate(today.getDate() + diffToMonday);
+  start.setHours(0, 0, 0, 0);
+  const end = new Date(start);
+  end.setDate(start.getDate() + 6);
+  end.setHours(23, 59, 59, 999);
+  const pad = (n: number) => String(n).padStart(2, '0');
+  const fmt = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+  return { from: fmt(start), to: fmt(end) };
+}
 
 export const PaymentsPage: React.FC = () => {
   const [trips, setTrips] = useState<Trip[]>([]);
   const [parties, setParties] = useState<Party[]>([]);
+  const [vehicles, setVehicles] = useState<Vehicle[]>([]);
+  const [units, setUnits] = useState<Unit[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
+
+  // Filters
+  const [fromDate, setFromDate] = useState('');
+  const [toDate, setToDate] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
   const [partyFilter, setPartyFilter] = useState('');
+  const [vehicleFilter, setVehicleFilter] = useState('');
+  const [unitFilter, setUnitFilter] = useState('');
+
   const [isLoading, setIsLoading] = useState(false);
+  const [isDownloading, setIsDownloading] = useState(false);
 
   // Payment Recording Modal
   const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
@@ -28,12 +67,29 @@ export const PaymentsPage: React.FC = () => {
   const [isHistoryModalOpen, setIsHistoryModalOpen] = useState(false);
   const [paymentsList, setPaymentsList] = useState<TripPayment[]>([]);
 
-  useEffect(() => {
-    loadTrips();
-    loadParties();
-  }, [page, statusFilter, partyFilter]);
+  const thisWeek = getThisWeekRange();
+  const isThisWeekActive = fromDate === thisWeek.from && toDate === thisWeek.to;
 
-  const loadTrips = async () => {
+  const loadLookups = async () => {
+    try {
+      const [pRes, vRes, uRes] = await Promise.all([
+        partyService.getParties({ limit: 200, status: 'ACTIVE' }),
+        vehicleService.getVehicles({ limit: 200, status: 'ACTIVE' }),
+        unitService.getUnits('ACTIVE').catch(() => unitService.getUnits()),
+      ]);
+      setParties(pRes.data.items || (Array.isArray(pRes.data) ? pRes.data : []));
+      setVehicles(vRes.data.items || (Array.isArray(vRes.data) ? vRes.data : []));
+      setUnits(Array.isArray(uRes.data) ? uRes.data : (uRes.data as any)?.items || []);
+    } catch (err) {
+      console.error('Failed to load lookups', err);
+    }
+  };
+
+  useEffect(() => {
+    loadLookups();
+  }, []);
+
+  const loadTrips = useCallback(async () => {
     try {
       setIsLoading(true);
       const res = await tripService.getTrips({
@@ -41,6 +97,10 @@ export const PaymentsPage: React.FC = () => {
         limit: 10,
         status: statusFilter || undefined,
         party_id: partyFilter || undefined,
+        vehicle_id: vehicleFilter || undefined,
+        unit_id: unitFilter || undefined,
+        from_date: fromDate || undefined,
+        to_date: toDate || undefined,
       });
       setTrips(res.data.items);
       setTotal(res.data.total);
@@ -49,20 +109,36 @@ export const PaymentsPage: React.FC = () => {
     } finally {
       setIsLoading(false);
     }
+  }, [page, statusFilter, partyFilter, vehicleFilter, unitFilter, fromDate, toDate]);
+
+  useEffect(() => {
+    loadTrips();
+  }, [loadTrips]);
+
+  const handleThisWeekClick = () => {
+    if (isThisWeekActive) {
+      setFromDate('');
+      setToDate('');
+    } else {
+      setFromDate(thisWeek.from);
+      setToDate(thisWeek.to);
+    }
+    setPage(1);
   };
 
-  const loadParties = async () => {
-    try {
-      const res = await partyService.getParties({ limit: 100, status: 'ACTIVE' });
-      setParties(res.data.items);
-    } catch (err) {
-      console.error('Failed to load parties', err);
-    }
+  const resetFilters = () => {
+    setFromDate('');
+    setToDate('');
+    setPartyFilter('');
+    setVehicleFilter('');
+    setUnitFilter('');
+    setStatusFilter('');
+    setPage(1);
   };
 
   const openPaymentModal = (trip: Trip) => {
     setSelectedTrip(trip);
-    setReceivedAmount(String(trip.balance_due || trip.total_freight));
+    setReceivedAmount(String(trip.balance_due ?? trip.total_freight));
     setPaymentDate(new Date().toISOString().split('T')[0]);
     setNotes('');
     setFormError('');
@@ -105,7 +181,7 @@ export const PaymentsPage: React.FC = () => {
     }
 
     const currentBalance = parseFloat(String(selectedTrip.balance_due ?? selectedTrip.total_freight));
-    if (amount > currentBalance) {
+    if (amount > currentBalance + 0.01) {
       setFormError(`Payment amount cannot exceed balance due of ₹${currentBalance.toFixed(2)}.`);
       return;
     }
@@ -141,9 +217,102 @@ export const PaymentsPage: React.FC = () => {
     return Math.max(0, currentBalance - paid);
   };
 
+  // Full CSV Export of all matching records
+  const handleDownloadFiltered = async () => {
+    try {
+      setIsDownloading(true);
+      const res = await tripService.getTrips({
+        page: 1,
+        limit: 10000,
+        status: statusFilter || undefined,
+        party_id: partyFilter || undefined,
+        vehicle_id: vehicleFilter || undefined,
+        unit_id: unitFilter || undefined,
+        from_date: fromDate || undefined,
+        to_date: toDate || undefined,
+      });
+      const items = res.data.items || [];
+      const dateTag = fromDate && toDate ? `${fromDate}_to_${toDate}` : 'All';
+      downloadCSV(
+        `Party_Payments_${dateTag}.csv`,
+        [
+          'S.No',
+          'Trip ID',
+          'Date',
+          'Party Name',
+          'Unit / Destination',
+          'Lorry Number',
+          'Total Freight (INR)',
+          'Received Amount (INR)',
+          'Balance Due (INR)',
+          'Payment Status',
+          'Trip Status',
+        ],
+        items.map((t, idx) => [
+          idx + 1,
+          `#${t.id}`,
+          formatDateDMY(t.trip_date),
+          t.party_name || '',
+          t.to_location || t.from_location || '',
+          t.lorry_number || '',
+          (parseFloat(String(t.total_freight)) || 0).toFixed(2),
+          (parseFloat(String(t.total_received || 0)) || 0).toFixed(2),
+          (parseFloat(String(t.balance_due ?? t.total_freight)) || 0).toFixed(2),
+          Number(t.balance_due ?? t.total_freight) <= 0
+            ? 'Fully Paid'
+            : Number(t.total_received) > 0
+            ? 'Partially Paid'
+            : 'Pending',
+          t.status || '',
+        ])
+      );
+    } catch (err) {
+      console.error('Failed to download payments CSV', err);
+      alert('Failed to download CSV report.');
+    } finally {
+      setIsDownloading(false);
+    }
+  };
+
+  // Single-row CSV export
+  const handleDownloadSingleTrip = (t: Trip) => {
+    const filename = `Party_Payment_Trip_${t.id}_${(t.party_name || 'party').replace(/[^a-zA-Z0-9]/g, '_')}_${formatDateDMY(t.trip_date)}.csv`;
+    downloadCSV(
+      filename,
+      [
+        'Trip ID',
+        'Date',
+        'Party Name',
+        'Unit / Destination',
+        'Lorry Number',
+        'Total Freight (INR)',
+        'Received Amount (INR)',
+        'Balance Due (INR)',
+        'Payment Status',
+        'Trip Status',
+      ],
+      [[
+        `#${t.id}`,
+        formatDateDMY(t.trip_date),
+        t.party_name || '',
+        t.to_location || t.from_location || '',
+        t.lorry_number || '',
+        (parseFloat(String(t.total_freight)) || 0).toFixed(2),
+        (parseFloat(String(t.total_received || 0)) || 0).toFixed(2),
+        (parseFloat(String(t.balance_due ?? t.total_freight)) || 0).toFixed(2),
+        Number(t.balance_due ?? t.total_freight) <= 0
+          ? 'Fully Paid'
+          : Number(t.total_received) > 0
+          ? 'Partially Paid'
+          : 'Pending',
+        t.status || '',
+      ]]
+    );
+  };
+
   const columns: Column<Trip>[] = [
     { header: 'Trip ID', accessor: (t) => `#${t.id}` },
-    { header: 'Date', accessor: (t) => new Date(t.trip_date).toLocaleDateString('en-IN') },
+    { header: 'Date', accessor: (t) => formatDateDMY(t.trip_date) },
     { header: 'Party Name', accessor: 'party_name', render: (t) => <strong>{t.party_name}</strong> },
     {
       header: 'Unit Name',
@@ -170,7 +339,7 @@ export const PaymentsPage: React.FC = () => {
     {
       header: 'Actions',
       render: (t) => (
-        <div style={{ display: 'flex', gap: '6px' }}>
+        <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
           {(t.balance_due ?? t.total_freight) > 0 && t.status !== 'CANCELLED' && (
             <button onClick={() => openPaymentModal(t)} className="btn btn-primary btn-sm" title="Collect Payment">
               <CreditCard size={14} /> Collect
@@ -179,6 +348,15 @@ export const PaymentsPage: React.FC = () => {
           <button onClick={() => openHistoryModal(t)} className="btn btn-outline btn-sm" title="Payment History">
             <History size={14} /> History
           </button>
+          <button
+            onClick={() => handleDownloadSingleTrip(t)}
+            className="btn btn-outline btn-sm"
+            style={{ padding: '5px 8px', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
+            title="Download this record (CSV)"
+          >
+            <Download size={13} />
+            <span style={{ fontSize: '11px', fontWeight: 600 }}>CSV</span>
+          </button>
         </div>
       ),
     },
@@ -186,37 +364,113 @@ export const PaymentsPage: React.FC = () => {
 
   return (
     <div>
-      <div className="card-header" style={{ marginBottom: '24px' }}>
+      {/* ── Executive Header ────────────────────────────────────────────── */}
+      <div className="card-header" style={{ marginBottom: '20px' }}>
         <div>
-          <h2 style={{ fontSize: '22px', fontWeight: 800 }}>Party Payments</h2>
-          <p style={{ color: 'var(--text-muted)', fontSize: '13.5px' }}>
-            Record customer freight payments, view balance dues & transaction ledger
+          <h2 style={{ fontSize: '22px', fontWeight: 800, margin: 0 }}>Party Payments</h2>
+          <p style={{ color: 'var(--text-muted)', fontSize: '13.5px', marginTop: '4px' }}>
+            Record customer freight payments, view balance dues &amp; transaction ledger
           </p>
+        </div>
+        <div style={{ display: 'flex', gap: '10px' }}>
+          <button
+            onClick={() => window.print()}
+            className="btn btn-outline"
+            style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
+          >
+            <Printer size={16} /> Print
+          </button>
+          <button
+            onClick={handleDownloadFiltered}
+            disabled={isDownloading}
+            className="btn btn-primary"
+            style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
+          >
+            <Download size={16} /> {isDownloading ? 'Exporting...' : 'Download CSV'}
+          </button>
         </div>
       </div>
 
-      <div className="card">
-        {/* Filters */}
-        <div className="search-filter-bar" style={{ marginBottom: '16px' }}>
-          <div style={{ display: 'flex', gap: '12px' }}>
-            <select
-              className="form-control form-select"
-              style={{ width: '200px' }}
-              value={statusFilter}
-              onChange={(e) => {
-                setStatusFilter(e.target.value);
-                setPage(1);
-              }}
-            >
-              <option value="">All Payment Statuses</option>
-              <option value="PAYMENT_PENDING">Pending Payments</option>
-              <option value="PARTIALLY_PAID">Partially Paid</option>
-              <option value="SETTLED">Fully Settled</option>
-            </select>
+      {/* ── Professional Unified Filter Toolbar (Matching Report Master) ─── */}
+      <div className="card" style={{ padding: '18px 22px', marginBottom: '22px', borderRadius: '10px' }}>
+        {/* Top Control Line: Date Range + This Week Quick Action */}
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            flexWrap: 'wrap',
+            gap: '14px',
+            paddingBottom: '14px',
+            borderBottom: '1px solid var(--border-color, #e5e7eb)',
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <span style={{ fontSize: '13.5px', fontWeight: 700, color: 'var(--text-secondary, #374151)' }}>
+              Filter by Date:
+            </span>
+          </div>
 
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <span style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-muted)' }}>From:</span>
+              <DateField
+                style={{ width: '140px', height: '38px' }}
+                value={fromDate}
+                onChange={(e) => {
+                  setFromDate(e.target.value);
+                  setPage(1);
+                }}
+              />
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <span style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-muted)' }}>To:</span>
+              <DateField
+                style={{ width: '140px', height: '38px' }}
+                value={toDate}
+                onChange={(e) => {
+                  setToDate(e.target.value);
+                  setPage(1);
+                }}
+              />
+            </div>
+            <button
+              type="button"
+              onClick={handleThisWeekClick}
+              className={`btn btn-sm ${isThisWeekActive ? 'btn-primary' : 'btn-outline'}`}
+              style={{
+                height: '38px',
+                padding: '0 14px',
+                fontSize: '13px',
+                fontWeight: 600,
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+                borderRadius: '6px',
+              }}
+              title="Filter by current week"
+            >
+              <Calendar size={14} />
+              This Week
+            </button>
+          </div>
+        </div>
+
+        {/* Bottom Control Line: Entity Filters (Party, Truck, Unit, Payment Status, Reset) */}
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '12px',
+            flexWrap: 'wrap',
+            paddingTop: '14px',
+          }}
+        >
+          {/* Party Wise */}
+          <div style={{ flex: '1 1 180px', minWidth: '160px' }}>
             <select
               className="form-control form-select"
-              style={{ width: '220px' }}
+              style={{ width: '100%', height: '38px' }}
               value={partyFilter}
               onChange={(e) => {
                 setPartyFilter(e.target.value);
@@ -231,8 +485,79 @@ export const PaymentsPage: React.FC = () => {
               ))}
             </select>
           </div>
-        </div>
 
+          {/* Truck Wise */}
+          <div style={{ flex: '1 1 160px', minWidth: '140px' }}>
+            <select
+              className="form-control form-select"
+              style={{ width: '100%', height: '38px' }}
+              value={vehicleFilter}
+              onChange={(e) => {
+                setVehicleFilter(e.target.value);
+                setPage(1);
+              }}
+            >
+              <option value="">All Trucks</option>
+              {vehicles.map((v) => (
+                <option key={v.id} value={v.id}>
+                  {v.lorry_number}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* Unit Wise */}
+          <div style={{ flex: '1 1 150px', minWidth: '130px' }}>
+            <select
+              className="form-control form-select"
+              style={{ width: '100%', height: '38px' }}
+              value={unitFilter}
+              onChange={(e) => {
+                setUnitFilter(e.target.value);
+                setPage(1);
+              }}
+            >
+              <option value="">All Units</option>
+              {units.map((u) => (
+                <option key={u.id} value={u.id}>
+                  {u.name}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* Payment Status Filter */}
+          <div style={{ flex: '1 1 170px', minWidth: '150px' }}>
+            <select
+              className="form-control form-select"
+              style={{ width: '100%', height: '38px' }}
+              value={statusFilter}
+              onChange={(e) => {
+                setStatusFilter(e.target.value);
+                setPage(1);
+              }}
+            >
+              <option value="">All Payment Statuses</option>
+              <option value="PAYMENT_PENDING">Pending Payments</option>
+              <option value="PARTIALLY_PAID">Partially Paid</option>
+              <option value="SETTLED">Fully Settled</option>
+            </select>
+          </div>
+
+          {/* Reset Filters Button */}
+          <button
+            type="button"
+            onClick={resetFilters}
+            className="btn btn-outline"
+            style={{ height: '38px', padding: '0 14px', fontSize: '13px', display: 'flex', alignItems: 'center', gap: '6px' }}
+            title="Reset all filters"
+          >
+            <RefreshCw size={14} /> Reset
+          </button>
+        </div>
+      </div>
+
+      <div className="card">
         <DataTable
           columns={columns}
           data={trips}
@@ -289,9 +614,7 @@ export const PaymentsPage: React.FC = () => {
               <div className="grid-cols-2">
                 <div className="form-group">
                   <label className="form-label">Payment Date *</label>
-                  <input
-                    type="date"
-                    className="form-control"
+                  <DateField
                     required
                     value={paymentDate}
                     onChange={(e) => setPaymentDate(e.target.value)}
@@ -339,22 +662,33 @@ export const PaymentsPage: React.FC = () => {
                 }}
               >
                 <div>
-                  <div style={{ fontSize: '11px', color: '#94a3b8', textTransform: 'uppercase' }}>Remaining Balance Due After Payment</div>
-                  <div style={{ fontSize: '13px', color: '#cbd5e1' }}>
+                  <div style={{ fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.5px', color: '#94a3b8' }}>
+                    Remaining Balance Due After Payment
+                  </div>
+                  <div style={{ fontSize: '13px', color: '#cbd5e1', marginTop: '2px' }}>
                     {calculatePreviewBalance() === 0 ? 'Full Payment — Status will be SETTLED' : 'Partial Payment'}
                   </div>
                 </div>
-                <div style={{ fontSize: '20px', fontWeight: 800, color: calculatePreviewBalance() === 0 ? '#10b981' : '#f59e0b' }}>
+                <div style={{ fontSize: '20px', fontWeight: 800, color: '#10b981' }}>
                   {formatCurrency(calculatePreviewBalance())}
                 </div>
               </div>
 
-              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
-                <button type="button" onClick={() => setIsPaymentModalOpen(false)} className="btn btn-outline">
+              <div style={{ display: 'flex', gap: '12px', justifyContent: 'flex-end' }}>
+                <button
+                  type="button"
+                  className="btn btn-outline"
+                  onClick={() => setIsPaymentModalOpen(false)}
+                  disabled={isSubmitting}
+                >
                   Cancel
                 </button>
-                <button type="submit" className="btn btn-primary" disabled={isSubmitting}>
-                  <CheckCircle2 size={16} /> {isSubmitting ? 'Recording...' : 'Confirm Payment'}
+                <button
+                  type="submit"
+                  className="btn btn-primary"
+                  disabled={isSubmitting}
+                >
+                  {isSubmitting ? 'Recording...' : 'Confirm Payment'}
                 </button>
               </div>
             </form>
@@ -369,64 +703,51 @@ export const PaymentsPage: React.FC = () => {
         title={`Payment History for Trip #${selectedTrip?.id}`}
         maxWidth="650px"
       >
-        {selectedTrip && (
-          <div>
-            <div style={{ marginBottom: '16px', fontSize: '13.5px' }}>
-              <strong>Party:</strong> {selectedTrip.party_name} | <strong>Freight:</strong> {formatCurrency(selectedTrip.total_freight)}
-            </div>
-
+        <div>
+          {paymentsList.length === 0 ? (
+            <p style={{ textAlign: 'center', padding: '24px', color: 'var(--text-muted)' }}>
+              No payments recorded yet for this trip.
+            </p>
+          ) : (
             <div className="table-container">
               <table className="table">
                 <thead>
                   <tr>
-                    <th style={{ width: '55px', textAlign: 'center' }}>S.No</th>
                     <th>Date</th>
-                    <th>Received Amount</th>
-                    <th>Remaining Balance</th>
-                    <th>Recorded By</th>
+                    <th>Amount</th>
+                    <th>Remaining</th>
+                    <th>Collected By</th>
                     <th>Notes</th>
-                    <th>Actions</th>
+                    <th>Action</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {paymentsList.length === 0 ? (
-                    <tr>
-                      <td colSpan={7} style={{ textAlign: 'center', padding: '24px', color: 'var(--text-muted)' }}>
-                        No payments recorded yet for this trip.
+                  {paymentsList.map((p) => (
+                    <tr key={p.id}>
+                      <td>{formatDateDMY(p.payment_date)}</td>
+                      <td style={{ color: 'var(--success-700)', fontWeight: 700 }}>
+                        {formatCurrency(p.received_amount)}
+                      </td>
+                      <td>{formatCurrency(p.balance_due)}</td>
+                      <td>{p.created_by_name || 'Admin'}</td>
+                      <td>{p.notes || '—'}</td>
+                      <td>
+                        <button
+                          onClick={() => handleDeletePayment(p.id)}
+                          className="btn btn-outline btn-sm"
+                          style={{ color: 'var(--danger-700)', padding: '4px 8px' }}
+                          title="Delete payment record"
+                        >
+                          <Trash2 size={13} />
+                        </button>
                       </td>
                     </tr>
-                  ) : (
-                    paymentsList.map((p, idx) => (
-                      <tr key={p.id}>
-                        <td style={{ textAlign: 'center', fontWeight: 600, color: 'var(--text-muted)' }}>{idx + 1}</td>
-                        <td>{new Date(p.payment_date).toLocaleDateString('en-IN')}</td>
-                        <td style={{ color: 'var(--success-700)', fontWeight: 700 }}>{formatCurrency(p.received_amount)}</td>
-                        <td>{formatCurrency(p.balance_due)}</td>
-                        <td>{p.created_by_name || 'System User'}</td>
-                        <td>{p.notes || '—'}</td>
-                        <td>
-                          <button
-                            onClick={() => handleDeletePayment(p.id)}
-                            className="btn btn-danger btn-sm"
-                            title="Delete Payment Record"
-                          >
-                            <Trash2 size={14} />
-                          </button>
-                        </td>
-                      </tr>
-                    ))
-                  )}
+                  ))}
                 </tbody>
               </table>
             </div>
-
-            <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '20px' }}>
-              <button type="button" onClick={() => setIsHistoryModalOpen(false)} className="btn btn-outline">
-                Close
-              </button>
-            </div>
-          </div>
-        )}
+          )}
+        </div>
       </Modal>
     </div>
   );

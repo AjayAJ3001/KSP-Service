@@ -31,6 +31,8 @@ import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { mobileLookupService, mobileTripService } from '../services/mobileService';
 import { Vehicle, Driver, Party, Route, Unit, FreightRate, RootStackParamList } from '../types';
 import { COLORS, SPACING, RADIUS, SHADOWS } from '../constants/theme';
+import { ComplianceAlertModal, ComplianceDoc } from '../components/ComplianceAlertModal';
+import { formatDateDMY } from '../utils/dateUtils';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'NewTrip'>;
 
@@ -44,7 +46,18 @@ export const NewTripScreen: React.FC<Props> = ({ navigation, route }) => {
   const [isLoading, setIsLoading] = useState(true);
 
   // Form Fields
-  const [tripDate, setTripDate] = useState(new Date().toISOString().split('T')[0]);
+  const [tripDate, setTripDate] = useState(formatDateDMY(new Date()));
+
+  const handleTripDateChange = (raw: string) => {
+    const digits = raw.replace(/\D/g, '').slice(0, 8);
+    let formatted = digits;
+    if (digits.length > 4) {
+      formatted = `${digits.slice(0, 2)}-${digits.slice(2, 4)}-${digits.slice(4)}`;
+    } else if (digits.length > 2) {
+      formatted = `${digits.slice(0, 2)}-${digits.slice(2)}`;
+    }
+    setTripDate(formatted);
+  };
   const [selectedVehicleId, setSelectedVehicleId] = useState<number | null>(null);
   const [selectedDriverId, setSelectedDriverId] = useState<number | null>(null);
   const [selectedPartyId, setSelectedPartyId] = useState<number | null>(null);
@@ -66,6 +79,24 @@ export const NewTripScreen: React.FC<Props> = ({ navigation, route }) => {
 
   const [error, setError] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // Compliance Alert Modal State
+  const [complianceModal, setComplianceModal] = useState<{
+    visible: boolean;
+    type: 'VEHICLE' | 'DRIVER';
+    entityName: string;
+    documents: ComplianceDoc[];
+    notice?: string;
+    onProceed: () => void;
+    onCancel: () => void;
+  }>({
+    visible: false,
+    type: 'VEHICLE',
+    entityName: '',
+    documents: [],
+    onProceed: () => {},
+    onCancel: () => {},
+  });
 
   // True when truck was pre-selected from GiveTruckAdvanceScreen — lock it
   const isTruckLocked = !!(route?.params?.preselectedVehicleId);
@@ -173,10 +204,10 @@ export const NewTripScreen: React.FC<Props> = ({ navigation, route }) => {
         exp.setHours(0, 0, 0, 0);
         td.setHours(0, 0, 0, 0);
         const days = Math.ceil((exp.getTime() - td.getTime()) / (1000 * 60 * 60 * 24));
-        if (days <= 45) {
+        if (days <= 30) {
           alerts.push({
             name,
-            date: dateStr.split('T')[0],
+            date: formatDateDMY(dateStr),
             days,
             isExpired: days < 0,
           });
@@ -188,6 +219,7 @@ export const NewTripScreen: React.FC<Props> = ({ navigation, route }) => {
     checkDoc('Insurance Policy', v.insurance_expiry_date);
     checkDoc('Road Permit', v.permit_expiry_date);
     checkDoc('Yearly Road Tax', v.tax_expiry_date);
+    checkDoc('RC (Registration)', v.rc_expiry_date);
     checkDoc('DTS Certificate', v.dts_expiry_date);
 
     return alerts;
@@ -200,25 +232,20 @@ export const NewTripScreen: React.FC<Props> = ({ navigation, route }) => {
     if (v) {
       const alerts = getVehicleComplianceAlerts(v);
       if (alerts.length > 0) {
-        const hasExpired = alerts.some((a) => a.isExpired);
-        const alertMsg = alerts
-          .map((a) => `• ${a.name}: ${a.isExpired ? 'EXPIRED (' + a.date + ')' : 'Expires in ' + a.days + ' days (' + a.date + ')'}`)
-          .join('\n');
-        Alert.alert(
-          hasExpired ? '⚠️ Truck Compliance Expired!' : '⚠️ Compliance Notice (≤ 45 Days)',
-          `Truck ${v.lorry_number} has ${alerts.length} compliance document(s) requiring attention:\n\n${alertMsg}\n\nPlease inform admin or ensure renewal before dispatch.`,
-          [
-            {
-              text: 'Choose Another Truck',
-              style: 'cancel',
-              onPress: () => setSelectedVehicleId(null),
-            },
-            {
-              text: 'Acknowledge & Proceed',
-              style: 'default',
-            },
-          ]
-        );
+        setComplianceModal({
+          visible: true,
+          type: 'VEHICLE',
+          entityName: v.lorry_number,
+          documents: alerts,
+          notice: 'Please inform admin or ensure valid renewal documents before dispatching on highway.',
+          onProceed: () => {
+            setComplianceModal((prev) => ({ ...prev, visible: false }));
+          },
+          onCancel: () => {
+            setSelectedVehicleId(null);
+            setComplianceModal((prev) => ({ ...prev, visible: false }));
+          },
+        });
       }
     }
   };
@@ -234,28 +261,30 @@ export const NewTripScreen: React.FC<Props> = ({ navigation, route }) => {
         exp.setHours(0, 0, 0, 0);
         td.setHours(0, 0, 0, 0);
         const days = Math.ceil((exp.getTime() - td.getTime()) / (1000 * 60 * 60 * 24));
-        if (days <= 45) {
+        if (days <= 30) {
           const isExp = days < 0;
-          const formattedDate = selDriver.license_expiry_date.split('T')[0];
-          Alert.alert(
-            isExp ? '⚠️ Driving License Expired!' : '⚠️ License Expiring Soon!',
-            `Driver ${selDriver.name}'s license ${
-              isExp
-                ? `expired on ${formattedDate} (${Math.abs(days)} days ago).`
-                : `expires on ${formattedDate} (${days} days remaining).`
-            }\n\nPlease remind the driver to start the renewal process.`,
-            [
+          const formattedDate = formatDateDMY(selDriver.license_expiry_date);
+          setComplianceModal({
+            visible: true,
+            type: 'DRIVER',
+            entityName: selDriver.name,
+            documents: [
               {
-                text: 'Choose Another Driver',
-                style: 'cancel',
-                onPress: () => setSelectedDriverId(null),
+                name: 'Commercial Driving License',
+                date: formattedDate,
+                days,
+                isExpired: isExp,
               },
-              {
-                text: 'Acknowledge & Proceed',
-                style: 'default',
-              },
-            ]
-          );
+            ],
+            notice: 'Please remind the driver to complete license renewal to maintain legal highway compliance.',
+            onProceed: () => {
+              setComplianceModal((prev) => ({ ...prev, visible: false }));
+            },
+            onCancel: () => {
+              setSelectedDriverId(null);
+              setComplianceModal((prev) => ({ ...prev, visible: false }));
+            },
+          });
         }
       } catch (e) {
         console.error('Date error', e);
@@ -359,8 +388,13 @@ export const NewTripScreen: React.FC<Props> = ({ navigation, route }) => {
       setIsSubmitting(true);
       setError('');
       const defaultUnitId = selectedUnitId || (units.length > 0 ? units[0].id : 1);
+      let apiTripDate = tripDate.trim();
+      const dmy = apiTripDate.match(/^(\d{2})-(\d{2})-(\d{4})$/);
+      if (dmy) {
+        apiTripDate = `${dmy[3]}-${dmy[2]}-${dmy[1]}`;
+      }
       const res = await mobileTripService.createTrip({
-        trip_date: tripDate,
+        trip_date: apiTripDate,
         vehicle_id: selectedVehicleId,
         driver_id: selectedDriverId,
         party_id: selectedPartyId,
@@ -423,14 +457,16 @@ export const NewTripScreen: React.FC<Props> = ({ navigation, route }) => {
         <View style={styles.card}>
           {/* Trip Date */}
           <View style={styles.formRow}>
-            <Text style={styles.fieldLabel}>Trip Date (YYYY-MM-DD)</Text>
+            <Text style={styles.fieldLabel}>Trip Date (DD-MM-YYYY) *</Text>
             <View style={styles.inputWithIcon}>
               <Calendar size={18} color={COLORS.accent} style={{ marginRight: 10 }} />
               <TextInput
                 style={styles.innerInput}
                 value={tripDate}
-                onChangeText={setTripDate}
-                placeholder="2026-08-30"
+                onChangeText={handleTripDateChange}
+                placeholder="DD-MM-YYYY"
+                maxLength={10}
+                keyboardType="numeric"
               />
             </View>
           </View>
@@ -464,7 +500,7 @@ export const NewTripScreen: React.FC<Props> = ({ navigation, route }) => {
                         const soonCount = alerts.length - expCount;
                         const alertTag = expCount > 0
                           ? `⚠️ ${expCount} Expired Doc(s)`
-                          : `⚠️ ${soonCount} Expiring in ≤45d`;
+                          : `⚠️ ${soonCount} Expiring in ≤30d`;
                         sub = sub ? `${sub} • ${alertTag}` : alertTag;
                       }
                       return {
@@ -488,33 +524,68 @@ export const NewTripScreen: React.FC<Props> = ({ navigation, route }) => {
               </TouchableOpacity>
             )}
 
-            {/* Selected Truck 45-day Compliance Alert Banner */}
+            {/* Selected Truck 30-day Compliance Alert Banner */}
             {selectedVehicle && (() => {
               const alerts = getVehicleComplianceAlerts(selectedVehicle);
               if (alerts.length === 0) return null;
               const hasExpired = alerts.some((a) => a.isExpired);
               return (
-                <View
+                <TouchableOpacity
+                  activeOpacity={0.8}
+                  onPress={() => {
+                    setComplianceModal({
+                      visible: true,
+                      type: 'VEHICLE',
+                      entityName: selectedVehicle.lorry_number,
+                      documents: alerts,
+                      notice: 'Please inform admin or ensure valid renewal documents before dispatching on highway.',
+                      onProceed: () => setComplianceModal((prev) => ({ ...prev, visible: false })),
+                      onCancel: () => {
+                        setSelectedVehicleId(null);
+                        setComplianceModal((prev) => ({ ...prev, visible: false }));
+                      },
+                    });
+                  }}
                   style={{
                     marginTop: 10,
                     backgroundColor: hasExpired ? '#fef2f2' : '#fffbeb',
                     borderColor: hasExpired ? '#fca5a5' : '#fde68a',
                     borderWidth: 1.5,
-                    borderRadius: 10,
+                    borderRadius: 12,
                     padding: 12,
                   }}
                 >
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 6 }}>
-                    <ShieldAlert size={16} color={hasExpired ? '#dc2626' : '#d97706'} />
-                    <Text
+                  <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                      <ShieldAlert size={16} color={hasExpired ? '#dc2626' : '#d97706'} />
+                      <Text
+                        style={{
+                          fontSize: 12.5,
+                          fontWeight: '800',
+                          color: hasExpired ? '#991b1b' : '#92400e',
+                        }}
+                      >
+                        {hasExpired ? 'Compliance Expired' : 'Renewal Due (≤ 30 Days)'}
+                      </Text>
+                    </View>
+                    <View
                       style={{
-                        fontSize: 12.5,
-                        fontWeight: '700',
-                        color: hasExpired ? '#991b1b' : '#92400e',
+                        backgroundColor: hasExpired ? '#fee2e2' : '#fef3c7',
+                        paddingHorizontal: 8,
+                        paddingVertical: 2,
+                        borderRadius: 12,
                       }}
                     >
-                      {hasExpired ? '⚠️ Compliance Warning — Expired Documents' : '⚠️ Expiry Notice (Within 45 Days)'}
-                    </Text>
+                      <Text
+                        style={{
+                          fontSize: 10.5,
+                          fontWeight: '800',
+                          color: hasExpired ? '#dc2626' : '#b45309',
+                        }}
+                      >
+                        TAP TO VIEW
+                      </Text>
+                    </View>
                   </View>
                   <Text style={{ fontSize: 11, color: hasExpired ? '#b91c1c' : '#b45309', marginBottom: 6 }}>
                     Truck {selectedVehicle.lorry_number} has {alerts.length} document(s) needing renewal:
@@ -538,7 +609,7 @@ export const NewTripScreen: React.FC<Props> = ({ navigation, route }) => {
                       </Text>
                     </View>
                   ))}
-                </View>
+                </TouchableOpacity>
               );
             })()}
           </View>
@@ -561,9 +632,9 @@ export const NewTripScreen: React.FC<Props> = ({ navigation, route }) => {
                         td.setHours(0, 0, 0, 0);
                         const diff = Math.ceil((exp.getTime() - td.getTime()) / (1000 * 60 * 60 * 24));
                         if (diff < 0) {
-                          sub += `${sub ? ' • ' : ''}⚠️ EXPIRED (${d.license_expiry_date.split('T')[0]})`;
-                        } else if (diff <= 45) {
-                          sub += `${sub ? ' • ' : ''}⚠️ Expires in ${diff}d (${d.license_expiry_date.split('T')[0]})`;
+                          sub += `${sub ? ' • ' : ''}⚠️ EXPIRED (${formatDateDMY(d.license_expiry_date)})`;
+                        } else if (diff <= 30) {
+                          sub += `${sub ? ' • ' : ''}⚠️ Expires in ${diff}d (${formatDateDMY(d.license_expiry_date)})`;
                         }
                       } catch {}
                     }
@@ -600,16 +671,16 @@ export const NewTripScreen: React.FC<Props> = ({ navigation, route }) => {
                       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 6, backgroundColor: '#fef2f2', padding: 8, borderRadius: 6, borderWidth: 1, borderColor: '#fca5a5' }}>
                         <AlertCircle size={14} color="#dc2626" />
                         <Text style={{ fontSize: 12, color: '#dc2626', fontWeight: '700' }}>
-                          License EXPIRED ({selectedDriver.license_expiry_date.split('T')[0]})
+                          License EXPIRED ({formatDateDMY(selectedDriver.license_expiry_date)})
                         </Text>
                       </View>
                     );
-                  } else if (diff <= 45) {
+                  } else if (diff <= 30) {
                     return (
                       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 6, backgroundColor: '#fffbeb', padding: 8, borderRadius: 6, borderWidth: 1, borderColor: '#fde047' }}>
                         <AlertCircle size={14} color="#d97706" />
                         <Text style={{ fontSize: 12, color: '#b45309', fontWeight: '700' }}>
-                          License expires in {diff} day{diff === 1 ? '' : 's'} ({selectedDriver.license_expiry_date.split('T')[0]})
+                          License expires in {diff} day{diff === 1 ? '' : 's'} ({formatDateDMY(selectedDriver.license_expiry_date)})
                         </Text>
                       </View>
                     );
@@ -808,6 +879,17 @@ export const NewTripScreen: React.FC<Props> = ({ navigation, route }) => {
           </View>
         </View>
       </Modal>
+
+      {/* Professional Compliance Alert Modal */}
+      <ComplianceAlertModal
+        visible={complianceModal.visible}
+        type={complianceModal.type}
+        entityName={complianceModal.entityName}
+        documents={complianceModal.documents}
+        notice={complianceModal.notice}
+        onProceed={complianceModal.onProceed}
+        onCancel={complianceModal.onCancel}
+      />
     </View>
   );
 };

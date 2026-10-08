@@ -8,7 +8,6 @@ import {
   Building2,
   Scale,
   MapPin,
-  CircleDollarSign,
   Receipt,
   Navigation,
   CreditCard,
@@ -40,12 +39,12 @@ export const AdminLayout: React.FC = () => {
   const [expiringVehicleCount, setExpiringVehicleCount] = useState(0);
 
   useEffect(() => {
-    // Driver license expiry count
-    driverService.getExpiringDrivers(45).then((res) => {
+    // Driver license expiry count (30 days threshold)
+    driverService.getExpiringDrivers(30).then((res) => {
       if (res.data) setExpiringCount(res.data.length);
     }).catch(() => {});
-    // Vehicle compliance expiry count
-    vehicleService.getExpiringVehicles(45).then((res) => {
+    // Vehicle compliance expiry count (30 days threshold)
+    vehicleService.getExpiringVehicles(30).then((res) => {
       if (res.data) setExpiringVehicleCount(res.data.length);
     }).catch(() => {});
   }, []);
@@ -105,12 +104,6 @@ export const AdminLayout: React.FC = () => {
           </NavLink>
           <NavLink to="/parties" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
             <Building2 /> Parties and Units
-          </NavLink>
-          <NavLink to="/freight-rates" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
-            <CircleDollarSign /> Freight Rates
-          </NavLink>
-          <NavLink to="/expense-rates" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
-            <Receipt /> Expense Rates
           </NavLink>
           <NavLink to="/cleaning-expenses" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
             <Droplets /> Cleaning Expenses

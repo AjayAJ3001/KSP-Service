@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { formatDateDMY } from '../utils/dateUtils';
 import {
   View,
   Text,
@@ -256,7 +257,7 @@ export const SettlementReceiptScreen: React.FC<{ route: any; navigation: any }> 
           <View style={styles.gridRow}>
             <Text style={styles.gridLabel}>Date:</Text>
             <Text style={styles.gridValue}>
-              {new Date(trip.trip_date).toLocaleDateString('en-IN')}
+              {formatDateDMY(trip.trip_date)}
             </Text>
           </View>
           <View style={styles.gridRow}>

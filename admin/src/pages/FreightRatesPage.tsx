@@ -5,6 +5,8 @@ import { FreightRate, Route, Unit, Party } from '../types';
 import { DataTable, Column } from '../components/Common/DataTable';
 import { Modal } from '../components/Common/Modal';
 import { StatusBadge } from '../components/Common/StatusBadge';
+import { formatDateDMY } from '../utils/dateUtils';
+import { DateField } from '../components/Common/DateField';
 
 export const FreightRatesPage: React.FC = () => {
   const [rates, setRates] = useState<FreightRate[]>([]);
@@ -190,7 +192,7 @@ export const FreightRatesPage: React.FC = () => {
         </strong>
       ),
     },
-    { header: 'Effective From', accessor: (r) => new Date(r.effective_from).toLocaleDateString('en-IN') },
+    { header: 'Effective From', accessor: (r) => formatDateDMY(r.effective_from) },
     { header: 'Status', accessor: 'status', render: (r) => <StatusBadge status={r.status} /> },
     {
       header: 'Actions',
@@ -341,9 +343,7 @@ export const FreightRatesPage: React.FC = () => {
 
             <div className="form-group">
               <label className="form-label">Effective From Date *</label>
-              <input
-                type="date"
-                className="form-control"
+              <DateField
                 required
                 value={formData.effective_from}
                 onChange={(e) => setFormData({ ...formData, effective_from: e.target.value })}

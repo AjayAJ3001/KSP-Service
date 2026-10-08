@@ -9,7 +9,8 @@ export const getDashboard = asyncHandler(async (req: AuthRequest, res: Response)
   const [
     usersResult, driversResult, vehiclesResult, partiesResult,
     todayTripsResult, pendingPaymentsResult, settledTripsResult,
-    pendingSettlementsResult, recentTripsResult, totalFreightResult
+    pendingSettlementsResult, recentTripsResult, totalFreightResult,
+    complianceAlertsResult
   ] = await Promise.all([
     query(`SELECT COUNT(*) as total, COUNT(*) FILTER (WHERE status = 'ACTIVE') as active FROM users`),
     query(`SELECT COUNT(*) as total FROM drivers WHERE status = 'ACTIVE'`),
@@ -39,6 +40,25 @@ export const getDashboard = asyncHandler(async (req: AuthRequest, res: Response)
        ON t.id = tp.trip_id
        WHERE t.status NOT IN ('CANCELLED')`
     ),
+    // Vehicles with any document expiring within 30 days (or already expired)
+    query(
+      `SELECT lorry_number,
+              fc_expiry_date, insurance_expiry_date, permit_expiry_date, tax_expiry_date
+       FROM vehicles
+       WHERE status = 'ACTIVE'
+         AND (
+           (fc_expiry_date IS NOT NULL AND fc_expiry_date <= CURRENT_DATE + INTERVAL '30 days')
+           OR (insurance_expiry_date IS NOT NULL AND insurance_expiry_date <= CURRENT_DATE + INTERVAL '30 days')
+           OR (permit_expiry_date IS NOT NULL AND permit_expiry_date <= CURRENT_DATE + INTERVAL '30 days')
+           OR (tax_expiry_date IS NOT NULL AND tax_expiry_date <= CURRENT_DATE + INTERVAL '30 days')
+         )
+       ORDER BY LEAST(
+         COALESCE(fc_expiry_date, '9999-12-31'::date),
+         COALESCE(insurance_expiry_date, '9999-12-31'::date),
+         COALESCE(permit_expiry_date, '9999-12-31'::date),
+         COALESCE(tax_expiry_date, '9999-12-31'::date)
+       ) ASC`
+    ),
   ]);
 
   res.json({
@@ -58,6 +78,7 @@ export const getDashboard = asyncHandler(async (req: AuthRequest, res: Response)
       },
       financials: totalFreightResult.rows[0],
       recent_trips: recentTripsResult.rows,
+      compliance_alerts: complianceAlertsResult.rows,
     },
   });
 });

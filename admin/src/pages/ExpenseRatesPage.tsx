@@ -150,7 +150,7 @@ export const ExpenseRatesPage: React.FC = () => {
     <div>
       <div className="card-header" style={{ marginBottom: '24px' }}>
         <div>
-          <h2 style={{ fontSize: '22px', fontWeight: 800 }}>Expense Rate Master</h2>
+          <h2 style={{ fontSize: '22px', fontWeight: 800 }}>Expense Rates</h2>
           <p style={{ color: 'var(--text-muted)', fontSize: '13.5px' }}>
             Maintain loading, unloading & operational trip expense definitions
           </p>

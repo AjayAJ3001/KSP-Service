@@ -4,15 +4,15 @@ import * as FileSystem from 'expo-file-system';
 import { Platform } from 'react-native';
 import { Settlement, Trip } from '../types';
 
+import { formatDateDMY } from './dateUtils';
+
 export const generateSettlementHtml = (trip: Trip, settlement: Settlement) => {
   const formatCurrency = (val: number | string) => {
     const num = parseFloat(String(val)) || 0;
     return `₹${num.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
   };
 
-  const tripDate = trip.trip_date
-    ? new Date(trip.trip_date).toLocaleDateString('en-IN')
-    : new Date().toLocaleDateString('en-IN');
+  const tripDate = formatDateDMY(trip.trip_date || new Date());
 
   const goodsWeight = parseFloat(String(trip.goods_weight || 0));
   const freightRate = parseFloat(String(trip.freight_rate || 0));

@@ -4,6 +4,7 @@ import { ownerService } from '../services/adminService';
 import { Owner } from '../types';
 import { DataTable, Column } from '../components/Common/DataTable';
 import { Modal } from '../components/Common/Modal';
+import { formatDateDMY } from '../utils/dateUtils';
 
 export const OwnersPage: React.FC = () => {
   const [owners, setOwners] = useState<Owner[]>([]);
@@ -101,7 +102,7 @@ export const OwnersPage: React.FC = () => {
     { header: 'Mobile Number', accessor: (o) => o.mobile_number || '—' },
     {
       header: 'Created Date',
-      accessor: (o) => (o.created_at ? new Date(o.created_at).toLocaleDateString('en-IN') : '—'),
+      accessor: (o) => (o.created_at ? formatDateDMY(o.created_at) : '—'),
     },
     {
       header: 'Actions',

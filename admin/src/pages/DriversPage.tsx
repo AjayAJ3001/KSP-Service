@@ -5,23 +5,18 @@ import {
   Printer, ShieldCheck, AlertCircle, AlertTriangle, Calendar, Loader, ScanLine, Truck, Sparkles, Lock, Unlock
 } from 'lucide-react';
 import { createWorker } from 'tesseract.js';
+import { isPdfFile, extractTextFromFile } from '../utils/fileExtraction';
 import { driverService } from '../services/adminService';
 import { Driver } from '../types';
 import { DataTable, Column } from '../components/Common/DataTable';
 import { Modal } from '../components/Common/Modal';
 
+import { formatDateDMY } from '../utils/dateUtils';
+import { DateField } from '../components/Common/DateField';
+
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 const toIST = (d: string) => {
-  try {
-    return new Date(d).toLocaleDateString('en-IN', {
-      day: '2-digit',
-      month: 'short',
-      year: 'numeric',
-      timeZone: 'Asia/Kolkata',
-    });
-  } catch {
-    return d;
-  }
+  return formatDateDMY(d);
 };
 
 const getDaysDifference = (expiryDateStr: string): number => {
@@ -65,7 +60,7 @@ const DriverProfileModal: React.FC<ProfileModalProps> = ({ driver, onClose, onEd
 
   const expiryDays = driver.license_expiry_date ? getDaysDifference(driver.license_expiry_date) : null;
   const isLicenseExpired = expiryDays !== null && expiryDays < 0;
-  const isLicenseExpiringSoon = expiryDays !== null && expiryDays >= 0 && expiryDays <= 45;
+  const isLicenseExpiringSoon = expiryDays !== null && expiryDays >= 0 && expiryDays <= 30;
 
   const buildDriverProfileHtml = () => {
     return `
@@ -187,8 +182,8 @@ const DriverProfileModal: React.FC<ProfileModalProps> = ({ driver, onClose, onEd
     }
     .docs-grid {
       display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 20px;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 16px;
       margin-bottom: 30px;
     }
     .doc-card {
@@ -211,6 +206,16 @@ const DriverProfileModal: React.FC<ProfileModalProps> = ({ driver, onClose, onEd
       object-fit: contain;
       border-radius: 4px;
       border: 1px solid #cbd5e1;
+    }
+    .pdf-doc-box {
+      padding: 36px 12px;
+      background: #f8fafc;
+      border: 1.5px dashed #94a3b8;
+      border-radius: 6px;
+      font-weight: 700;
+      color: #1e3a8a;
+      text-align: center;
+      font-size: 13px;
     }
     .no-doc {
       padding: 40px 10px;
@@ -244,7 +249,7 @@ const DriverProfileModal: React.FC<ProfileModalProps> = ({ driver, onClose, onEd
     <div class="report-badge">
       <div>STATUS: ${driver.status}</div>
       <div style="font-size: 10px; font-weight: normal; color: #64748b; margin-top: 2px;">
-        Generated: ${new Date().toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata' })}
+        Generated: ${formatDateDMY(new Date())}
       </div>
     </div>
   </div>
@@ -302,12 +307,16 @@ const DriverProfileModal: React.FC<ProfileModalProps> = ({ driver, onClose, onEd
   <div class="section-title">Submitted Documents</div>
   <div class="docs-grid">
     <div class="doc-card">
-      <h4>Driving License Photo</h4>
-      ${driver.license_photo_url ? `<img src="${driver.license_photo_url}" class="doc-img" alt="Driving License" />` : '<div class="no-doc">No Driving License Photo Uploaded</div>'}
+      <h4>Driving License (Front Side)</h4>
+      ${driver.license_photo_url ? (isPdfFile(driver.license_photo_url) ? '<div class="pdf-doc-box">📄 Driving License (Front) — PDF Document</div>' : `<img src="${driver.license_photo_url}" class="doc-img" alt="Driving License Front" />`) : '<div class="no-doc">No Front Photo Uploaded</div>'}
+    </div>
+    <div class="doc-card">
+      <h4>Driving License (Back Side)</h4>
+      ${driver.license_photo_back_url ? (isPdfFile(driver.license_photo_back_url) ? '<div class="pdf-doc-box">📄 Driving License (Back) — PDF Document</div>' : `<img src="${driver.license_photo_back_url}" class="doc-img" alt="Driving License Back" />`) : '<div class="no-doc">No Back Photo Uploaded</div>'}
     </div>
     <div class="doc-card">
       <h4>Address Proof (${driver.id_proof_type || 'Document'})</h4>
-      ${driver.id_proof_url ? `<img src="${driver.id_proof_url}" class="doc-img" alt="Address Proof" />` : '<div class="no-doc">No Address Proof Uploaded</div>'}
+      ${driver.id_proof_url ? (isPdfFile(driver.id_proof_url) ? `<div class="pdf-doc-box">📄 ${driver.id_proof_type || 'Address Proof'} — PDF Document</div>` : `<img src="${driver.id_proof_url}" class="doc-img" alt="Address Proof" />`) : '<div class="no-doc">No Address Proof Uploaded</div>'}
     </div>
   </div>
 
@@ -414,27 +423,53 @@ const DriverProfileModal: React.FC<ProfileModalProps> = ({ driver, onClose, onEd
         {title}
       </div>
       {url ? (
-        <div
-          style={{ cursor: 'zoom-in', width: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center' }}
-          onClick={() => setZoomImage({ url, title })}
-          title="Click to view full size"
-        >
-          <img
-            src={url}
-            alt={title}
+        isPdfFile(url) ? (
+          <div
             style={{
-              width: isPortrait ? '90px' : '100%',
+              cursor: 'pointer',
+              width: '100%',
               height: isPortrait ? '120px' : '140px',
-              objectFit: isPortrait ? 'cover' : 'contain',
               borderRadius: '10px',
-              border: '2px solid #e2e8f0',
-              boxShadow: '0 4px 12px rgba(0,0,0,0.08)',
+              background: '#fef2f2',
+              border: '2px solid #fecaca',
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: '6px',
             }}
-          />
-          <div style={{ marginTop: '8px', fontSize: '11px', color: '#2563eb', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '3px' }}>
-            <Eye size={11} /> Click to zoom
+            onClick={() => window.open(url, '_blank')}
+            title="Click to view PDF in new tab"
+          >
+            <FileText size={32} color="#dc2626" />
+            <span style={{ fontSize: '12px', fontWeight: 700, color: '#991b1b' }}>PDF Document</span>
+            <div style={{ fontSize: '11px', color: '#dc2626', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '3px' }}>
+              <Eye size={11} /> Open / View PDF
+            </div>
           </div>
-        </div>
+        ) : (
+          <div
+            style={{ cursor: 'zoom-in', width: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center' }}
+            onClick={() => setZoomImage({ url, title })}
+            title="Click to view full size"
+          >
+            <img
+              src={url}
+              alt={title}
+              style={{
+                width: isPortrait ? '90px' : '100%',
+                height: isPortrait ? '120px' : '140px',
+                objectFit: isPortrait ? 'cover' : 'contain',
+                borderRadius: '10px',
+                border: '2px solid #e2e8f0',
+                boxShadow: '0 4px 12px rgba(0,0,0,0.08)',
+              }}
+            />
+            <div style={{ marginTop: '8px', fontSize: '11px', color: '#2563eb', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '3px' }}>
+              <Eye size={11} /> Click to zoom
+            </div>
+          </div>
+        )
       ) : (
         <div style={{ padding: '20px 12px', textAlign: 'center', color: '#cbd5e1' }}>
           <AlertCircle size={30} style={{ margin: '0 auto 6px', display: 'block' }} />
@@ -679,7 +714,7 @@ const DriverProfileModal: React.FC<ProfileModalProps> = ({ driver, onClose, onEd
                 <FileText size={16} color="#2563eb" />
                 <span style={{ fontSize: '14px', fontWeight: 800, color: '#0f172a' }}>Submitted Documents & Photos</span>
               </div>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '14px' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '14px' }}>
                 <DocCard
                   title="Passport Photo"
                   icon={<Camera size={14} />}
@@ -689,11 +724,18 @@ const DriverProfileModal: React.FC<ProfileModalProps> = ({ driver, onClose, onEd
                   isPortrait
                 />
                 <DocCard
-                  title="Driving License Photo"
+                  title="License (Front Side)"
                   icon={<CreditCard size={14} />}
                   iconColor="#7c3aed"
                   url={driver.license_photo_url}
-                  emptyText="No License Photo Uploaded"
+                  emptyText="No Front Photo Uploaded"
+                />
+                <DocCard
+                  title="License (Back Side)"
+                  icon={<CreditCard size={14} />}
+                  iconColor="#9333ea"
+                  url={driver.license_photo_back_url}
+                  emptyText="No Back Photo Uploaded"
                 />
                 <DocCard
                   title={`Address Proof (${driver.id_proof_type || 'Document'})`}
@@ -842,12 +884,13 @@ interface BatchLicenseInfo {
   raw_text: string;
 }
 
-// ─── Batch OCR: Extract Type (Heavy/Regular), Expiry Date, DL Number & Name ───
+// ─── Batch OCR: Extract Type (Heavy/Regular), Expiry Date, DL Number & Name from 2 Pages ───
 const extractBatchLicenseInfo = (text: string): BatchLicenseInfo => {
   const t = text.toUpperCase().replace(/\r/g, '');
 
   // 1. License Type Detection: HEAVY (Transport / Commercial / HMV) vs REGULAR (LMV / Non-Transport)
-  const heavyMatch = t.match(/\b(TRANS(?:PORT)?|HMV|HGV|HPV|HGMV|HPMV|MGV|HAZARD(?:OUS)?|TRAILER|HEAVY|COMMERCIAL|PSV|BADGE)\b/i);
+  // Back page typically contains endorsements like TRANS, TR, HMV, HGV, HAZARDOUS, BADGE, TRUCK, BUS
+  const heavyMatch = t.match(/\b(TRANS(?:PORT)?|HMV|HGV|HPV|HGMV|HPMV|MGV|HAZARD(?:OUS)?|TRAILER|HEAVY|COMMERCIAL|PSV|BADGE|TRUCK|BUS)\b/i);
   const regularMatch = t.match(/\b(LMV|LMV-NT|NON-?TRANS(?:PORT)?|MCWG|MCWOG|LIGHT\s*MOTOR)\b/i);
 
   let license_type: 'HEAVY' | 'REGULAR' = 'HEAVY';
@@ -868,10 +911,12 @@ const extractBatchLicenseInfo = (text: string): BatchLicenseInfo => {
     license_type_detail = 'Defaulted to Heavy Transport';
   }
 
-  // 2. License Number (DL No)
+  // 2. License Number (DL No) - usually on front page, sometimes repeated on back
   let license_number: string | null = null;
-  const dlNumPattern = /\b([A-Z]{2}[-\s]?[0-9]{2}[-\s]?(?:19|20)[0-9]{2}[-\s]?[0-9]{7})\b/i;
-  const dlLabelPattern = /(?:DL\s*NO|DRIVING\s*LICEN[CS]E\s*NO|LICEN[CS]E\s*NO|LICENCE\s*NO|D\.L\.\s*NO)\s*[:\-.]?\s*([A-Z0-9\/\-\s]{9,22})/i;
+  const dlNumPattern = /\b([A-Z]{2}[-\s]?[0-9]{2}[A-Z]?[-\s]?(?:19|20)[0-9]{2}[-\s]?[0-9]{7})\b/i;
+  const dlLabelPattern = /(?:DL\s*NO|DRIVING\s*LICEN[CS]E\s*NO|LICEN[CS]E\s*NO|LICENCE\s*NO|D\.L\.\s*NO)\s*[:\-.]?\s*([A-Z0-9\/\-\s]{9,24})/i;
+  const dlOldPattern = /\b([A-Z]{2}[-\s]?[0-9]{2}[-\s]?[0-9]{4,11}(?:\/[0-9]{2,4})?)\b/i;
+
   const mNum = t.match(dlNumPattern);
   if (mNum) {
     license_number = mNum[1].replace(/\s+/g, ' ').trim();
@@ -879,13 +924,18 @@ const extractBatchLicenseInfo = (text: string): BatchLicenseInfo => {
     const mLabel = t.match(dlLabelPattern);
     if (mLabel) {
       license_number = mLabel[1].replace(/\s+/g, ' ').trim();
+    } else {
+      const mOld = t.match(dlOldPattern);
+      if (mOld && mOld[1].length >= 10) {
+        license_number = mOld[1].replace(/\s+/g, ' ').trim();
+      }
     }
   }
 
-  // 3. Expiry Date: prioritize Transport/TR validity (commercial)
+  // 3. Expiry Date: prioritize Transport/TR validity (commercial) found on front or back page
   let license_expiry_date: string | null = null;
-  const trValidityPattern = /(?:VALID(?:ITY)?\s*(?:TILL|UP\s*TO)?\s*\(?TR(?:ANS)?\)?|TR(?:ANS)?\s*VALID(?:ITY)?)\s*[:\-.]?\s*([0-9]{2}[\-\/\.][0-9]{2}[\-\/\.][0-9]{2,4}|[0-9]{2}-[A-Z]{3}-[0-9]{2,4})/i;
-  const genValidityPattern = /(?:VALIDITY|VALID(?:ITY)?\s*(?:TILL|UP\s*TO|UPTO)?|EXPIRY|EXPIR(?:ES|Y)?\s*(?:DATE|ON)?|VALID\s*UP\s*TO)\s*[:\-.]?\s*([0-9]{2}[\-\/\.][0-9]{2}[\-\/\.][0-9]{2,4}|[0-9]{2}-[A-Z]{3}-[0-9]{2,4})/i;
+  const trValidityPattern = /(?:VALID(?:ITY)?\s*(?:TILL|UP\s*TO|UPTO)?\s*\(?TR(?:ANS)?\)?|TR(?:ANS)?\s*(?:VALID(?:ITY)?|VALID\s*UP\s*TO|TILL)?|AUTHORI[SZ]ATION\s*TO\s*DRIVE\s*TRANSPORT[^\n]*VALID(?:ITY)?\s*(?:TILL|UP\s*TO)?)\s*[:\-.]?\s*([0-9]{2}[\-\/\.][0-9]{2}[\-\/\.][0-9]{2,4}|[0-9]{2}-[A-Z]{3}-[0-9]{2,4})/i;
+  const genValidityPattern = /(?:VALID(?:ITY)?\s*(?:TILL|UP\s*TO|UPTO)?|EXPIRY|EXPIR(?:ES|Y)?\s*(?:DATE|ON)?|VALID\s*UP\s*TO)\s*[:\-.]?\s*([0-9]{2}[\-\/\.][0-9]{2}[\-\/\.][0-9]{2,4}|[0-9]{2}-[A-Z]{3}-[0-9]{2,4})/i;
 
   const mTr = t.match(trValidityPattern);
   if (mTr && mTr[1]) {
@@ -897,14 +947,21 @@ const extractBatchLicenseInfo = (text: string): BatchLicenseInfo => {
       license_expiry_date = parseDateToISO(mGen[1]);
     }
   }
-  // Fallback: parse all dates and take latest
+
+  // Fallback: parse all dates, excluding DOB / DOI lines
   if (!license_expiry_date) {
     const allDates: string[] = [];
+    const lines = t.split('\n');
     const dateRegex = /\b(\d{2}[\-\/\.\s]\d{2}[\-\/\.\s]\d{4})\b|\b(\d{2}-[A-Z]{3}-\d{4})\b/g;
-    let mDate: RegExpExecArray | null;
-    while ((mDate = dateRegex.exec(t)) !== null) {
-      const parsed = parseDateToISO(mDate[1] || mDate[2]);
-      if (parsed) allDates.push(parsed);
+    for (const line of lines) {
+      if (/(?:DOB|BIRTH|D\.O\.B|DOI|ISSUE|ISSUED|D\.O\.I)/i.test(line) && !/VALID|EXPIR|TILL|UPTO|TR/i.test(line)) {
+        continue;
+      }
+      let mDate: RegExpExecArray | null;
+      while ((mDate = dateRegex.exec(line)) !== null) {
+        const parsed = parseDateToISO(mDate[1] || mDate[2]);
+        if (parsed) allDates.push(parsed);
+      }
     }
     if (allDates.length > 0) {
       allDates.sort();
@@ -918,7 +975,7 @@ const extractBatchLicenseInfo = (text: string): BatchLicenseInfo => {
   const mName = t.match(namePattern);
   if (mName && mName[1]) {
     const cleanName = mName[1].replace(/[\n\r]/g, ' ').replace(/\s+/g, ' ').trim();
-    if (cleanName.length >= 3 && !/^(DRIVING|LICENCE|UNION|INDIA)/i.test(cleanName)) {
+    if (cleanName.length >= 3 && !/^(DRIVING|LICENCE|UNION|INDIA|FORM|TRANSPORT)/i.test(cleanName)) {
       detected_name = cleanName;
     }
   }
@@ -987,14 +1044,18 @@ export const DriversPage: React.FC = () => {
     id_proof_type: 'Aadhar Card',
     photo_url: '',
     license_photo_url: '',
+    license_photo_back_url: '',
     license_expiry_date: '',
     id_proof_url: '',
   });
   const [formError, setFormError] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  // Batch OCR state
+  // Batch OCR state for 2-page extraction
   const [isOcrScanning, setIsOcrScanning] = useState(false);
+  const [scanningSide, setScanningSide] = useState<'front' | 'back' | null>(null);
+  const [frontOcrText, setFrontOcrText] = useState('');
+  const [backOcrText, setBackOcrText] = useState('');
   const [ocrStatus, setOcrStatus] = useState<'idle' | 'scanning' | 'found' | 'not_found'>('idle');
   const [batchOcrResult, setBatchOcrResult] = useState<BatchLicenseInfo | null>(null);
   const [isManualEdit, setIsManualEdit] = useState(false);
@@ -1004,7 +1065,8 @@ export const DriversPage: React.FC = () => {
 
   // File Input References
   const photoInputRef = useRef<HTMLInputElement>(null);
-  const licenseInputRef = useRef<HTMLInputElement>(null);
+  const licenseFrontInputRef = useRef<HTMLInputElement>(null);
+  const licenseBackInputRef = useRef<HTMLInputElement>(null);
   const idProofInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -1030,37 +1092,46 @@ export const DriversPage: React.FC = () => {
 
   const handleFileUpload = async (
     e: React.ChangeEvent<HTMLInputElement>,
-    field: 'photo_url' | 'license_photo_url' | 'id_proof_url'
+    field: 'photo_url' | 'license_photo_url' | 'license_photo_back_url' | 'id_proof_url'
   ) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    if (!file.type.startsWith('image/')) {
-      alert('Please select a valid image file (PNG, JPG, JPEG, WEBP).');
+    const isImage = file.type.startsWith('image/');
+    const isPdf = isPdfFile(file);
+    if (!isImage && !isPdf) {
+      alert('Please select a valid image file (PNG, JPG, JPEG, WEBP) or PDF file.');
       return;
     }
-    if (file.size > 5 * 1024 * 1024) {
-      alert('File size must be under 5 MB.');
+    if (file.size > 10 * 1024 * 1024) {
+      alert('File size must be under 10 MB.');
       return;
     }
     const base64 = await readAsBase64(file);
     setFormData((prev) => ({ ...prev, [field]: base64 }));
     e.target.value = '';
 
-    // ── Run Batch OCR only for license photo ─────────────────────────────────
-    if (field === 'license_photo_url') {
+    // ── Run Batch OCR for Driving License Front or Back ──────────────────────
+    if (field === 'license_photo_url' || field === 'license_photo_back_url') {
+      const isFront = field === 'license_photo_url';
+      setScanningSide(isFront ? 'front' : 'back');
       setIsOcrScanning(true);
       setOcrStatus('scanning');
-      setBatchOcrResult(null);
       try {
-        const worker = await createWorker('eng');
-        const { data: { text } } = await worker.recognize(file);
-        await worker.terminate();
+        const text = await extractTextFromFile(file);
 
-        console.log('[Batch OCR] Extracted raw text:', text);
-        const batchInfo = extractBatchLicenseInfo(text);
+        console.log(`[Batch OCR] Extracted text from License ${isFront ? 'FRONT' : 'BACK'}:`, text);
+
+        const newFrontText = isFront ? text : frontOcrText;
+        const newBackText = isFront ? backOcrText : text;
+        if (isFront) setFrontOcrText(text);
+        else setBackOcrText(text);
+
+        // Combine text from both sides so all details are merged
+        const combinedText = [newFrontText, newBackText].filter(Boolean).join('\n---\n');
+        const batchInfo = extractBatchLicenseInfo(combinedText);
         setBatchOcrResult(batchInfo);
 
-        // Batch update license fields automatically (Driver name is typed manually by user)
+        // Auto-update license fields from 2-page extraction
         setFormData((prev) => ({
           ...prev,
           license_type: batchInfo.license_type,
@@ -1078,6 +1149,45 @@ export const DriversPage: React.FC = () => {
         setOcrStatus('not_found');
       } finally {
         setIsOcrScanning(false);
+        setScanningSide(null);
+      }
+    }
+  };
+
+  const handleRemoveLicensePage = (side: 'front' | 'back') => {
+    if (side === 'front') {
+      const remainingBack = backOcrText;
+      setFrontOcrText('');
+      setFormData((prev) => ({ ...prev, license_photo_url: '' }));
+      if (remainingBack) {
+        const info = extractBatchLicenseInfo(remainingBack);
+        setBatchOcrResult(info);
+        setFormData((prev) => ({
+          ...prev,
+          license_type: info.license_type,
+          ...(info.license_expiry_date ? { license_expiry_date: info.license_expiry_date } : {}),
+          ...(info.license_number ? { license_number: info.license_number } : {}),
+        }));
+      } else {
+        setBatchOcrResult(null);
+        setOcrStatus('idle');
+      }
+    } else {
+      const remainingFront = frontOcrText;
+      setBackOcrText('');
+      setFormData((prev) => ({ ...prev, license_photo_back_url: '' }));
+      if (remainingFront) {
+        const info = extractBatchLicenseInfo(remainingFront);
+        setBatchOcrResult(info);
+        setFormData((prev) => ({
+          ...prev,
+          license_type: info.license_type,
+          ...(info.license_expiry_date ? { license_expiry_date: info.license_expiry_date } : {}),
+          ...(info.license_number ? { license_number: info.license_number } : {}),
+        }));
+      } else {
+        setBatchOcrResult(null);
+        setOcrStatus('idle');
       }
     }
   };
@@ -1100,6 +1210,7 @@ export const DriversPage: React.FC = () => {
         id_proof_type: formData.id_proof_type || undefined,
         photo_url: formData.photo_url || undefined,
         license_photo_url: formData.license_photo_url || undefined,
+        license_photo_back_url: formData.license_photo_back_url || undefined,
         license_expiry_date: formData.license_expiry_date || undefined,
         id_proof_url: formData.id_proof_url || undefined,
       };
@@ -1137,6 +1248,9 @@ export const DriversPage: React.FC = () => {
     setOcrStatus('idle');
     setIsOcrScanning(false);
     setBatchOcrResult(null);
+    setFrontOcrText('');
+    setBackOcrText('');
+    setScanningSide(null);
     setIsManualEdit(false);
     setIsModalOpen(true);
   };
@@ -1151,6 +1265,7 @@ export const DriversPage: React.FC = () => {
       id_proof_type: driver.id_proof_type || 'Aadhar Card',
       photo_url: driver.photo_url || '',
       license_photo_url: driver.license_photo_url || '',
+      license_photo_back_url: driver.license_photo_back_url || '',
       license_expiry_date: driver.license_expiry_date ? driver.license_expiry_date.split('T')[0] : '',
       id_proof_url: driver.id_proof_url || '',
     });
@@ -1158,6 +1273,9 @@ export const DriversPage: React.FC = () => {
     setOcrStatus('idle');
     setIsOcrScanning(false);
     setBatchOcrResult(null);
+    setFrontOcrText('');
+    setBackOcrText('');
+    setScanningSide(null);
     setIsManualEdit(true);
     setIsModalOpen(true);
   };
@@ -1171,11 +1289,15 @@ export const DriversPage: React.FC = () => {
       id_proof_type: 'Aadhar Card',
       photo_url: '',
       license_photo_url: '',
+      license_photo_back_url: '',
       license_expiry_date: '',
       id_proof_url: '',
     });
     setFormError('');
     setBatchOcrResult(null);
+    setFrontOcrText('');
+    setBackOcrText('');
+    setScanningSide(null);
   };
 
   // ─── Table Columns ─────────────────────────────────────────────────────────
@@ -1302,7 +1424,7 @@ export const DriversPage: React.FC = () => {
         if (!d.license_expiry_date) return <span style={{ color: '#94a3b8' }}>—</span>;
         const days = getDaysDifference(d.license_expiry_date);
         const isExpired = days < 0;
-        const isExpiringSoon = days >= 0 && days <= 45;
+        const isExpiringSoon = days >= 0 && days <= 30;
 
         if (isExpired) {
           return (
@@ -1417,16 +1539,25 @@ export const DriversPage: React.FC = () => {
             {d.photo_url ? '📷' : <Camera size={13} color="#cbd5e1" />}
           </span>
 
-          {/* License Photo */}
+          {/* License Photo (Front & Back) */}
           <span
-            title={d.license_photo_url ? 'Driving License Photo: Uploaded' : 'Driving License: Not uploaded'}
+            title={
+              d.license_photo_url && d.license_photo_back_url
+                ? 'Driving License: Front & Back Uploaded'
+                : d.license_photo_url
+                ? 'Driving License: Front Side Uploaded'
+                : d.license_photo_back_url
+                ? 'Driving License: Back Side Uploaded'
+                : 'Driving License: Not uploaded'
+            }
             style={{
-              width: '26px',
+              minWidth: '26px',
               height: '26px',
+              padding: d.license_photo_url && d.license_photo_back_url ? '0 5px' : '0',
               borderRadius: '6px',
-              background: d.license_photo_url ? '#ede9fe' : '#f1f5f9',
-              color: d.license_photo_url ? '#5b21b6' : '#94a3b8',
-              border: `1px solid ${d.license_photo_url ? '#ddd6fe' : '#e2e8f0'}`,
+              background: d.license_photo_url || d.license_photo_back_url ? '#ede9fe' : '#f1f5f9',
+              color: d.license_photo_url || d.license_photo_back_url ? '#5b21b6' : '#94a3b8',
+              border: `1px solid ${d.license_photo_url || d.license_photo_back_url ? '#ddd6fe' : '#e2e8f0'}`,
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
@@ -1434,7 +1565,11 @@ export const DriversPage: React.FC = () => {
               fontWeight: 700,
             }}
           >
-            {d.license_photo_url ? '🪪' : <CreditCard size={13} color="#cbd5e1" />}
+            {d.license_photo_url && d.license_photo_back_url
+              ? '🪪 2/2'
+              : d.license_photo_url || d.license_photo_back_url
+              ? '🪪 1/2'
+              : <CreditCard size={13} color="#cbd5e1" />}
           </span>
 
           {/* Address Proof Document */}
@@ -1508,7 +1643,7 @@ export const DriversPage: React.FC = () => {
     subtitle: string;
     previewUrl: string;
     inputRef: React.RefObject<HTMLInputElement | null>;
-    field: 'photo_url' | 'license_photo_url' | 'id_proof_url';
+    field: 'photo_url' | 'license_photo_url' | 'license_photo_back_url' | 'id_proof_url';
     badge?: string;
     isScanning?: boolean;
   }) => (
@@ -1534,19 +1669,44 @@ export const DriversPage: React.FC = () => {
 
       {previewUrl ? (
         <div style={{ position: 'relative', textAlign: 'center', marginTop: 'auto' }}>
-          <img
-            src={previewUrl}
-            alt={title}
-            style={{
-              maxHeight: '140px',
-              maxWidth: '100%',
-              objectFit: 'contain',
-              borderRadius: '8px',
-              border: isScanning ? '2px solid #7c3aed' : '2px solid #3b82f6',
-              boxShadow: '0 4px 6px rgba(0,0,0,0.05)',
-              opacity: isScanning ? 0.7 : 1,
-            }}
-          />
+          {isPdfFile(previewUrl) ? (
+            <div
+              onClick={() => window.open(previewUrl, '_blank')}
+              style={{
+                cursor: 'pointer',
+                padding: '16px 12px',
+                borderRadius: '8px',
+                background: '#fef2f2',
+                border: '1.5px solid #fecaca',
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: '4px',
+              }}
+              title="Click to preview PDF"
+            >
+              <FileText size={28} color="#dc2626" />
+              <span style={{ fontSize: '11.5px', fontWeight: 700, color: '#991b1b' }}>PDF Document</span>
+              <span style={{ fontSize: '10.5px', color: '#dc2626', display: 'flex', alignItems: 'center', gap: '3px' }}>
+                <Eye size={10} /> View PDF
+              </span>
+            </div>
+          ) : (
+            <img
+              src={previewUrl}
+              alt={title}
+              style={{
+                maxHeight: '140px',
+                maxWidth: '100%',
+                objectFit: 'contain',
+                borderRadius: '8px',
+                border: isScanning ? '2px solid #7c3aed' : '2px solid #3b82f6',
+                boxShadow: '0 4px 6px rgba(0,0,0,0.05)',
+                opacity: isScanning ? 0.7 : 1,
+              }}
+            />
+          )}
           {isScanning && (
             <div style={{
               position: 'absolute',
@@ -1613,14 +1773,14 @@ export const DriversPage: React.FC = () => {
         >
           <Camera size={24} style={{ color: '#94a3b8', margin: '0 auto 6px' }} />
           <div style={{ fontSize: '12px', fontWeight: 600, color: '#3b82f6' }}>Click to upload</div>
-          <div style={{ fontSize: '10px', color: '#94a3b8', marginTop: '2px' }}>JPG, PNG up to 5MB</div>
+          <div style={{ fontSize: '10px', color: '#94a3b8', marginTop: '2px' }}>JPG, PNG or PDF up to 10MB</div>
         </div>
       )}
 
       <input
         type="file"
         ref={inputRef}
-        accept="image/*"
+        accept="image/*,application/pdf,.pdf"
         style={{ display: 'none' }}
         onChange={(e) => handleFileUpload(e, field)}
       />
@@ -1698,207 +1858,424 @@ export const DriversPage: React.FC = () => {
 
         <form onSubmit={handleSubmit}>
           {/* ═══════════════════════════════════════════════════════════════ */}
-          {/* STEP 1: UPLOAD DRIVING LICENSE (PRIMARY ACTION AT TOP)         */}
+          {/* STEP 1: UPLOAD DRIVING LICENSE (FRONT & BACK PAGES)             */}
           {/* ═══════════════════════════════════════════════════════════════ */}
           <div
             style={{
-              background: formData.license_photo_url ? '#f0fdf4' : '#f8fafc',
-              border: formData.license_photo_url ? '1.5px solid #86efac' : '2px dashed #93c5fd',
+              background: formData.license_photo_url && formData.license_photo_back_url
+                ? '#f0fdf4'
+                : formData.license_photo_url || formData.license_photo_back_url
+                ? '#eff6ff'
+                : '#f8fafc',
+              border: formData.license_photo_url && formData.license_photo_back_url
+                ? '1.5px solid #86efac'
+                : formData.license_photo_url || formData.license_photo_back_url
+                ? '1.5px solid #93c5fd'
+                : '2px dashed #93c5fd',
               borderRadius: '16px',
               padding: '18px 20px',
               marginBottom: '22px',
-              boxShadow: formData.license_photo_url ? '0 4px 12px rgba(34, 197, 94, 0.08)' : 'none',
+              boxShadow: formData.license_photo_url || formData.license_photo_back_url
+                ? '0 4px 12px rgba(37, 99, 235, 0.08)'
+                : 'none',
               transition: 'all 0.2s',
             }}
           >
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+            {/* Header with Title and Status Badges */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px', flexWrap: 'wrap', gap: '8px' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                 <CreditCard size={18} color="#2563eb" />
                 <span style={{ fontWeight: 800, fontSize: '14.5px', color: '#0f172a' }}>
-                  Step 1: Upload Driving License Photo
+                  Step 1: Upload Driving License (Front & Back Pages)
                 </span>
                 <span
                   style={{
-                    background: formData.license_photo_url ? '#dcfce7' : '#dbeafe',
-                    color: formData.license_photo_url ? '#15803d' : '#1d4ed8',
+                    background: formData.license_photo_url && formData.license_photo_back_url
+                      ? '#dcfce7'
+                      : formData.license_photo_url || formData.license_photo_back_url
+                      ? '#dbeafe'
+                      : '#f1f5f9',
+                    color: formData.license_photo_url && formData.license_photo_back_url
+                      ? '#15803d'
+                      : formData.license_photo_url || formData.license_photo_back_url
+                      ? '#1d4ed8'
+                      : '#64748b',
                     fontSize: '11px',
                     fontWeight: 700,
                     padding: '2px 8px',
                     borderRadius: '12px',
-                    border: `1px solid ${formData.license_photo_url ? '#bbf7d0' : '#bfdbfe'}`,
+                    border: `1px solid ${
+                      formData.license_photo_url && formData.license_photo_back_url
+                        ? '#bbf7d0'
+                        : formData.license_photo_url || formData.license_photo_back_url
+                        ? '#bfdbfe'
+                        : '#e2e8f0'
+                    }`,
                   }}
                 >
-                  {formData.license_photo_url ? '✅ Auto-Extracted' : '⚡ Instant Auto-Fill'}
+                  {formData.license_photo_url && formData.license_photo_back_url
+                    ? '✅ Both Sides Uploaded'
+                    : formData.license_photo_url
+                    ? '🪪 Front Uploaded (Upload Back for Vehicle Class/TR Expiry)'
+                    : formData.license_photo_back_url
+                    ? '🔄 Back Uploaded (Upload Front for DL No/Name)'
+                    : '⚡ 2-Page Smart Auto-Fill'}
                 </span>
               </div>
-
-              {formData.license_photo_url && !isOcrScanning && (
-                <button
-                  type="button"
-                  onClick={() => licenseInputRef.current?.click()}
-                  style={{
-                    background: '#ffffff',
-                    border: '1px solid #cbd5e1',
-                    borderRadius: '8px',
-                    padding: '4px 10px',
-                    fontSize: '11.5px',
-                    fontWeight: 600,
-                    color: '#2563eb',
-                    cursor: 'pointer',
-                  }}
-                >
-                  Re-upload / Change License
-                </button>
-              )}
             </div>
 
             <p style={{ fontSize: '12px', color: '#64748b', margin: '0 0 14px 0' }}>
-              Upload the driving license photo below. The system automatically extracts the <strong>Driver Name</strong>, <strong>License Type (Heavy/Regular)</strong>, <strong>DL Number</strong>, and <strong>Expiry Date</strong>. <strong>No manual typing required!</strong>
+              Upload both the <strong>Front Page</strong> (Driver Photo, DL Number & Name) and <strong>Back Page</strong> (Vehicle Endorsement Classes, TR Transport Validity & Address). Details from both pages are automatically merged and extracted below.
             </p>
 
-            {/* License Upload / Scanning / Preview Area */}
-            {isOcrScanning ? (
+            {/* 2-Column Upload Cards for Front & Back */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '14px', marginBottom: '14px' }}>
+              {/* FRONT PAGE UPLOAD CARD */}
+              <div
+                style={{
+                  background: '#ffffff',
+                  border: formData.license_photo_url ? '1.5px solid #86efac' : '1.5px dashed #93c5fd',
+                  borderRadius: '12px',
+                  padding: '14px',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '10px',
+                  transition: 'all 0.2s',
+                }}
+              >
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <CreditCard size={15} color="#2563eb" />
+                    <strong style={{ fontSize: '13px', color: '#0f172a' }}>Front Page</strong>
+                    <span style={{ fontSize: '11px', color: '#64748b' }}>(Photo, DL No & Name)</span>
+                  </div>
+                  {formData.license_photo_url && (
+                    <span style={{ fontSize: '10.5px', color: '#166534', background: '#dcfce7', padding: '2px 6px', borderRadius: '4px', fontWeight: 700 }}>
+                      ✓ Uploaded
+                    </span>
+                  )}
+                </div>
+
+                {isOcrScanning && scanningSide === 'front' ? (
+                  <div style={{ padding: '20px', textAlign: 'center', background: '#f5f3ff', borderRadius: '8px', border: '1px solid #ddd6fe' }}>
+                    <ScanLine size={24} color="#7c3aed" style={{ animation: 'pulse 1.2s ease-in-out infinite', margin: '0 auto 6px' }} />
+                    <div style={{ fontWeight: 700, fontSize: '12px', color: '#6d28d9' }}>Scanning Front Page...</div>
+                  </div>
+                ) : formData.license_photo_url ? (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                    {isPdfFile(formData.license_photo_url) ? (
+                      <div
+                        onClick={() => window.open(formData.license_photo_url, '_blank')}
+                        style={{
+                          width: '90px',
+                          height: '60px',
+                          borderRadius: '6px',
+                          border: '1.5px solid #ef4444',
+                          background: '#fef2f2',
+                          display: 'flex',
+                          flexDirection: 'column',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          cursor: 'pointer',
+                        }}
+                        title="Click to view PDF"
+                      >
+                        <FileText size={20} color="#dc2626" />
+                        <span style={{ fontSize: '9.5px', fontWeight: 700, color: '#991b1b' }}>PDF Front</span>
+                      </div>
+                    ) : (
+                      <img
+                        src={formData.license_photo_url}
+                        alt="License Front"
+                        style={{
+                          width: '90px',
+                          height: '60px',
+                          objectFit: 'contain',
+                          borderRadius: '6px',
+                          border: '1.5px solid #22c55e',
+                          background: '#f8fafc',
+                        }}
+                      />
+                    )}
+                    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                      <button
+                        type="button"
+                        onClick={() => licenseFrontInputRef.current?.click()}
+                        style={{
+                          background: '#eff6ff',
+                          border: '1px solid #bfdbfe',
+                          borderRadius: '6px',
+                          padding: '4px 8px',
+                          fontSize: '11px',
+                          fontWeight: 600,
+                          color: '#1d4ed8',
+                          cursor: 'pointer',
+                        }}
+                      >
+                        Change Front Page
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleRemoveLicensePage('front')}
+                        style={{
+                          background: '#fef2f2',
+                          border: '1px solid #fecaca',
+                          borderRadius: '6px',
+                          padding: '4px 8px',
+                          fontSize: '11px',
+                          fontWeight: 600,
+                          color: '#dc2626',
+                          cursor: 'pointer',
+                        }}
+                      >
+                        Remove Front
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <div
+                    onClick={() => licenseFrontInputRef.current?.click()}
+                    style={{
+                      border: '1.5px dashed #cbd5e1',
+                      borderRadius: '8px',
+                      padding: '16px 12px',
+                      textAlign: 'center',
+                      cursor: 'pointer',
+                      background: '#f8fafc',
+                      transition: 'all 0.15s ease',
+                    }}
+                    onMouseEnter={(e) => {
+                      (e.currentTarget as HTMLDivElement).style.borderColor = '#2563eb';
+                      (e.currentTarget as HTMLDivElement).style.background = '#eff6ff';
+                    }}
+                    onMouseLeave={(e) => {
+                      (e.currentTarget as HTMLDivElement).style.borderColor = '#cbd5e1';
+                      (e.currentTarget as HTMLDivElement).style.background = '#f8fafc';
+                    }}
+                  >
+                    <Camera size={24} style={{ color: '#3b82f6', margin: '0 auto 4px' }} />
+                    <div style={{ fontSize: '12.5px', fontWeight: 700, color: '#1d4ed8' }}>
+                      Click to Upload Front Page
+                    </div>
+                    <div style={{ fontSize: '10.5px', color: '#64748b', marginTop: '2px' }}>
+                      DL No, Photo & Name
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* BACK PAGE UPLOAD CARD */}
+              <div
+                style={{
+                  background: '#ffffff',
+                  border: formData.license_photo_back_url ? '1.5px solid #86efac' : '1.5px dashed #93c5fd',
+                  borderRadius: '12px',
+                  padding: '14px',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '10px',
+                  transition: 'all 0.2s',
+                }}
+              >
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <CreditCard size={15} color="#7c3aed" />
+                    <strong style={{ fontSize: '13px', color: '#0f172a' }}>Back Page</strong>
+                    <span style={{ fontSize: '11px', color: '#64748b' }}>(Vehicle Class, TR Expiry)</span>
+                  </div>
+                  {formData.license_photo_back_url && (
+                    <span style={{ fontSize: '10.5px', color: '#166534', background: '#dcfce7', padding: '2px 6px', borderRadius: '4px', fontWeight: 700 }}>
+                      ✓ Uploaded
+                    </span>
+                  )}
+                </div>
+
+                {isOcrScanning && scanningSide === 'back' ? (
+                  <div style={{ padding: '20px', textAlign: 'center', background: '#f5f3ff', borderRadius: '8px', border: '1px solid #ddd6fe' }}>
+                    <ScanLine size={24} color="#7c3aed" style={{ animation: 'pulse 1.2s ease-in-out infinite', margin: '0 auto 6px' }} />
+                    <div style={{ fontWeight: 700, fontSize: '12px', color: '#6d28d9' }}>Scanning Back Page...</div>
+                  </div>
+                ) : formData.license_photo_back_url ? (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                    {isPdfFile(formData.license_photo_back_url) ? (
+                      <div
+                        onClick={() => window.open(formData.license_photo_back_url, '_blank')}
+                        style={{
+                          width: '90px',
+                          height: '60px',
+                          borderRadius: '6px',
+                          border: '1.5px solid #ef4444',
+                          background: '#fef2f2',
+                          display: 'flex',
+                          flexDirection: 'column',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          cursor: 'pointer',
+                        }}
+                        title="Click to view PDF"
+                      >
+                        <FileText size={20} color="#dc2626" />
+                        <span style={{ fontSize: '9.5px', fontWeight: 700, color: '#991b1b' }}>PDF Back</span>
+                      </div>
+                    ) : (
+                      <img
+                        src={formData.license_photo_back_url}
+                        alt="License Back"
+                        style={{
+                          width: '90px',
+                          height: '60px',
+                          objectFit: 'contain',
+                          borderRadius: '6px',
+                          border: '1.5px solid #22c55e',
+                          background: '#f8fafc',
+                        }}
+                      />
+                    )}
+                    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                      <button
+                        type="button"
+                        onClick={() => licenseBackInputRef.current?.click()}
+                        style={{
+                          background: '#eff6ff',
+                          border: '1px solid #bfdbfe',
+                          borderRadius: '6px',
+                          padding: '4px 8px',
+                          fontSize: '11px',
+                          fontWeight: 600,
+                          color: '#1d4ed8',
+                          cursor: 'pointer',
+                        }}
+                      >
+                        Change Back Page
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleRemoveLicensePage('back')}
+                        style={{
+                          background: '#fef2f2',
+                          border: '1px solid #fecaca',
+                          borderRadius: '6px',
+                          padding: '4px 8px',
+                          fontSize: '11px',
+                          fontWeight: 600,
+                          color: '#dc2626',
+                          cursor: 'pointer',
+                        }}
+                      >
+                        Remove Back
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <div
+                    onClick={() => licenseBackInputRef.current?.click()}
+                    style={{
+                      border: '1.5px dashed #cbd5e1',
+                      borderRadius: '8px',
+                      padding: '16px 12px',
+                      textAlign: 'center',
+                      cursor: 'pointer',
+                      background: '#f8fafc',
+                      transition: 'all 0.15s ease',
+                    }}
+                    onMouseEnter={(e) => {
+                      (e.currentTarget as HTMLDivElement).style.borderColor = '#7c3aed';
+                      (e.currentTarget as HTMLDivElement).style.background = '#f5f3ff';
+                    }}
+                    onMouseLeave={(e) => {
+                      (e.currentTarget as HTMLDivElement).style.borderColor = '#cbd5e1';
+                      (e.currentTarget as HTMLDivElement).style.background = '#f8fafc';
+                    }}
+                  >
+                    <Camera size={24} style={{ color: '#7c3aed', margin: '0 auto 4px' }} />
+                    <div style={{ fontSize: '12.5px', fontWeight: 700, color: '#6d28d9' }}>
+                      Click to Upload Back Page
+                    </div>
+                    <div style={{ fontSize: '10.5px', color: '#64748b', marginTop: '2px' }}>
+                      Vehicle Class, TR Expiry & Badge
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Scanning Banner */}
+            {isOcrScanning && (
               <div
                 style={{
                   background: '#f5f3ff',
                   border: '1.5px solid #ddd6fe',
                   borderRadius: '12px',
-                  padding: '24px 20px',
+                  padding: '16px 20px',
                   textAlign: 'center',
                   display: 'flex',
-                  flexDirection: 'column',
                   alignItems: 'center',
-                  gap: '8px',
+                  justifyContent: 'center',
+                  gap: '10px',
                 }}
               >
-                <ScanLine size={32} color="#7c3aed" style={{ animation: 'pulse 1.2s ease-in-out infinite' }} />
-                <div style={{ fontWeight: 800, fontSize: '15px', color: '#6d28d9' }}>
-                  🔍 Scanning License Photo & Reading Details...
-                </div>
-                <div style={{ fontSize: '12px', color: '#7c3aed' }}>
-                  Extracting Driver Name, License Class (Heavy/Regular), DL No, and Expiry Date automatically.
+                <ScanLine size={24} color="#7c3aed" style={{ animation: 'pulse 1.2s ease-in-out infinite' }} />
+                <div style={{ fontSize: '13px', fontWeight: 700, color: '#6d28d9' }}>
+                  Scanning {scanningSide === 'front' ? 'Front Page' : 'Back Page'} & extracting details across both sides...
                 </div>
               </div>
-            ) : formData.license_photo_url ? (
-              <div>
-                <div
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '16px',
-                    background: '#ffffff',
-                    padding: '12px 16px',
-                    borderRadius: '12px',
-                    border: '1px solid #bbf7d0',
-                  }}
-                >
-                  <img
-                    src={formData.license_photo_url}
-                    alt="License"
-                    style={{
-                      width: '110px',
-                      height: '75px',
-                      objectFit: 'contain',
-                      borderRadius: '8px',
-                      border: '2px solid #22c55e',
-                      background: '#f8fafc',
-                    }}
-                  />
-                  <div style={{ flex: 1 }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#15803d', fontWeight: 800, fontSize: '13px' }}>
-                      <CheckCircle size={15} /> All Details Auto-Extracted Successfully
-                    </div>
-                    <div style={{ fontSize: '11px', color: '#64748b', marginTop: '3px' }}>
-                      All required fields below have been populated directly from this driving license.
-                    </div>
+            )}
+
+            {/* Extracted Details Summary (Shown whenever at least 1 page is uploaded) */}
+            {(formData.license_photo_url || formData.license_photo_back_url) && !isOcrScanning && (
+              <div style={{ background: '#ffffff', border: '1px solid #bbf7d0', borderRadius: '12px', padding: '12px 16px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px', flexWrap: 'wrap', gap: '6px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#15803d', fontWeight: 800, fontSize: '13px' }}>
+                    <CheckCircle size={15} /> All Details Auto-Extracted Successfully
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setFormData((prev) => ({
-                        ...prev,
-                        license_photo_url: '',
-                        license_number: '',
-                        license_expiry_date: '',
-                      }));
-                      setBatchOcrResult(null);
-                    }}
-                    style={{
-                      background: '#fef2f2',
-                      border: '1px solid #fecaca',
-                      color: '#dc2626',
-                      borderRadius: '8px',
-                      padding: '6px 10px',
-                      fontSize: '11px',
-                      fontWeight: 600,
-                      cursor: 'pointer',
-                    }}
-                  >
-                    Remove
-                  </button>
+                  <span style={{ fontSize: '11px', color: '#64748b' }}>
+                    {formData.license_photo_url && formData.license_photo_back_url
+                      ? '✨ Combined extraction from both Front and Back pages'
+                      : formData.license_photo_url
+                      ? 'Extracted from Front page (Tip: Upload Back page for vehicle class & TR expiry)'
+                      : 'Extracted from Back page (Tip: Upload Front page for DL number & photo)'}
+                  </span>
                 </div>
 
-                {/* 3-Item Batch Result Chips */}
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '10px', marginTop: '12px' }}>
-                  <div style={{ background: '#ffffff', border: '1px solid #bbf7d0', borderRadius: '8px', padding: '8px 12px' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '10px' }}>
+                  <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '8px', padding: '8px 12px' }}>
                     <div style={{ fontSize: '10px', color: '#64748b', fontWeight: 700, textTransform: 'uppercase' }}>License Class</div>
                     <div style={{ fontWeight: 800, fontSize: '12.5px', color: formData.license_type === 'HEAVY' ? '#1d4ed8' : '#0f766e' }}>
-                      {formData.license_type === 'HEAVY' ? '🚛 HEAVY (Transport)' : '🚗 REGULAR (LMV)'}
+                      {formData.license_type === 'HEAVY' ? '🚛 HEAVY (Transport / HMV)' : '🚗 REGULAR (LMV)'}
                     </div>
                   </div>
 
-                  <div style={{ background: '#ffffff', border: '1px solid #bbf7d0', borderRadius: '8px', padding: '8px 12px' }}>
+                  <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '8px', padding: '8px 12px' }}>
                     <div style={{ fontSize: '10px', color: '#64748b', fontWeight: 700, textTransform: 'uppercase' }}>DL Number</div>
                     <div style={{ fontWeight: 800, fontSize: '12.5px', color: '#0f172a', fontFamily: 'monospace' }}>
                       {formData.license_number || 'Detected'}
                     </div>
                   </div>
 
-                  <div style={{ background: '#ffffff', border: '1px solid #bbf7d0', borderRadius: '8px', padding: '8px 12px' }}>
-                    <div style={{ fontSize: '10px', color: '#64748b', fontWeight: 700, textTransform: 'uppercase' }}>Expiry Date</div>
+                  <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '8px', padding: '8px 12px' }}>
+                    <div style={{ fontSize: '10px', color: '#64748b', fontWeight: 700, textTransform: 'uppercase' }}>Transport Expiry Date</div>
                     <div style={{ fontWeight: 800, fontSize: '12.5px', color: '#15803d' }}>
                       {formData.license_expiry_date ? toIST(formData.license_expiry_date) : 'Detected'}
                     </div>
                   </div>
                 </div>
               </div>
-            ) : (
-              <div
-                onClick={() => licenseInputRef.current?.click()}
-                style={{
-                  border: '2px dashed #93c5fd',
-                  borderRadius: '12px',
-                  padding: '24px 16px',
-                  textAlign: 'center',
-                  cursor: 'pointer',
-                  background: '#ffffff',
-                  transition: 'all 0.2s',
-                }}
-                onMouseEnter={(e) => {
-                  (e.currentTarget as HTMLDivElement).style.borderColor = '#2563eb';
-                  (e.currentTarget as HTMLDivElement).style.background = '#eff6ff';
-                }}
-                onMouseLeave={(e) => {
-                  (e.currentTarget as HTMLDivElement).style.borderColor = '#93c5fd';
-                  (e.currentTarget as HTMLDivElement).style.background = '#ffffff';
-                }}
-              >
-                <Camera size={32} style={{ color: '#3b82f6', margin: '0 auto 8px' }} />
-                <div style={{ fontSize: '14px', fontWeight: 700, color: '#1d4ed8' }}>
-                  Click to Upload Driving License Photo
-                </div>
-                <div style={{ fontSize: '11px', color: '#64748b', marginTop: '4px' }}>
-                  JPG, PNG, JPEG up to 5MB • Automatically fills all driver details below
-                </div>
-              </div>
             )}
 
+            {/* Hidden File Inputs for Front & Back */}
             <input
               type="file"
-              ref={licenseInputRef}
-              accept="image/*"
+              ref={licenseFrontInputRef}
+              accept="image/*,application/pdf,.pdf"
               style={{ display: 'none' }}
               onChange={(e) => handleFileUpload(e, 'license_photo_url')}
+            />
+            <input
+              type="file"
+              ref={licenseBackInputRef}
+              accept="image/*,application/pdf,.pdf"
+              style={{ display: 'none' }}
+              onChange={(e) => handleFileUpload(e, 'license_photo_back_url')}
             />
           </div>
 
@@ -2102,9 +2479,7 @@ export const DriversPage: React.FC = () => {
                 )}
               </label>
 
-              <input
-                type="date"
-                className="form-control"
+              <DateField
                 readOnly={!isManualEdit}
                 value={formData.license_expiry_date}
                 onChange={(e) => setFormData({ ...formData, license_expiry_date: e.target.value })}
@@ -2121,7 +2496,7 @@ export const DriversPage: React.FC = () => {
                 }
               />
               <small style={{ color: '#64748b', fontSize: '11px', marginTop: '4px', display: 'block' }}>
-                ⚠️ System alerts admin & managers 45 days before this date.
+                ⚠️ System alerts admin & managers 30 days before this date.
               </small>
             </div>
 

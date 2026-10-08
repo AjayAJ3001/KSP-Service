@@ -594,7 +594,7 @@ export const UnloadingRatesPage: React.FC = () => {
                   />
                   {formData.party_id && partyRoutes.length === 0 && !isLoadingPartyRoutes && (
                     <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px' }}>
-                      No routes assigned to this party in Freight Rates. Enter unit name manually.
+                      No delivery units assigned to this party in Parties and Units. Enter unit name manually.
                     </div>
                   )}
                 </div>

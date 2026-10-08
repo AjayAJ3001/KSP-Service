@@ -13,14 +13,10 @@ const getDaysDifference = (expiryDateStr: string) => {
   return Math.ceil(diffTime / (1000 * 60 * 60 * 24));
 };
 
+import { formatDateDMY } from '../../utils/dateUtils';
+
 const formatDate = (dateStr: string) => {
-  try {
-    return new Date(dateStr).toLocaleDateString('en-IN', {
-      day: '2-digit', month: 'short', year: 'numeric', timeZone: 'Asia/Kolkata',
-    });
-  } catch {
-    return dateStr;
-  }
+  return formatDateDMY(dateStr);
 };
 
 interface DocAlert {
@@ -29,16 +25,16 @@ interface DocAlert {
   days: number;
 }
 
-const THRESHOLD = 45;
+const THRESHOLD = 30;
 
 const getVehicleAlerts = (vehicle: Vehicle): DocAlert[] => {
   const alerts: DocAlert[] = [];
   const docs: { label: string; date: string | undefined }[] = [
-    { label: 'DTS Certificate', date: vehicle.dts_expiry_date },
+    { label: 'TDS Certificate', date: vehicle.tds_expiry_date || vehicle.dts_expiry_date },
     { label: 'Insurance', date: vehicle.insurance_expiry_date },
     { label: 'Permit', date: vehicle.permit_expiry_date },
     { label: 'FC (Fitness Certificate)', date: vehicle.fc_expiry_date },
-    { label: 'Road Tax', date: vehicle.tax_expiry_date },
+    { label: 'Yearly Road Tax', date: vehicle.tax_expiry_date },
   ];
   for (const doc of docs) {
     if (doc.date) {
@@ -159,7 +155,7 @@ export const VehicleExpiryAlertModal: React.FC<Props> = ({
                 Fleet Compliance Alert
               </div>
               <h3 style={{ margin: 0, fontSize: '20px', fontWeight: 800 }}>
-                Vehicle Document Expiry — Within 45 Days
+                Vehicle Document Expiry — Within 30 Days
               </h3>
               <div style={{ marginTop: '4px', fontSize: '13px', color: 'rgba(255,255,255,0.85)' }}>
                 {expiringVehicles.length} vehicle{expiringVehicles.length > 1 ? 's' : ''} &nbsp;&middot;&nbsp; {totalAlerts} document alert{totalAlerts > 1 ? 's' : ''}
@@ -171,7 +167,7 @@ export const VehicleExpiryAlertModal: React.FC<Props> = ({
         {/* Body */}
         <div style={{ flex: 1, overflowY: 'auto', padding: '20px 24px' }}>
           <p style={{ margin: '0 0 16px', fontSize: '13.5px', color: '#475569', lineHeight: 1.6 }}>
-            The following active vehicles have one or more compliance documents that are <strong>already expired</strong> or will expire within the next <strong>45 days</strong>. Please take action to renew them promptly.
+            The following active vehicles have one or more compliance documents that are <strong>already expired</strong> or will expire within the next <strong>30 days</strong>. Please take action to renew them promptly.
           </p>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
             {expiringVehicles.map((vehicle) => {

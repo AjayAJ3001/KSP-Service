@@ -71,7 +71,7 @@ export const driverService = {
     const res = await api.get('/drivers', { params });
     return res.data;
   },
-  getExpiringDrivers: async (days: number = 45): Promise<ApiResponse<Driver[]>> => {
+  getExpiringDrivers: async (days: number = 30): Promise<ApiResponse<Driver[]>> => {
     const res = await api.get('/drivers/expiring', { params: { days } });
     return res.data;
   },
@@ -123,7 +123,7 @@ export const vehicleService = {
     const res = await api.delete(`/vehicles/${id}`);
     return res.data;
   },
-  getExpiringVehicles: async (days: number = 45): Promise<ApiResponse<Vehicle[]>> => {
+  getExpiringVehicles: async (days: number = 30): Promise<ApiResponse<Vehicle[]>> => {
     const res = await api.get('/vehicles/expiring', { params: { days } });
     return res.data;
   },
@@ -343,7 +343,7 @@ export const reportService = {
 
 // Audit Log Service
 export const auditLogService = {
-  getAuditLogs: async (params?: { page?: number; limit?: number; module?: string; from_date?: string; to_date?: string }): Promise<ApiResponse<PaginatedData<AuditLog>>> => {
+  getAuditLogs: async (params?: { page?: number; limit?: number; module?: string; source?: string; from_date?: string; to_date?: string }): Promise<ApiResponse<PaginatedData<AuditLog> & { counts?: { total_all: number; total_admin: number; total_mobile: number } }>> => {
     const res = await api.get('/audit-logs', { params });
     return res.data;
   },

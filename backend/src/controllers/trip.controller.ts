@@ -14,6 +14,7 @@ export const getTrips = asyncHandler(async (req: AuthRequest, res: Response): Pr
   const vehicle_id = req.query.vehicle_id as string;
   const from_date = req.query.from_date as string;
   const to_date = req.query.to_date as string;
+  const unit_id = req.query.unit_id as string;
   const created_by = req.query.created_by as string;
 
   let conditions = ['1=1'];
@@ -31,6 +32,7 @@ export const getTrips = asyncHandler(async (req: AuthRequest, res: Response): Pr
   if (party_id) { conditions.push(`t.party_id = $${paramIdx}`); params.push(party_id); paramIdx++; }
   if (driver_id) { conditions.push(`t.driver_id = $${paramIdx}`); params.push(driver_id); paramIdx++; }
   if (vehicle_id) { conditions.push(`t.vehicle_id = $${paramIdx}`); params.push(vehicle_id); paramIdx++; }
+  if (unit_id) { conditions.push(`t.unit_id = $${paramIdx}`); params.push(unit_id); paramIdx++; }
   if (from_date) { conditions.push(`t.trip_date >= $${paramIdx}`); params.push(from_date); paramIdx++; }
   if (to_date) { conditions.push(`t.trip_date <= $${paramIdx}`); params.push(to_date); paramIdx++; }
 
@@ -107,13 +109,20 @@ export const createTrip = asyncHandler(async (req: AuthRequest, res: Response): 
   // Backend calculates total freight — never trust frontend
   const total_freight = parseFloat(goods_weight) * parseFloat(freight_rate);
 
+  // Normalize date format if provided as DD-MM-YYYY
+  let normalized_trip_date = trip_date;
+  if (typeof trip_date === 'string' && /^\d{2}-\d{2}-\d{4}$/.test(trip_date.trim())) {
+    const [d, m, y] = trip_date.trim().split('-');
+    normalized_trip_date = `${y}-${m}-${d}`;
+  }
+
   const result = await query(
     `INSERT INTO trips (vehicle_id, driver_id, party_id, route_id, unit_id, freight_rate_id,
      freight_rate, goods_weight, total_freight, advance_paid, trip_date, status, created_by)
      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 'PAYMENT_PENDING', $12)
      RETURNING *`,
     [vehicle_id, driver_id, party_id, route_id, effectiveUnitId, freight_rate_id || null,
-     freight_rate, goods_weight, total_freight, advance_paid || 0, trip_date, req.user?.id]
+     freight_rate, goods_weight, total_freight, advance_paid || 0, normalized_trip_date, req.user?.id]
   );
 
   await createAuditLog(req.user?.id, 'CREATE_TRIP', 'TRIPS', result.rows[0].id, { trip_date, total_freight });

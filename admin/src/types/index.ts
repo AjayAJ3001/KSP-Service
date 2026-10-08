@@ -21,6 +21,7 @@ export interface Driver {
   license_type?: 'HEAVY' | 'REGULAR' | string;
   photo_url?: string;
   license_photo_url?: string;
+  license_photo_back_url?: string;
   license_expiry_date?: string;
   days_remaining?: number;
   id_proof_type?: string;
@@ -33,11 +34,15 @@ export interface Driver {
 export interface Vehicle {
   id: number;
   lorry_number: string;
+  truck_image_url?: string;
   vehicle_type?: string;
   capacity_tons?: number;
   goodshed_loading_expense?: number;
   rc_number?: string;
   rc_photo_url?: string;
+  rc_photo_back_url?: string;
+  rc_expiry_date?: string;
+  rc_reg_date?: string;
   account_number?: string;
   bank_name?: string;
   ifsc_code?: string;
@@ -48,6 +53,10 @@ export interface Vehicle {
   dts_number?: string;
   dts_expiry_date?: string;
   dts_certificate_url?: string;
+  tds_number?: string;
+  tds_expiry_date?: string;
+  tds_certificate_url?: string;
+  tds_certificate_url_2?: string;
   insurance_policy_number?: string;
   insurance_expiry_date?: string;
   insurance_photo_url?: string;
@@ -159,7 +168,7 @@ export interface ExpenseRate {
 
 export interface CleaningExpenseRate {
   id: number;
-  loading_expense: number;
+  unit_name: string;
   cleaning_charge: number;
   description?: string;
   status: 'ACTIVE' | 'INACTIVE';
@@ -289,9 +298,11 @@ export interface AuditLog {
   user_id?: number;
   username?: string;
   user_name?: string;
+  user_role?: string;
   action: string;
   module: string;
   record_id?: string;
+  source?: 'ADMIN' | 'MOBILE' | string;
   details?: any;
   created_at: string;
 }
@@ -314,6 +325,13 @@ export interface DashboardData {
     total_balance: string | number;
   };
   recent_trips: Trip[];
+  compliance_alerts?: Array<{
+    lorry_number: string;
+    fc_expiry_date?: string | null;
+    insurance_expiry_date?: string | null;
+    permit_expiry_date?: string | null;
+    tax_expiry_date?: string | null;
+  }>;
 }
 
 export interface ApiResponse<T = any> {

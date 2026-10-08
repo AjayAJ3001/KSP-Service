@@ -30,7 +30,18 @@ async function migrateVehicles() {
         ADD COLUMN IF NOT EXISTS fc_expiry_date DATE,
         ADD COLUMN IF NOT EXISTS fc_photo_url TEXT,
         ADD COLUMN IF NOT EXISTS tax_expiry_date DATE,
-        ADD COLUMN IF NOT EXISTS tax_photo_url TEXT;
+        ADD COLUMN IF NOT EXISTS tax_photo_url TEXT,
+        ADD COLUMN IF NOT EXISTS rc_expiry_date DATE,
+        ADD COLUMN IF NOT EXISTS rc_reg_date DATE,
+        ADD COLUMN IF NOT EXISTS rc_photo_back_url TEXT,
+        ADD COLUMN IF NOT EXISTS tds_number VARCHAR(50),
+        ADD COLUMN IF NOT EXISTS tds_expiry_date DATE,
+        ADD COLUMN IF NOT EXISTS tds_certificate_url TEXT;
+
+      UPDATE vehicles SET tds_number = dts_number WHERE tds_number IS NULL AND dts_number IS NOT NULL;
+      UPDATE vehicles SET tds_expiry_date = dts_expiry_date WHERE tds_expiry_date IS NULL AND dts_expiry_date IS NOT NULL;
+      UPDATE vehicles SET tds_certificate_url = dts_certificate_url WHERE tds_certificate_url IS NULL AND dts_certificate_url IS NOT NULL;
+      UPDATE vehicles SET rc_reg_date = rc_expiry_date WHERE rc_reg_date IS NULL AND rc_expiry_date IS NOT NULL;
     `);
     console.log('Migration successful: All vehicle document, banking, and compliance columns added.');
 

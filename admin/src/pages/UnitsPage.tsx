@@ -5,6 +5,7 @@ import { Unit } from '../types';
 import { DataTable, Column } from '../components/Common/DataTable';
 import { Modal } from '../components/Common/Modal';
 import { StatusBadge } from '../components/Common/StatusBadge';
+import { formatDateDMY } from '../utils/dateUtils';
 
 export const UnitsPage: React.FC = () => {
   const [units, setUnits] = useState<Unit[]>([]);
@@ -89,7 +90,7 @@ export const UnitsPage: React.FC = () => {
     { header: 'Unit Name', accessor: 'name', render: (u) => <strong>{u.name}</strong> },
     { header: 'Abbreviation', accessor: (u) => u.abbreviation || '—' },
     { header: 'Status', accessor: 'status', render: (u) => <StatusBadge status={u.status} /> },
-    { header: 'Created Date', accessor: (u) => new Date(u.created_at).toLocaleDateString('en-IN') },
+    { header: 'Created Date', accessor: (u) => formatDateDMY(u.created_at) },
     {
       header: 'Actions',
       render: (u) => (

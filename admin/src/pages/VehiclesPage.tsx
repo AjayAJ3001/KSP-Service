@@ -1,42 +1,30 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
-  Truck, Plus, Edit2, Search, Trash2, Eye, Download, Printer, X, Share2, Copy, Check,
-  Calendar, ShieldCheck, FileText, CreditCard, AlertTriangle, AlertCircle,
-  Camera, CheckCircle, User as UserIcon, Building, DollarSign,
-  ScanLine, Loader, RefreshCw
+  Truck, Plus, Edit2, Search, Trash2, Eye, X, Camera,
+  CheckCircle, AlertCircle, Image as ImageIcon, Download, ZoomIn,
+  FileText, Shield, CreditCard, Building, Hash, Calendar,
+  Loader2, Sparkles, AlertTriangle, Share2, Printer
 } from 'lucide-react';
 import { vehicleService } from '../services/adminService';
 import { Vehicle } from '../types';
 import { DataTable, Column } from '../components/Common/DataTable';
 import { Modal } from '../components/Common/Modal';
-import Tesseract from 'tesseract.js';
+import { extractTextFromFileOrData } from '../utils/fileExtraction';
+import {
+  parseRcDocument,
+  parseFcDocument,
+  parseTaxDocument,
+  parseTdsDocument,
+  parseBankDocument,
+  parsePanDocument,
+  parseInsuranceDocument,
+  parsePermitDocument,
+  getNextMarch31st,
+  formatVehicleNumber,
+} from '../utils/docParsers';
 
-// ─── Helpers ─────────────────────────────────────────────────────────────────
-const toIST = (d: string) => {
-  try {
-    return new Date(d).toLocaleDateString('en-IN', {
-      day: '2-digit',
-      month: 'short',
-      year: 'numeric',
-      timeZone: 'Asia/Kolkata',
-    });
-  } catch {
-    return d;
-  }
-};
-
-const getDaysDifference = (expiryDateStr?: string | null): number | null => {
-  if (!expiryDateStr) return null;
-  try {
-    const expiry = new Date(expiryDateStr);
-    const today = new Date();
-    expiry.setHours(0, 0, 0, 0);
-    today.setHours(0, 0, 0, 0);
-    return Math.ceil((expiry.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
-  } catch {
-    return null;
-  }
-};
+import { formatDateDMY } from '../utils/dateUtils';
+import { DateField } from '../components/Common/DateField';
 
 const readAsBase64 = (file: File): Promise<string> =>
   new Promise((res, rej) => {
@@ -46,1368 +34,1034 @@ const readAsBase64 = (file: File): Promise<string> =>
     r.readAsDataURL(file);
   });
 
-const formatCurrency = (val: number | string | undefined) => {
-  const num = parseFloat(String(val)) || 0;
-  return `₹${num.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+// ─── Helper: format date as DD-MM-YYYY ───────────────────────────────────────
+const fmtDate = (d?: string | null) => {
+  if (!d) return null;
+  return formatDateDMY(d);
 };
 
-// ─── OCR Date Extraction ──────────────────────────────────────────────────────
-const parseIndianDate = (text: string): string | null => {
-  // Normalise OCR noise
-  const t = text.replace(/[oO]/g, '0').replace(/[lI|]/g, '1');
-
-  const patterns = [
-    // DD/MM/YYYY or DD-MM-YYYY or DD.MM.YYYY
-    /(\d{1,2})[.\-/](\d{1,2})[.\-/](\d{4})/g,
-    // YYYY/MM/DD
-    /(\d{4})[.\-/](\d{1,2})[.\-/](\d{1,2})/g,
-    // DD Mon YYYY  e.g. 15 Mar 2026
-    /(\d{1,2})\s+([A-Za-z]{3,9})\s+(\d{4})/g,
-    // Mon YYYY  (e.g. MAR 2026 – treat as last day of month)
-    /([A-Za-z]{3,9})\s+(\d{4})/g,
-  ];
-
-  const months: Record<string, string> = {
-    jan:'01', feb:'02', mar:'03', apr:'04', may:'05', jun:'06',
-    jul:'07', aug:'08', sep:'09', oct:'10', nov:'11', dec:'12',
-    january:'01', february:'02', march:'03', april:'04', june:'06',
-    july:'07', august:'08', september:'09', october:'10', november:'11', december:'12',
-  };
-
-  const candidates: Date[] = [];
-
-  // Pattern 1: DD/MM/YYYY
-  const p1 = /(\d{1,2})[.\-/](\d{1,2})[.\-/](\d{4})/g;
-  let m;
-  while ((m = p1.exec(t)) !== null) {
-    const d = new Date(`${m[3]}-${m[2].padStart(2,'0')}-${m[1].padStart(2,'0')}`);
-    if (!isNaN(d.getTime())) candidates.push(d);
-  }
-
-  // Pattern 2: YYYY/MM/DD
-  const p2 = /(\d{4})[.\-/](\d{1,2})[.\-/](\d{1,2})/g;
-  while ((m = p2.exec(t)) !== null) {
-    const d = new Date(`${m[1]}-${m[2].padStart(2,'0')}-${m[3].padStart(2,'0')}`);
-    if (!isNaN(d.getTime())) candidates.push(d);
-  }
-
-  // Pattern 3: DD Mon YYYY
-  const p3 = /(\d{1,2})\s+([A-Za-z]{3,9})\s+(\d{4})/g;
-  while ((m = p3.exec(t)) !== null) {
-    const mo = months[m[2].toLowerCase()];
-    if (mo) {
-      const d = new Date(`${m[3]}-${mo}-${m[1].padStart(2,'0')}`);
-      if (!isNaN(d.getTime())) candidates.push(d);
-    }
-  }
-
-  // Pattern 4: Mon YYYY
-  const p4 = /([A-Za-z]{3,9})\s+(\d{4})/g;
-  while ((m = p4.exec(t)) !== null) {
-    const mo = months[m[1].toLowerCase()];
-    if (mo) {
-      const lastDay = new Date(parseInt(m[2]), parseInt(mo), 0).getDate();
-      const d = new Date(`${m[2]}-${mo}-${String(lastDay).padStart(2,'0')}`);
-      if (!isNaN(d.getTime())) candidates.push(d);
-    }
-  }
-
-  if (candidates.length === 0) return null;
-
-  // Prefer the latest future date that looks like an expiry (or the max date found)
-  const today = new Date();
-  const future = candidates.filter(d => d > today);
-  const target = future.length > 0
-    ? future.reduce((a, b) => (a < b ? a : b)) // nearest future date
-    : candidates.reduce((a, b) => (a > b ? a : b)); // most recent past
-
-  return target.toISOString().slice(0, 10);
+const getDaysLeft = (d?: string | null): number | null => {
+  if (!d) return null;
+  const diff = Math.ceil((new Date(d).getTime() - Date.now()) / 86400000);
+  return diff;
 };
 
-const extractDocNumber = (text: string, docType: 'fc' | 'insurance' | 'permit' | 'dts' | 'pan' | 'rc' | 'bank'): string | null => {
-  const t = text.toUpperCase();
-  const patterns: Record<string, RegExp[]> = {
-    pan: [/[A-Z]{5}[0-9]{4}[A-Z]/],
-    rc: [/[A-Z]{2}\s?\d{2}\s?[A-Z]{1,2}\s?\d{4}/],
-    insurance: [
-      /POLICY\s*(?:NO\.?|NUMBER)?\s*[:\-]?\s*([A-Z0-9\-\/]{6,20})/,
-      /(?:POLICY|POL)\s*[:\-]?\s*([A-Z0-9\-\/]{6,20})/,
-    ],
-    permit: [
-      /PERMIT\s*(?:NO\.?|NUMBER)?\s*[:\-]?\s*([A-Z0-9\-\/]{4,20})/,
-    ],
-    fc: [
-      /(?:CERT|CERTIFICATE|FC)\s*(?:NO\.?|NUMBER)?\s*[:\-]?\s*([A-Z0-9\-\/]{4,20})/,
-    ],
-    dts: [
-      /(?:DTS|CERT|CERTIFICATE)\s*(?:NO\.?|NUMBER)?\s*[:\-]?\s*([A-Z0-9\-\/]{4,20})/,
-    ],
-    bank: [
-      /\b\d{9,18}\b/,
-      /[A-Z]{4}0[A-Z0-9]{6}/,
-    ],
-  };
-  for (const pat of (patterns[docType] || [])) {
-    const m = t.match(pat);
-    if (m) return m[1] || m[0];
-  }
-  return null;
+const ExpiryBadge: React.FC<{ date?: string | null }> = ({ date }) => {
+  if (!date) return null;
+  const days = getDaysLeft(date);
+  if (days === null) return null;
+  const color = days < 0 ? '#b91c1c' : days <= 30 ? '#d97706' : '#15803d';
+  const bg = days < 0 ? '#fef2f2' : days <= 30 ? '#fffbeb' : '#f0fdf4';
+  const label = days < 0 ? `Expired ${Math.abs(days)}d ago` : days === 0 ? 'Expires today' : `${days}d left`;
+  return (
+    <span style={{
+      fontSize: '11px', fontWeight: 700, padding: '2px 8px',
+      borderRadius: '10px', background: bg, color, display: 'inline-flex',
+      alignItems: 'center', gap: '4px',
+    }}>
+      <Calendar size={10} />{label}
+    </span>
+  );
 };
 
-// ─── Truck Profile & Verification View Modal ─────────────────────────────────
-interface TruckProfileModalProps {
-  vehicle: Vehicle | null;
-  onClose: () => void;
-  onEdit?: (vehicle: Vehicle) => void;
+// ─── Helpers to detect file type from base64 data URI ───────────────────────
+const getFileType = (dataUri: string): 'image' | 'pdf' | 'word' | 'file' => {
+  if (!dataUri) return 'file';
+  if (dataUri.startsWith('data:image/')) return 'image';
+  if (dataUri.includes('application/pdf')) return 'pdf';
+  if (dataUri.includes('application/msword') || dataUri.includes('officedocument.wordprocessingml')) return 'word';
+  return 'file';
+};
+
+const getFileName = (dataUri: string): string => {
+  const type = getFileType(dataUri);
+  if (type === 'pdf') return 'PDF Document';
+  if (type === 'word') return 'Word Document';
+  if (type === 'image') return 'Image';
+  return 'File';
+};
+
+// ─── Reusable upload widget — accepts image / PDF / Word / any file ───────────
+interface ImageUploadFieldProps {
+  value: string;
+  label: string;
+  onUpload: () => void;
+  onRemove: () => void;
+  isExtracting?: boolean;
 }
 
-const TruckProfileModal: React.FC<TruckProfileModalProps> = ({ vehicle, onClose, onEdit }) => {
-  const [zoomImage, setZoomImage] = useState<{ url: string; title: string } | null>(null);
-  const [shareCopied, setShareCopied] = useState(false);
-  const [shareMenuOpen, setShareMenuOpen] = useState(false);
-
-  if (!vehicle) return null;
-
-  const fcDays = getDaysDifference(vehicle.fc_expiry_date);
-  const insDays = getDaysDifference(vehicle.insurance_expiry_date);
-  const permitDays = getDaysDifference(vehicle.permit_expiry_date);
-  const taxDays = getDaysDifference(vehicle.tax_expiry_date);
-  const dtsDays = getDaysDifference(vehicle.dts_expiry_date);
-
-  const isFcExpired = fcDays !== null && fcDays < 0;
-  const isFcExpiringSoon = fcDays !== null && fcDays >= 0 && fcDays <= 45;
-
-  const isInsExpired = insDays !== null && insDays < 0;
-  const isInsExpiringSoon = insDays !== null && insDays >= 0 && insDays <= 45;
-
-  const isPermitExpired = permitDays !== null && permitDays < 0;
-  const isPermitExpiringSoon = permitDays !== null && permitDays >= 0 && permitDays <= 45;
-
-  const isTaxExpired = taxDays !== null && taxDays < 0;
-  const isTaxExpiringSoon = taxDays !== null && taxDays >= 0 && taxDays <= 45;
-
-  const isDtsExpired = dtsDays !== null && dtsDays < 0;
-  const isDtsExpiringSoon = dtsDays !== null && dtsDays >= 0 && dtsDays <= 45;
-
-  const alertList: { name: string; date: string; days: number; isExpired: boolean }[] = [];
-  if (vehicle.fc_expiry_date && fcDays !== null && fcDays <= 45) {
-    alertList.push({ name: 'Fitness Certificate (FC)', date: vehicle.fc_expiry_date, days: fcDays, isExpired: isFcExpired });
-  }
-  if (vehicle.insurance_expiry_date && insDays !== null && insDays <= 45) {
-    alertList.push({ name: 'Insurance Policy', date: vehicle.insurance_expiry_date, days: insDays, isExpired: isInsExpired });
-  }
-  if (vehicle.permit_expiry_date && permitDays !== null && permitDays <= 45) {
-    alertList.push({ name: 'Road Permit', date: vehicle.permit_expiry_date, days: permitDays, isExpired: isPermitExpired });
-  }
-  if (vehicle.tax_expiry_date && taxDays !== null && taxDays <= 45) {
-    alertList.push({ name: 'Yearly Road Tax', date: vehicle.tax_expiry_date, days: taxDays, isExpired: isTaxExpired });
-  }
-  if (vehicle.dts_expiry_date && dtsDays !== null && dtsDays <= 45) {
-    alertList.push({ name: 'DTS Certificate', date: vehicle.dts_expiry_date, days: dtsDays, isExpired: isDtsExpired });
-  }
-
-  const buildTruckProfileHtml = () => {
-    return `
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8" />
-  <title>Truck Master Record - ${vehicle.lorry_number}</title>
-  <style>
-    @page { size: A4; margin: 12mm; }
-    * { box-sizing: border-box; }
-    body {
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
-      color: #0f172a;
-      background: #ffffff;
-      margin: 0;
-      padding: 20px;
-      font-size: 12.5px;
-      line-height: 1.45;
-    }
-    .header {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      border-bottom: 2.5px solid #2563eb;
-      padding-bottom: 14px;
-      margin-bottom: 20px;
-    }
-    .header h1 {
-      margin: 0 0 3px 0;
-      font-size: 22px;
-      color: #1e3a8a;
-      font-weight: 800;
-      letter-spacing: -0.5px;
-    }
-    .header p {
-      margin: 0;
-      color: #64748b;
-      font-size: 12px;
-    }
-    .badge {
-      background: #eff6ff;
-      border: 1px solid #bfdbfe;
-      color: #1d4ed8;
-      padding: 5px 12px;
-      border-radius: 6px;
-      font-weight: 700;
-      font-size: 11px;
-      text-align: right;
-    }
-    .alert-banner {
-      background: #fef2f2;
-      border: 1px solid #fecaca;
-      color: #b91c1c;
-      padding: 9px 14px;
-      border-radius: 6px;
-      font-weight: 700;
-      margin-bottom: 16px;
-      font-size: 12px;
-    }
-    .section-title {
-      font-size: 13px;
-      font-weight: 700;
-      text-transform: uppercase;
-      letter-spacing: 0.6px;
-      color: #1e3a8a;
-      margin: 18px 0 10px;
-      padding-bottom: 5px;
-      border-bottom: 1px solid #e2e8f0;
-    }
-    .info-table {
-      width: 100%;
-      border-collapse: collapse;
-      margin-bottom: 16px;
-    }
-    .info-table th, .info-table td {
-      border: 1px solid #e2e8f0;
-      padding: 8px 12px;
-      text-align: left;
-    }
-    .info-table th {
-      background: #f8fafc;
-      color: #475569;
-      font-size: 11px;
-      text-transform: uppercase;
-      width: 25%;
-    }
-    .info-table td {
-      font-weight: 600;
-      color: #0f172a;
-    }
-    .docs-grid {
-      display: grid;
-      grid-template-columns: repeat(2, 1fr);
-      gap: 16px;
-      margin-bottom: 24px;
-    }
-    .doc-card {
-      border: 1px solid #e2e8f0;
-      border-radius: 8px;
-      padding: 10px;
-      background: #fff;
-      text-align: center;
-      page-break-inside: avoid;
-    }
-    .doc-card h4 {
-      margin: 0 0 8px 0;
-      font-size: 11.5px;
-      color: #334155;
-      text-transform: uppercase;
-      letter-spacing: 0.5px;
-    }
-    .doc-img {
-      max-width: 100%;
-      max-height: 180px;
-      object-fit: contain;
-      border-radius: 4px;
-      border: 1px solid #cbd5e1;
-    }
-    .no-doc {
-      padding: 30px 10px;
-      color: #94a3b8;
-      font-style: italic;
-      font-size: 11.5px;
-    }
-    .footer-sign {
-      display: flex;
-      justify-content: space-between;
-      margin-top: 36px;
-      padding-top: 16px;
-    }
-    .sign-box {
-      width: 200px;
-      text-align: center;
-      border-top: 1px solid #94a3b8;
-      padding-top: 6px;
-      font-size: 11px;
-      font-weight: 600;
-      color: #475569;
-    }
-  </style>
-</head>
-<body>
-  <div class="header">
-    <div>
-      <h1>KSP TRANSPORT SERVICES</h1>
-      <p>Official Fleet Truck Master & Verification Record</p>
-    </div>
-    <div class="badge">
-      <div>STATUS: ${vehicle.status}</div>
-      <div style="font-size: 9.5px; font-weight: normal; color: #64748b; margin-top: 2px;">
-        Generated: ${new Date().toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata' })}
-      </div>
-    </div>
-  </div>
-
-  ${alertList.length > 0 ? `
-    <div class="alert-banner">
-      ⚠️ 45-DAY COMPLIANCE EXPIRY NOTICE — ACTION REQUIRED BEFORE DISPATCH:
-      <ul style="margin: 6px 0 0 16px; padding: 0;">
-        ${alertList.map(a => `<li><strong>${a.name}:</strong> ${a.isExpired ? '<span style="color:#b91c1c; font-weight: bold;">EXPIRED (' + toIST(a.date) + ')</span>' : '<span style="color:#b45309; font-weight: bold;">Expires in ' + a.days + ' days (' + toIST(a.date) + ')</span>'}</li>`).join('')}
-      </ul>
-    </div>
-  ` : ''}
-
-  <div class="section-title">1. Vehicle & Loading Specifications</div>
-  <table class="info-table">
-    <tr>
-      <th>Lorry / Truck No</th>
-      <td><strong>${vehicle.lorry_number}</strong></td>
-      <th>Vehicle Type</th>
-      <td>${vehicle.vehicle_type || '—'}</td>
-    </tr>
-    <tr>
-      <th>Capacity (Tons)</th>
-      <td>${vehicle.capacity_tons ? `${vehicle.capacity_tons} Tons` : '—'}</td>
-      <th>Goodshed Loading Exp.</th>
-      <td>${formatCurrency(vehicle.goodshed_loading_expense)}</td>
-    </tr>
-    <tr>
-      <th>RC / Reg No</th>
-      <td>${vehicle.rc_number || vehicle.lorry_number}</td>
-      <th>Status</th>
-      <td>${vehicle.status}</td>
-    </tr>
-  </table>
-
-  <div class="section-title">2. Validity & Compliance Dates</div>
-  <table class="info-table">
-    <tr>
-      <th>Fitness Cert (FC)</th>
-      <td>${vehicle.fc_number ? `No: ${vehicle.fc_number} | ` : ''}${vehicle.fc_expiry_date ? toIST(vehicle.fc_expiry_date) : 'Not Specified'} ${fcDays !== null ? (fcDays < 0 ? '(EXPIRED)' : `(${fcDays}d left)`) : ''}</td>
-      <th>Insurance Policy</th>
-      <td>${vehicle.insurance_policy_number ? `No: ${vehicle.insurance_policy_number} | ` : ''}${vehicle.insurance_expiry_date ? toIST(vehicle.insurance_expiry_date) : 'Not Specified'} ${insDays !== null ? (insDays < 0 ? '(EXPIRED)' : `(${insDays}d left)`) : ''}</td>
-    </tr>
-    <tr>
-      <th>Road Permit</th>
-      <td>${vehicle.permit_number ? `No: ${vehicle.permit_number} | ` : ''}${vehicle.permit_expiry_date ? toIST(vehicle.permit_expiry_date) : 'Not Specified'} ${permitDays !== null ? (permitDays < 0 ? '(EXPIRED)' : `(${permitDays}d left)`) : ''}</td>
-      <th>Yearly Road Tax</th>
-      <td>${vehicle.tax_expiry_date ? toIST(vehicle.tax_expiry_date) : 'Not Specified'} ${taxDays !== null ? (taxDays < 0 ? '(EXPIRED)' : `(${taxDays}d left)`) : ''}</td>
-    </tr>
-    <tr>
-      <th>DTS Certificate</th>
-      <td>${vehicle.dts_number ? `No: ${vehicle.dts_number} | ` : ''}${vehicle.dts_expiry_date ? toIST(vehicle.dts_expiry_date) : '—'}</td>
-      <th>Registered Date</th>
-      <td>${vehicle.created_at ? toIST(vehicle.created_at) : '—'}</td>
-    </tr>
-  </table>
-
-  <div class="section-title">3. Bank Account & PAN Card Details</div>
-  <table class="info-table">
-    <tr>
-      <th>Account Holder</th>
-      <td>${vehicle.account_holder_name || '—'}</td>
-      <th>Account Number</th>
-      <td>${vehicle.account_number ? `<span style="font-family:monospace">${vehicle.account_number}</span>` : '—'}</td>
-    </tr>
-    <tr>
-      <th>Bank Name</th>
-      <td>${vehicle.bank_name || '—'}</td>
-      <th>IFSC Code</th>
-      <td>${vehicle.ifsc_code ? `<span style="font-family:monospace">${vehicle.ifsc_code}</span>` : '—'}</td>
-    </tr>
-    <tr>
-      <th>PAN Number</th>
-      <td colspan="3">${vehicle.pan_number ? `<span style="font-family:monospace">${vehicle.pan_number}</span>` : '—'}</td>
-    </tr>
-  </table>
-
-  <div class="section-title">4. Submitted Document Verification Scans</div>
-  <div class="docs-grid">
-    <div class="doc-card">
-      <h4>Registration Certificate (RC Photo)</h4>
-      ${vehicle.rc_photo_url ? `<img src="${vehicle.rc_photo_url}" class="doc-img" alt="RC Photo" />` : '<div class="no-doc">No RC Photo Uploaded</div>'}
-    </div>
-    <div class="doc-card">
-      <h4>Fitness Certificate (FC)</h4>
-      ${vehicle.fc_photo_url ? `<img src="${vehicle.fc_photo_url}" class="doc-img" alt="FC Certificate" />` : '<div class="no-doc">No FC Document Uploaded</div>'}
-    </div>
-    <div class="doc-card">
-      <h4>Insurance Document</h4>
-      ${vehicle.insurance_photo_url ? `<img src="${vehicle.insurance_photo_url}" class="doc-img" alt="Insurance" />` : '<div class="no-doc">No Insurance Document Uploaded</div>'}
-    </div>
-    <div class="doc-card">
-      <h4>Road Permit</h4>
-      ${vehicle.permit_photo_url ? `<img src="${vehicle.permit_photo_url}" class="doc-img" alt="Permit" />` : '<div class="no-doc">No Permit Document Uploaded</div>'}
-    </div>
-    <div class="doc-card">
-      <h4>Road Tax Receipt (Yearly Tax)</h4>
-      ${vehicle.tax_photo_url ? `<img src="${vehicle.tax_photo_url}" class="doc-img" alt="Tax Receipt" />` : '<div class="no-doc">No Tax Receipt Uploaded</div>'}
-    </div>
-    <div class="doc-card">
-      <h4>PAN Card</h4>
-      ${vehicle.pan_card_url ? `<img src="${vehicle.pan_card_url}" class="doc-img" alt="PAN Card" />` : '<div class="no-doc">No PAN Card Uploaded</div>'}
-    </div>
-    <div class="doc-card">
-      <h4>DTS Certificate</h4>
-      ${vehicle.dts_certificate_url ? `<img src="${vehicle.dts_certificate_url}" class="doc-img" alt="DTS Certificate" />` : '<div class="no-doc">No DTS Certificate Uploaded</div>'}
-    </div>
-    <div class="doc-card">
-      <h4>Bank Passbook / Cheque</h4>
-      ${vehicle.account_photo_url ? `<img src="${vehicle.account_photo_url}" class="doc-img" alt="Bank Account" />` : '<div class="no-doc">No Bank Account Document Uploaded</div>'}
-    </div>
-  </div>
-
-  <div class="footer-sign">
-    <div class="sign-box">Fleet / Transport Manager</div>
-    <div class="sign-box">Authorized Admin Signature</div>
-  </div>
-</body>
-</html>
-    `;
-  };
-
-  const handlePrint = () => {
-    const printWindow = window.open('', '_blank');
-    if (!printWindow) return;
-    const html = buildTruckProfileHtml();
-    printWindow.document.open();
-    printWindow.document.write(html);
-    printWindow.document.close();
-    printWindow.document.title = `${vehicle.lorry_number} - Truck Verification Record`;
-    printWindow.focus();
-    setTimeout(() => {
-      printWindow.print();
-    }, 400);
-  };
-
-  const handleDownload = () => {
-    const html = buildTruckProfileHtml();
-    const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `Truck_Profile_${vehicle.lorry_number.replace(/\s+/g, '_')}.html`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-  };
-
-  const buildShareText = () => {
-    const lines: string[] = [
-      `🚛 KSP Transport — Truck Profile`,
-      `Lorry No: ${vehicle.lorry_number}`,
-    ];
-    if (vehicle.vehicle_type) lines.push(`Type: ${vehicle.vehicle_type}`);
-    if (vehicle.capacity_tons) lines.push(`Capacity: ${vehicle.capacity_tons} Tons`);
-    if (vehicle.rc_number) lines.push(`RC No: ${vehicle.rc_number}`);
-    if (vehicle.pan_number) lines.push(`PAN No: ${vehicle.pan_number}`);
-    if (vehicle.dts_number) lines.push(`DTS No: ${vehicle.dts_number}`);
-    lines.push(`Status: ${vehicle.status}`);
-    lines.push(``);
-    lines.push(`📋 Compliance Validities`);
-    if (vehicle.fc_expiry_date) lines.push(`  FC Expiry: ${toIST(vehicle.fc_expiry_date)}`);
-    if (vehicle.fc_number) lines.push(`  FC No: ${vehicle.fc_number}`);
-    if (vehicle.insurance_expiry_date) lines.push(`  Insurance Expiry: ${toIST(vehicle.insurance_expiry_date)}`);
-    if (vehicle.insurance_policy_number) lines.push(`  Insurance Policy No: ${vehicle.insurance_policy_number}`);
-    if (vehicle.permit_expiry_date) lines.push(`  Permit Expiry: ${toIST(vehicle.permit_expiry_date)}`);
-    if (vehicle.permit_number) lines.push(`  Permit No: ${vehicle.permit_number}`);
-    if (vehicle.tax_expiry_date) lines.push(`  Road Tax Expiry: ${toIST(vehicle.tax_expiry_date)}`);
-    if (vehicle.dts_expiry_date) lines.push(`  DTS Expiry: ${toIST(vehicle.dts_expiry_date)}`);
-    lines.push(``);
-    lines.push(`Generated by KSP Transport Admin Portal`);
-    return lines.join('\n');
-  };
-
-  const handleShareWhatsApp = () => {
-    const text = buildShareText();
-    const url = `https://wa.me/?text=${encodeURIComponent(text)}`;
-    window.open(url, '_blank');
-    setShareMenuOpen(false);
-  };
-
-  const handleShareEmail = () => {
-    const text = buildShareText();
-    const subject = `Truck Profile — ${vehicle.lorry_number}`;
-    const url = `mailto:?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(text)}`;
-    window.open(url, '_self');
-    setShareMenuOpen(false);
-  };
-
-  const handleCopyClipboard = async () => {
-    const text = buildShareText();
-    try {
-      await navigator.clipboard.writeText(text);
-      setShareCopied(true);
-      setTimeout(() => setShareCopied(false), 2500);
-    } catch (_) {
-      const ta = document.createElement('textarea');
-      ta.value = text;
-      document.body.appendChild(ta);
-      ta.select();
-      document.execCommand('copy');
-      document.body.removeChild(ta);
-      setShareCopied(true);
-      setTimeout(() => setShareCopied(false), 2500);
-    }
-    setShareMenuOpen(false);
-  };
-
-  const InfoChip = ({
-    icon, label, value, highlight,
-  }: {
-    icon: React.ReactNode;
-    label: string;
-    value: React.ReactNode;
-    highlight?: 'red' | 'yellow' | null;
-  }) => (
-    <div
-      style={{
-        background: highlight === 'red'
-          ? 'rgba(239, 68, 68, 0.22)'
-          : highlight === 'yellow'
-          ? 'rgba(245, 158, 11, 0.20)'
-          : 'rgba(255, 255, 255, 0.12)',
-        border: `1.5px solid ${highlight === 'red' ? 'rgba(239, 68, 68, 0.5)' : highlight === 'yellow' ? 'rgba(245, 158, 11, 0.45)' : 'rgba(255, 255, 255, 0.22)'}`,
-        borderRadius: '12px',
-        padding: '10px 14px',
-        backdropFilter: 'blur(8px)',
-        boxShadow: '0 2px 8px rgba(0,0,0,0.06)',
-        display: 'flex',
-        flexDirection: 'column',
-        justifyContent: 'center',
-        minHeight: '62px',
-        boxSizing: 'border-box',
-      }}
-    >
-      <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: 'rgba(255,255,255,0.75)', fontSize: '10.5px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.8px', marginBottom: '4px' }}>
-        {icon} <span>{label}</span>
-      </div>
-      <div style={{ fontSize: '14px', fontWeight: 700, color: highlight === 'red' ? '#fca5a5' : highlight === 'yellow' ? '#fde68a' : '#ffffff', lineHeight: 1.25, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-        {value}
-      </div>
-    </div>
-  );
-
-  const DocCard = ({
-    title, icon, iconColor, url, emptyText,
-  }: {
-    title: string;
-    icon: React.ReactNode;
-    iconColor: string;
-    url?: string;
-    emptyText: string;
-  }) => (
-    <div
-      style={{
-        background: '#ffffff',
-        border: '1.5px solid #e2e8f0',
-        borderRadius: '14px',
-        padding: '14px',
-        display: 'flex',
-        flexDirection: 'column',
-        alignItems: 'center',
-        gap: '8px',
-        boxShadow: '0 2px 8px rgba(0,0,0,0.04)',
-        boxSizing: 'border-box',
-      }}
-    >
-      <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px', fontWeight: 700, color: '#374151', alignSelf: 'flex-start' }}>
-        <span style={{ color: iconColor }}>{icon}</span>
-        {title}
-      </div>
-      {url ? (
-        <div
-          style={{ cursor: 'zoom-in', width: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center' }}
-          onClick={() => setZoomImage({ url, title })}
-          title="Click to view full size"
-        >
-          <img
-            src={url}
-            alt={title}
-            style={{
-              width: '100%',
-              height: '130px',
-              objectFit: 'contain',
-              borderRadius: '8px',
-              border: '1.5px solid #e2e8f0',
-              boxShadow: '0 2px 8px rgba(0,0,0,0.06)',
-            }}
-          />
-          <div style={{ marginTop: '6px', fontSize: '11px', color: '#2563eb', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '3px' }}>
-            <Eye size={11} /> Click to zoom
+const ImageUploadField: React.FC<ImageUploadFieldProps> = ({
+  value,
+  label,
+  onUpload,
+  onRemove,
+  isExtracting,
+}) => {
+  if (isExtracting) {
+    return (
+      <div style={{
+        border: '2px dashed #3b82f6', borderRadius: '10px', padding: '22px 16px',
+        textAlign: 'center', background: '#eff6ff', display: 'flex', flexDirection: 'column',
+        alignItems: 'center', gap: '10px',
+      }}>
+        <div style={{
+          width: '42px', height: '42px', borderRadius: '50%', background: '#dbeafe',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+        }}>
+          <Loader2 size={24} color="#2563eb" style={{ animation: 'spin 1s linear infinite' }} />
+        </div>
+        <div>
+          <div style={{ fontWeight: 800, fontSize: '13px', color: '#1d4ed8' }}>
+            Scanning Document &amp; Extracting Details...
+          </div>
+          <div style={{ fontSize: '11px', color: '#3b82f6', marginTop: '3px' }}>
+            AI OCR is automatically reading text and filling fields
           </div>
         </div>
-      ) : (
-        <div style={{ padding: '24px 10px', textAlign: 'center', color: '#cbd5e1' }}>
-          <AlertCircle size={26} style={{ margin: '0 auto 6px', display: 'block' }} />
-          <div style={{ fontSize: '11px', color: '#94a3b8' }}>{emptyText}</div>
+      </div>
+    );
+  }
+
+  if (!value) {
+    return (
+      <div onClick={onUpload}
+        style={{
+          border: '2px dashed #cbd5e1', borderRadius: '10px', padding: '22px 16px',
+          textAlign: 'center', background: '#f8fafc', cursor: 'pointer',
+          display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px',
+          transition: 'all 0.18s ease',
+        }}
+        onMouseEnter={e => { e.currentTarget.style.borderColor = '#3b82f6'; e.currentTarget.style.backgroundColor = '#eff6ff'; }}
+        onMouseLeave={e => { e.currentTarget.style.borderColor = '#cbd5e1'; e.currentTarget.style.backgroundColor = '#f8fafc'; }}
+      >
+        <div style={{ width: '42px', height: '42px', borderRadius: '50%', background: '#e0e7ff', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <Camera size={22} color="#4338ca" />
         </div>
-      )}
+        <div>
+          <div style={{ fontWeight: 700, fontSize: '13px', color: '#1e293b' }}>{label}</div>
+          <div style={{ fontSize: '11px', color: '#64748b', marginTop: '3px' }}>Image · PDF · Word (.doc / .docx) · Auto OCR</div>
+        </div>
+      </div>
+    );
+  }
+
+  const fileType = getFileType(value);
+
+  const actions = (
+    <div style={{ display: 'flex', gap: '8px', padding: '8px 12px', background: '#fff', borderTop: '1px solid #e2e8f0', justifyContent: 'center' }}>
+      <button type="button" onClick={onUpload} className="btn btn-outline btn-sm" style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+        <Camera size={12} /> Change
+      </button>
+      <button type="button" onClick={onRemove} className="btn btn-danger btn-sm" style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+        <X size={12} /> Remove
+      </button>
     </div>
   );
+
+  if (fileType === 'image') {
+    return (
+      <div style={{ border: '1.5px solid #cbd5e1', borderRadius: '10px', overflow: 'hidden', background: '#f8fafc' }}>
+        <img src={value} alt="preview" style={{ width: '100%', maxHeight: '160px', objectFit: 'cover', display: 'block' }} />
+        {actions}
+      </div>
+    );
+  }
+
+  // PDF / Word / generic file — show an icon card
+  const isPdf = fileType === 'pdf';
+  const isWord = fileType === 'word';
+  const iconBg = isPdf ? '#fef2f2' : isWord ? '#eff6ff' : '#f8fafc';
+  const iconColor = isPdf ? '#dc2626' : isWord ? '#2563eb' : '#64748b';
+  const iconLabel = isPdf ? 'PDF' : isWord ? 'DOCX' : 'FILE';
+  const fileLabel = getFileName(value);
 
   return (
-    <>
-      <div
-        style={{
-          position: 'fixed',
-          inset: 0,
-          zIndex: 9999,
-          background: 'rgba(6, 12, 34, 0.78)',
-          backdropFilter: 'blur(10px)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          padding: '16px',
-        }}
-        onClick={(e) => {
-          if (e.target === e.currentTarget) onClose();
-        }}
-      >
-        <div
-          style={{
-            background: '#f8fafc',
-            borderRadius: '22px',
-            width: '100%',
-            maxWidth: '920px',
-            maxHeight: '94vh',
-            overflowY: 'auto',
-            boxShadow: '0 32px 80px rgba(0,0,0,0.45), 0 0 0 1px rgba(255,255,255,0.06)',
-            display: 'flex',
-            flexDirection: 'column',
-          }}
-        >
-          {/* ═══════════════════════════════════════════════════════════
-              HEADER — deep blue gradient
-          ═══════════════════════════════════════════════════════════ */}
-          <div
-            style={{
-              background: 'linear-gradient(145deg, #0f1e5a 0%, #1a3aad 50%, #2563eb 100%)',
-              padding: '22px 28px 24px',
-              borderRadius: '22px 22px 0 0',
-              position: 'relative',
-              color: '#ffffff',
-              flexShrink: 0,
-            }}
-          >
-            {/* Close button */}
-            <button
-              onClick={onClose}
-              style={{
-                position: 'absolute',
-                top: '16px',
-                right: '16px',
-                background: 'rgba(255,255,255,0.12)',
-                border: '1px solid rgba(255,255,255,0.2)',
-                color: '#ffffff',
-                borderRadius: '50%',
-                width: '34px',
-                height: '34px',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                cursor: 'pointer',
-                zIndex: 1,
-              }}
-              title="Close"
-            >
-              <X size={16} />
-            </button>
-
-            {/* ── Top row: avatar + lorry number + specs ── */}
-            <div style={{ display: 'flex', gap: '16px', alignItems: 'center' }}>
-              <div style={{ flexShrink: 0 }}>
-                {vehicle.rc_photo_url ? (
-                  <img
-                    src={vehicle.rc_photo_url}
-                    alt={vehicle.lorry_number}
-                    onClick={() => setZoomImage({ url: vehicle.rc_photo_url!, title: `${vehicle.lorry_number} — RC Document` })}
-                    style={{
-                      width: '68px',
-                      height: '68px',
-                      borderRadius: '50%',
-                      objectFit: 'cover',
-                      border: '3px solid rgba(255,255,255,0.75)',
-                      boxShadow: '0 6px 18px rgba(0,0,0,0.25)',
-                      cursor: 'zoom-in',
-                    }}
-                    title="Click to zoom RC"
-                  />
-                ) : (
-                  <div
-                    style={{
-                      width: '68px',
-                      height: '68px',
-                      borderRadius: '50%',
-                      background: 'rgba(255,255,255,0.18)',
-                      border: '3px solid rgba(255,255,255,0.4)',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      color: '#ffffff',
-                      boxShadow: '0 6px 18px rgba(0,0,0,0.2)',
-                    }}
-                  >
-                    <Truck size={32} />
-                  </div>
-                )}
-              </div>
-
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: '10.5px', fontWeight: 700, letterSpacing: '1.2px', textTransform: 'uppercase', color: 'rgba(255,255,255,0.7)', marginBottom: '3px' }}>
-                  TRUCK & LORRY MASTER RECORD
-                </div>
-                <h2 style={{ fontSize: '26px', fontWeight: 800, margin: '0 0 5px 0', color: '#ffffff', lineHeight: 1.15, letterSpacing: '-0.3px' }}>
-                  {vehicle.lorry_number}
-                </h2>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-                  <span
-                    style={{
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      gap: '6px',
-                      background: vehicle.status === 'ACTIVE' ? '#10b981' : '#ef4444',
-                      color: '#ffffff',
-                      fontSize: '11px',
-                      fontWeight: 700,
-                      padding: '2.5px 12px',
-                      borderRadius: '20px',
-                      letterSpacing: '0.4px',
-                    }}
-                  >
-                    <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#ffffff', display: 'inline-block' }} />
-                    {vehicle.status}
-                  </span>
-                  {vehicle.vehicle_type && (
-                    <span style={{ fontSize: '12px', color: 'rgba(255,255,255,0.85)', fontWeight: 600 }}>
-                      🚛 {vehicle.vehicle_type}
-                    </span>
-                  )}
-                  {vehicle.capacity_tons && (
-                    <span style={{ fontSize: '12px', color: 'rgba(255,255,255,0.75)' }}>
-                      • {vehicle.capacity_tons} Tons
-                    </span>
-                  )}
-                </div>
-              </div>
-            </div>
-
-            {/* ── 8-chip info grid in header ── */}
-            <div
-              style={{
-                display: 'grid',
-                gridTemplateColumns: 'repeat(4, 1fr)',
-                gap: '10px',
-                marginTop: '18px',
-              }}
-            >
-              <InfoChip
-                icon={<ShieldCheck size={12} />}
-                label="Fitness (FC)"
-                highlight={isFcExpired ? 'red' : isFcExpiringSoon ? 'yellow' : null}
-                value={
-                  <span>
-                    {vehicle.fc_expiry_date ? toIST(vehicle.fc_expiry_date) : <span style={{ color: 'rgba(255,255,255,0.45)', fontWeight: 400 }}>Not Specified</span>}
-                    {fcDays !== null && (
-                      <span style={{ display: 'inline-block', marginLeft: '6px', fontSize: '10.5px', fontWeight: 600, opacity: 0.9 }}>
-                        {isFcExpired ? `(⚠ Expired)` : fcDays === 0 ? '(Today)' : `(${fcDays}d)`}
-                      </span>
-                    )}
-                  </span>
-                }
-              />
-              <InfoChip
-                icon={<FileText size={12} />}
-                label="Insurance"
-                highlight={isInsExpired ? 'red' : isInsExpiringSoon ? 'yellow' : null}
-                value={
-                  <span>
-                    {vehicle.insurance_expiry_date ? toIST(vehicle.insurance_expiry_date) : <span style={{ color: 'rgba(255,255,255,0.45)', fontWeight: 400 }}>Not Specified</span>}
-                    {insDays !== null && (
-                      <span style={{ display: 'inline-block', marginLeft: '6px', fontSize: '10.5px', fontWeight: 600, opacity: 0.9 }}>
-                        {isInsExpired ? `(⚠ Expired)` : insDays === 0 ? '(Today)' : `(${insDays}d)`}
-                      </span>
-                    )}
-                  </span>
-                }
-              />
-              <InfoChip
-                icon={<Truck size={12} />}
-                label="Permit"
-                highlight={isPermitExpired ? 'red' : isPermitExpiringSoon ? 'yellow' : null}
-                value={
-                  <span>
-                    {vehicle.permit_expiry_date ? toIST(vehicle.permit_expiry_date) : <span style={{ color: 'rgba(255,255,255,0.45)', fontWeight: 400 }}>Not Specified</span>}
-                    {permitDays !== null && (
-                      <span style={{ display: 'inline-block', marginLeft: '6px', fontSize: '10.5px', fontWeight: 600, opacity: 0.9 }}>
-                        {isPermitExpired ? `(⚠ Expired)` : permitDays === 0 ? '(Today)' : `(${permitDays}d)`}
-                      </span>
-                    )}
-                  </span>
-                }
-              />
-              <InfoChip
-                icon={<Calendar size={12} />}
-                label="Yearly Tax"
-                highlight={isTaxExpired ? 'red' : isTaxExpiringSoon ? 'yellow' : null}
-                value={
-                  <span>
-                    {vehicle.tax_expiry_date ? toIST(vehicle.tax_expiry_date) : <span style={{ color: 'rgba(255,255,255,0.45)', fontWeight: 400 }}>Not Specified</span>}
-                    {taxDays !== null && (
-                      <span style={{ display: 'inline-block', marginLeft: '6px', fontSize: '10.5px', fontWeight: 600, opacity: 0.9 }}>
-                        {isTaxExpired ? `(⚠ Expired)` : taxDays === 0 ? '(Today)' : `(${taxDays}d)`}
-                      </span>
-                    )}
-                  </span>
-                }
-              />
-              <InfoChip
-                icon={<FileText size={12} />}
-                label="DTS Certificate"
-                highlight={isDtsExpired ? 'red' : isDtsExpiringSoon ? 'yellow' : null}
-                value={
-                  <span>
-                    {vehicle.dts_expiry_date ? toIST(vehicle.dts_expiry_date) : <span style={{ color: 'rgba(255,255,255,0.45)', fontWeight: 400 }}>Not Specified</span>}
-                    {dtsDays !== null && (
-                      <span style={{ display: 'inline-block', marginLeft: '6px', fontSize: '10.5px', fontWeight: 600, opacity: 0.9 }}>
-                        {isDtsExpired ? `(⚠ Expired)` : dtsDays === 0 ? '(Today)' : `(${dtsDays}d)`}
-                      </span>
-                    )}
-                  </span>
-                }
-              />
-              <InfoChip
-                icon={<CreditCard size={12} />}
-                label="Bank Account"
-                value={vehicle.bank_name ? `${vehicle.bank_name} ${vehicle.account_number ? `(${vehicle.account_number.slice(-4)})` : ''}` : vehicle.account_number || <span style={{ color: 'rgba(255,255,255,0.45)', fontWeight: 400 }}>Not Specified</span>}
-              />
-              <InfoChip
-                icon={<UserIcon size={12} />}
-                label="PAN Card"
-                value={vehicle.pan_number ? <span style={{ fontFamily: 'monospace' }}>{vehicle.pan_number}</span> : <span style={{ color: 'rgba(255,255,255,0.45)', fontWeight: 400 }}>Not Specified</span>}
-              />
-              <InfoChip
-                icon={<Truck size={12} />}
-                label="Goodshed Exp."
-                value={formatCurrency(vehicle.goodshed_loading_expense)}
-              />
-            </div>
-          </div>
-
-          {/* ═══════════════════════════════════════════════════════════
-              BODY
-          ═══════════════════════════════════════════════════════════ */}
-          <div style={{ padding: '22px 28px', flex: 1 }}>
-
-            {/* 45-Day Expiry alerts banner */}
-            {alertList.length > 0 && (
-              <div
-                style={{
-                  background: alertList.some((a) => a.isExpired) ? '#fef2f2' : '#fffbeb',
-                  border: `1.5px solid ${alertList.some((a) => a.isExpired) ? '#fecaca' : '#fde68a'}`,
-                  borderRadius: '14px',
-                  padding: '14px 18px',
-                  marginBottom: '18px',
-                  display: 'flex',
-                  alignItems: 'flex-start',
-                  gap: '12px',
-                  boxShadow: '0 4px 12px rgba(0,0,0,0.04)',
-                }}
-              >
-                <AlertTriangle
-                  size={22}
-                  color={alertList.some((a) => a.isExpired) ? '#dc2626' : '#d97706'}
-                  style={{ flexShrink: 0, marginTop: '2px' }}
-                />
-                <div style={{ flex: 1 }}>
-                  <div
-                    style={{
-                      fontWeight: 800,
-                      fontSize: '13.5px',
-                      color: alertList.some((a) => a.isExpired) ? '#991b1b' : '#92400e',
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '8px',
-                      flexWrap: 'wrap',
-                    }}
-                  >
-                    <span>⚠️ 45-Day Compliance Expiry Notice — Action Required</span>
-                    <span
-                      style={{
-                        fontSize: '11px',
-                        background: alertList.some((a) => a.isExpired) ? '#fee2e2' : '#fef3c7',
-                        padding: '2px 8px',
-                        borderRadius: '12px',
-                        fontWeight: 700,
-                      }}
-                    >
-                      {alertList.length} Document{alertList.length > 1 ? 's' : ''} Expiring / Expired
-                    </span>
-                  </div>
-                  <div
-                    style={{
-                      fontSize: '12px',
-                      color: alertList.some((a) => a.isExpired) ? '#b91c1c' : '#b45309',
-                      marginTop: '4px',
-                      marginBottom: '10px',
-                    }}
-                  >
-                    Before dispatching trips for <strong>{vehicle.lorry_number}</strong>, please ensure renewal of the following compliance documents:
-                  </div>
-                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
-                    {alertList.map((a, i) => (
-                      <div
-                        key={i}
-                        style={{
-                          display: 'inline-flex',
-                          alignItems: 'center',
-                          gap: '6px',
-                          padding: '5px 12px',
-                          borderRadius: '8px',
-                          fontSize: '11.5px',
-                          fontWeight: 700,
-                          background: a.isExpired ? '#fee2e2' : '#fef3c7',
-                          color: a.isExpired ? '#991b1b' : '#92400e',
-                          border: `1px solid ${a.isExpired ? '#fca5a5' : '#fde68a'}`,
-                        }}
-                      >
-                        <span>{a.isExpired ? '❌' : '⏳'}</span>
-                        <span>{a.name}:</span>
-                        <span>
-                          {a.isExpired
-                            ? `EXPIRED (${toIST(a.date)})`
-                            : a.days === 0
-                            ? `Expires Today (${toIST(a.date)})`
-                            : `Expires in ${a.days} day${a.days > 1 ? 's' : ''} (${toIST(a.date)})`}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* Bank & Tax Summary */}
-            <div style={{ background: '#ffffff', border: '1.5px solid #e2e8f0', borderRadius: '14px', padding: '16px 20px', marginBottom: '20px' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px' }}>
-                <CreditCard size={15} color="#2563eb" />
-                <span style={{ fontSize: '13px', fontWeight: 800, color: '#0f172a', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-                  Banking & Tax Details
-                </span>
-              </div>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '12px' }}>
-                <div>
-                  <div style={{ fontSize: '10.5px', color: '#64748b', fontWeight: 700, textTransform: 'uppercase' }}>Account Holder</div>
-                  <div style={{ fontSize: '13px', fontWeight: 700, color: '#0f172a' }}>{vehicle.account_holder_name || '—'}</div>
-                </div>
-                <div>
-                  <div style={{ fontSize: '10.5px', color: '#64748b', fontWeight: 700, textTransform: 'uppercase' }}>Bank & IFSC</div>
-                  <div style={{ fontSize: '13px', fontWeight: 700, color: '#0f172a' }}>{vehicle.bank_name || '—'} {vehicle.ifsc_code ? `(${vehicle.ifsc_code})` : ''}</div>
-                </div>
-                <div>
-                  <div style={{ fontSize: '10.5px', color: '#64748b', fontWeight: 700, textTransform: 'uppercase' }}>Account Number</div>
-                  <div style={{ fontSize: '13px', fontWeight: 700, fontFamily: 'monospace', color: '#0f172a' }}>{vehicle.account_number || '—'}</div>
-                </div>
-                <div>
-                  <div style={{ fontSize: '10.5px', color: '#64748b', fontWeight: 700, textTransform: 'uppercase' }}>Goodshed Loading</div>
-                  <div style={{ fontSize: '13px', fontWeight: 800, color: '#2563eb' }}>{formatCurrency(vehicle.goodshed_loading_expense)}</div>
-                </div>
-              </div>
-            </div>
-
-            {/* Submitted Documents section */}
-            <div style={{ marginBottom: '20px' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '14px' }}>
-                <FileText size={16} color="#2563eb" />
-                <span style={{ fontSize: '14px', fontWeight: 800, color: '#0f172a' }}>
-                  Submitted Documents & Certificates (8 Scans)
-                </span>
-              </div>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '14px' }}>
-                <DocCard
-                  title="RC Photo"
-                  icon={<Truck size={14} />}
-                  iconColor="#3b82f6"
-                  url={vehicle.rc_photo_url}
-                  emptyText="No RC Photo Uploaded"
-                />
-                <DocCard
-                  title="Fitness Cert (FC)"
-                  icon={<ShieldCheck size={14} />}
-                  iconColor="#10b981"
-                  url={vehicle.fc_photo_url}
-                  emptyText="No FC Document Uploaded"
-                />
-                <DocCard
-                  title="Insurance Document"
-                  icon={<FileText size={14} />}
-                  iconColor="#6366f1"
-                  url={vehicle.insurance_photo_url}
-                  emptyText="No Insurance Uploaded"
-                />
-                <DocCard
-                  title="Road Permit"
-                  icon={<Truck size={14} />}
-                  iconColor="#f59e0b"
-                  url={vehicle.permit_photo_url}
-                  emptyText="No Permit Uploaded"
-                />
-                <DocCard
-                  title="Yearly Road Tax"
-                  icon={<Calendar size={14} />}
-                  iconColor="#ef4444"
-                  url={vehicle.tax_photo_url}
-                  emptyText="No Tax Receipt Uploaded"
-                />
-                <DocCard
-                  title="PAN Card"
-                  icon={<UserIcon size={14} />}
-                  iconColor="#8b5cf6"
-                  url={vehicle.pan_card_url}
-                  emptyText="No PAN Card Uploaded"
-                />
-                <DocCard
-                  title="DTS Certificate"
-                  icon={<FileText size={14} />}
-                  iconColor="#06b6d4"
-                  url={vehicle.dts_certificate_url}
-                  emptyText="No DTS Certificate Uploaded"
-                />
-                <DocCard
-                  title="Bank Passbook / Cheque"
-                  icon={<CreditCard size={14} />}
-                  iconColor="#10b981"
-                  url={vehicle.account_photo_url}
-                  emptyText="No Bank Document Uploaded"
-                />
-              </div>
-            </div>
-
-            {/* Footer actions */}
-            <div
-              style={{
-                display: 'flex',
-                justifyContent: 'space-between',
-                alignItems: 'center',
-                borderTop: '1px solid #e2e8f0',
-                paddingTop: '16px',
-                marginTop: '4px',
-                flexShrink: 0,
-              }}
-            >
-              {onEdit ? (
-                <button
-                  onClick={() => { onClose(); onEdit(vehicle); }}
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '7px',
-                    background: '#ffffff',
-                    border: '1.5px solid #e2e8f0',
-                    borderRadius: '10px',
-                    padding: '9px 18px',
-                    fontSize: '13px',
-                    fontWeight: 700,
-                    color: '#374151',
-                    cursor: 'pointer',
-                    transition: 'border-color 0.15s',
-                  }}
-                >
-                  <Edit2 size={14} color="#2563eb" /> Edit Truck Details
-                </button>
-              ) : <div />}
-
-              <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
-                <button
-                  onClick={onClose}
-                  style={{
-                    background: '#ffffff',
-                    border: '1.5px solid #e2e8f0',
-                    borderRadius: '10px',
-                    padding: '9px 18px',
-                    fontSize: '13px',
-                    fontWeight: 700,
-                    color: '#475569',
-                    cursor: 'pointer',
-                  }}
-                >
-                  Close
-                </button>
-                <button
-                  onClick={handlePrint}
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '6px',
-                    background: '#ffffff',
-                    border: '1.5px solid #cbd5e1',
-                    borderRadius: '10px',
-                    padding: '9px 16px',
-                    fontSize: '13px',
-                    fontWeight: 700,
-                    color: '#334155',
-                    cursor: 'pointer',
-                  }}
-                  title="Print Truck Verification Record"
-                >
-                  <Printer size={15} color="#475569" /> Print
-                </button>
-                <div style={{ position: 'relative' }}>
-                  <button
-                    onClick={() => setShareMenuOpen(!shareMenuOpen)}
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '6px',
-                      background: shareCopied ? '#f0fdf4' : '#ffffff',
-                      border: `1.5px solid ${shareCopied ? '#86efac' : '#cbd5e1'}`,
-                      borderRadius: '10px',
-                      padding: '9px 16px',
-                      fontSize: '13px',
-                      fontWeight: 700,
-                      color: shareCopied ? '#16a34a' : '#334155',
-                      cursor: 'pointer',
-                      transition: 'all 0.2s',
-                    }}
-                    title="Share truck details"
-                  >
-                    {shareCopied
-                      ? <><Check size={15} color="#16a34a" /> Copied!</>
-                      : <><Share2 size={15} color="#6366f1" /> Share ▾</>
-                    }
-                  </button>
-
-                  {shareMenuOpen && (
-                    <>
-                      {/* Invisible backdrop to close menu */}
-                      <div
-                        style={{ position: 'fixed', inset: 0, zIndex: 9998 }}
-                        onClick={() => setShareMenuOpen(false)}
-                      />
-                      <div
-                        style={{
-                          position: 'absolute',
-                          bottom: '100%',
-                          right: 0,
-                          marginBottom: '6px',
-                          background: '#ffffff',
-                          border: '1.5px solid #e2e8f0',
-                          borderRadius: '12px',
-                          boxShadow: '0 8px 30px rgba(0,0,0,0.15)',
-                          padding: '6px',
-                          minWidth: '200px',
-                          zIndex: 9999,
-                          animation: 'modalFadeIn 0.15s ease-out',
-                        }}
-                      >
-                        <button
-                          onClick={handleShareWhatsApp}
-                          style={{
-                            display: 'flex',
-                            alignItems: 'center',
-                            gap: '10px',
-                            width: '100%',
-                            padding: '10px 14px',
-                            background: 'none',
-                            border: 'none',
-                            borderRadius: '8px',
-                            cursor: 'pointer',
-                            fontSize: '13px',
-                            fontWeight: 600,
-                            color: '#1e293b',
-                            textAlign: 'left',
-                          }}
-                          onMouseEnter={(e) => (e.currentTarget.style.background = '#f0fdf4')}
-                          onMouseLeave={(e) => (e.currentTarget.style.background = 'none')}
-                        >
-                          <span style={{ fontSize: '18px' }}>💬</span>
-                          Share via WhatsApp
-                        </button>
-                        <button
-                          onClick={handleShareEmail}
-                          style={{
-                            display: 'flex',
-                            alignItems: 'center',
-                            gap: '10px',
-                            width: '100%',
-                            padding: '10px 14px',
-                            background: 'none',
-                            border: 'none',
-                            borderRadius: '8px',
-                            cursor: 'pointer',
-                            fontSize: '13px',
-                            fontWeight: 600,
-                            color: '#1e293b',
-                            textAlign: 'left',
-                          }}
-                          onMouseEnter={(e) => (e.currentTarget.style.background = '#eff6ff')}
-                          onMouseLeave={(e) => (e.currentTarget.style.background = 'none')}
-                        >
-                          <span style={{ fontSize: '18px' }}>📧</span>
-                          Share via Email
-                        </button>
-                        <div style={{ height: '1px', background: '#e2e8f0', margin: '4px 8px' }} />
-                        <button
-                          onClick={handleCopyClipboard}
-                          style={{
-                            display: 'flex',
-                            alignItems: 'center',
-                            gap: '10px',
-                            width: '100%',
-                            padding: '10px 14px',
-                            background: 'none',
-                            border: 'none',
-                            borderRadius: '8px',
-                            cursor: 'pointer',
-                            fontSize: '13px',
-                            fontWeight: 600,
-                            color: '#1e293b',
-                            textAlign: 'left',
-                          }}
-                          onMouseEnter={(e) => (e.currentTarget.style.background = '#f1f5f9')}
-                          onMouseLeave={(e) => (e.currentTarget.style.background = 'none')}
-                        >
-                          <Copy size={16} color="#64748b" />
-                          Copy to Clipboard
-                        </button>
-                      </div>
-                    </>
-                  )}
-                </div>
-                <button
-                  onClick={handleDownload}
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '7px',
-                    background: 'linear-gradient(135deg, #f59e0b, #d97706)',
-                    border: 'none',
-                    borderRadius: '10px',
-                    padding: '9px 20px',
-                    fontSize: '13px',
-                    fontWeight: 700,
-                    color: '#ffffff',
-                    cursor: 'pointer',
-                    boxShadow: '0 4px 12px rgba(217,119,6,0.35)',
-                  }}
-                  title="Download Truck Verification Record"
-                >
-                  <Download size={15} /> Download Details
-                </button>
-              </div>
-            </div>
+    <div style={{ border: '1.5px solid #cbd5e1', borderRadius: '10px', overflow: 'hidden', background: '#f8fafc' }}>
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '24px 16px', gap: '10px' }}>
+        <div style={{
+          width: '56px', height: '70px', borderRadius: '8px', background: iconBg,
+          border: `2px solid ${iconColor}22`, display: 'flex', flexDirection: 'column',
+          alignItems: 'center', justifyContent: 'center', gap: '4px', position: 'relative',
+          boxShadow: '0 2px 8px rgba(0,0,0,0.08)',
+        }}>
+          <FileText size={24} color={iconColor} />
+          <span style={{ fontSize: '9px', fontWeight: 800, color: iconColor, letterSpacing: '0.5px' }}>{iconLabel}</span>
+          <div style={{
+            position: 'absolute', top: '-6px', right: '-6px', width: '18px', height: '18px',
+            borderRadius: '50%', background: '#22c55e', display: 'flex', alignItems: 'center', justifyContent: 'center',
+          }}>
+            <CheckCircle size={12} color="#fff" />
           </div>
         </div>
+        <span style={{ fontSize: '12.5px', fontWeight: 600, color: '#334155' }}>{fileLabel} uploaded</span>
+        {isPdf && (
+          <a href={value} target="_blank" rel="noopener noreferrer"
+            onClick={e => e.stopPropagation()}
+            style={{ fontSize: '11.5px', color: '#2563eb', textDecoration: 'underline', fontWeight: 600 }}
+          >Preview PDF</a>
+        )}
       </div>
-
-      {/* Lightbox for zooming */}
-      {zoomImage && (
-        <div
-          style={{
-            position: 'fixed', inset: 0, zIndex: 10000,
-            background: 'rgba(0,0,0,0.88)',
-            backdropFilter: 'blur(4px)',
-            display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px',
-          }}
-          onClick={() => setZoomImage(null)}
-        >
-          <div
-            style={{ position: 'relative', maxWidth: '90vw', maxHeight: '90vh', background: '#fff', borderRadius: '14px', padding: '16px', display: 'flex', flexDirection: 'column', alignItems: 'center' }}
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div style={{ width: '100%', display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-              <span style={{ fontWeight: 700, fontSize: '14px', color: '#0f172a' }}>{zoomImage.title}</span>
-              <button onClick={() => setZoomImage(null)} style={{ background: '#f1f5f9', border: 'none', borderRadius: '50%', width: '30px', height: '30px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                <X size={15} />
-              </button>
-            </div>
-            <img src={zoomImage.url} alt={zoomImage.title} style={{ maxWidth: '85vw', maxHeight: '80vh', objectFit: 'contain', borderRadius: '8px' }} />
-          </div>
-        </div>
-      )}
-    </>
+      {actions}
+    </div>
   );
 };
 
-// ─── Main VehiclesPage Component ─────────────────────────────────────────────
+interface DocImageProps {
+  url: string;
+  title: string;
+  onZoom: (url: string, title: string) => void;
+}
+const DocImage: React.FC<DocImageProps> = ({ url, title, onZoom }) => {
+  const isPdf = getFileType(url) === 'pdf';
+  if (isPdf) {
+    return (
+      <div style={{
+        height: '110px', borderRadius: '8px', border: '1.5px solid #e2e8f0',
+        background: '#fef2f2', display: 'flex', flexDirection: 'column',
+        alignItems: 'center', justifyContent: 'center', gap: '6px', padding: '12px'
+      }}>
+        <FileText size={28} color="#dc2626" />
+        <a href={url} target="_blank" rel="noopener noreferrer"
+          style={{ fontSize: '12px', fontWeight: 700, color: '#dc2626', textDecoration: 'underline' }}>
+          Open PDF Document
+        </a>
+      </div>
+    );
+  }
+
+  return (
+    <div
+      onClick={() => onZoom(url, title)}
+      style={{
+        position: 'relative', borderRadius: '8px', overflow: 'hidden',
+        border: '1.5px solid #e2e8f0', cursor: 'zoom-in',
+        background: '#0f172a', height: '120px',
+      }}
+      title="Click to view full size"
+    >
+      <img src={url} alt={title} style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
+      <div style={{
+        position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.32)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        opacity: 0, transition: 'opacity 0.2s',
+      }}
+        onMouseEnter={e => (e.currentTarget.style.opacity = '1')}
+        onMouseLeave={e => (e.currentTarget.style.opacity = '0')}
+      >
+        <ZoomIn size={22} color="#fff" />
+      </div>
+    </div>
+  );
+};
+
+interface DocCardProps {
+  icon: React.ReactNode;
+  label: string;
+  color: string;
+  children: React.ReactNode;
+}
+const DocCard: React.FC<DocCardProps> = ({ icon, label, color, children }) => (
+  <div style={{
+    border: '1.5px solid #e2e8f0', borderRadius: '14px', overflow: 'hidden',
+    background: '#ffffff', boxShadow: '0 1px 4px rgba(0,0,0,0.04)',
+  }}>
+    <div style={{
+      padding: '10px 16px', background: color, display: 'flex',
+      alignItems: 'center', gap: '8px',
+    }}>
+      {icon}
+      <span style={{ fontWeight: 800, fontSize: '13px', color: '#1e293b' }}>{label}</span>
+    </div>
+    <div style={{ padding: '14px 16px' }}>{children}</div>
+  </div>
+);
+
+const InfoRow: React.FC<{ label: string; value?: string | null }> = ({ label, value }) => (
+  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '5px 0', borderBottom: '1px dashed #f1f5f9' }}>
+    <span style={{ fontSize: '12px', color: '#64748b', fontWeight: 600 }}>{label}</span>
+    <span style={{ fontSize: '13px', color: value ? '#0f172a' : '#94a3b8', fontWeight: value ? 700 : 400 }}>
+      {value || '—'}
+    </span>
+  </div>
+);
+
+interface VehicleDetailPanelProps {
+  vehicle: Vehicle;
+  onEdit: () => void;
+  onClose: () => void;
+  onZoom: (url: string, title: string) => void;
+}
+
+const VehicleDetailPanel: React.FC<VehicleDetailPanelProps> = ({ vehicle: v, onEdit, onClose, onZoom }) => {
+  const num = v.lorry_number;
+  const tdsNumber = v.tds_number || v.dts_number;
+  const tdsExpiry = v.tds_expiry_date || v.dts_expiry_date;
+  const tdsCertUrl = v.tds_certificate_url || v.dts_certificate_url;
+  const rcRegDate = v.rc_reg_date || v.rc_expiry_date;
+
+  const fmtForPrint = (d?: string | null) => {
+    if (!d) return '—';
+    try { return new Date(d).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }); }
+    catch { return d; }
+  };
+
+  const [isPrinting, setIsPrinting] = useState(false);
+  const [isDownloading, setIsDownloading] = useState(false);
+
+  const buildRecord = async () => {
+    // ── helpers ──────────────────────────────────────────────────
+    const today = new Date(); today.setHours(0,0,0,0);
+    const daysLeft = (d?: string|null) => {
+      if (!d) return null;
+      const diff = Math.ceil((new Date(d).getTime() - today.getTime()) / 86400000);
+      return diff;
+    };
+    const fmtD = (d?: string|null) => {
+      if (!d) return null;
+      return new Date(d).toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'});
+    };
+    const statusLabel = (d?: string|null) => {
+      const left = daysLeft(d);
+      if (left === null) return '';
+      if (left < 0) return ` <span style="color:#dc2626;font-weight:700">(EXPIRED)</span>`;
+      if (left === 0) return ` <span style="color:#dc2626;font-weight:700">(Expires Today)</span>`;
+      return ` <span style="color:#16a34a">(${left}d left)</span>`;
+    };
+    const complianceDocs: {label:string, date?:string|null}[] = [
+      { label:'Fitness Certificate (FC)', date: v.fc_expiry_date },
+      { label:'Insurance', date: v.insurance_expiry_date },
+      { label:'Road Permit', date: v.permit_expiry_date },
+      { label:'TDS Certificate', date: tdsExpiry },
+      { label:'Road Tax', date: v.tax_expiry_date },
+    ];
+    const alerts = complianceDocs.filter(d => {
+      const left = daysLeft(d.date);
+      return left !== null && left <= 30;
+    });
+
+    // ── image helpers ─────────────────────────────────────────────
+    const toBase64 = (url: string): Promise<string|null> =>
+      new Promise(resolve => {
+        const img = new Image(); img.crossOrigin = 'anonymous';
+        img.onload = () => {
+          try {
+            const c = document.createElement('canvas');
+            c.width = img.naturalWidth; c.height = img.naturalHeight;
+            c.getContext('2d')!.drawImage(img,0,0);
+            resolve(c.toDataURL('image/jpeg', 0.85));
+          } catch { resolve(null); }
+        };
+        img.onerror = () => resolve(null);
+        img.src = url;
+      });
+
+    const isPdf = (url?: string|null) => url && (url.toLowerCase().includes('.pdf') || url.toLowerCase().includes('application/pdf'));
+
+    // Pre-load all images
+    const [
+      rcFront, rcBack, fcImg, insImg, permitImg,
+      tdsPg1, tdsPg2, taxImg, panImg, bankImg, truckImg
+    ] = await Promise.all([
+      v.rc_photo_url      ? toBase64(v.rc_photo_url)      : Promise.resolve(null),
+      v.rc_photo_back_url ? toBase64(v.rc_photo_back_url) : Promise.resolve(null),
+      v.fc_photo_url      ? toBase64(v.fc_photo_url)      : Promise.resolve(null),
+      v.insurance_photo_url ? toBase64(v.insurance_photo_url) : Promise.resolve(null),
+      v.permit_photo_url  ? toBase64(v.permit_photo_url)  : Promise.resolve(null),
+      tdsCertUrl          ? toBase64(tdsCertUrl)           : Promise.resolve(null),
+      v.tds_certificate_url_2 ? toBase64(v.tds_certificate_url_2) : Promise.resolve(null),
+      v.tax_photo_url     ? toBase64(v.tax_photo_url)     : Promise.resolve(null),
+      v.pan_card_url      ? toBase64(v.pan_card_url)      : Promise.resolve(null),
+      v.account_photo_url ? toBase64(v.account_photo_url) : Promise.resolve(null),
+      v.truck_image_url   ? toBase64(v.truck_image_url)   : Promise.resolve(null),
+    ]);
+
+    const makeImgBox = (b64: string|null, label: string, emptyLabel: string, isDocPdf: boolean) => {
+      const headerStyle = `font-size:10.5px;font-weight:800;letter-spacing:1px;color:#1d4ed8;text-transform:uppercase;padding:10px 14px;border-bottom:1px solid #e2e8f0;background:#f8fafc;border-radius:6px 6px 0 0`;
+      const wrapStyle = `border:1.5px solid #e2e8f0;border-radius:6px;overflow:hidden;width:100%`;
+      if (!b64 && !isDocPdf) return `<div style="${wrapStyle}"><div style="${headerStyle}">${label}</div><div style="padding:22px;text-align:center;font-size:11px;color:#94a3b8;font-style:italic">${emptyLabel}</div></div>`;
+      if (isDocPdf) return `<div style="${wrapStyle}"><div style="${headerStyle}">${label}</div><div style="padding:18px;text-align:center"><div style="display:inline-block;border:1.5px dashed #94a3b8;border-radius:6px;padding:10px 20px;font-size:11.5px;font-weight:600;color:#475569">📄 PDF Document</div></div></div>`;
+      if (!b64) return `<div style="${wrapStyle}"><div style="${headerStyle}">${label}</div><div style="padding:22px;text-align:center;font-size:11px;color:#94a3b8;font-style:italic">${emptyLabel}</div></div>`;
+      return `<div style="${wrapStyle}"><div style="${headerStyle}">${label}</div><div style="padding:10px;text-align:center"><img src="${b64}" style="max-width:100%;max-height:300px;object-fit:contain;border-radius:4px;display:block;margin:0 auto"/></div></div>`;
+    };
+
+    const cell = (lbl: string, val: string) =>
+      `<td style="padding:8px 10px;font-size:10.5px;font-weight:700;color:#1e40af;text-transform:uppercase;white-space:nowrap;border:1px solid #e2e8f0;width:18%">${lbl}</td><td style="padding:8px 10px;font-size:11px;font-weight:700;color:#0f172a;border:1px solid #e2e8f0;width:32%">${val}</td>`;
+
+    const cellFull = (lbl: string, val: string) =>
+      `<td style="padding:8px 10px;font-size:10.5px;font-weight:700;color:#1e40af;text-transform:uppercase;white-space:nowrap;border:1px solid #e2e8f0;width:18%">${lbl}</td><td colspan="3" style="padding:8px 10px;font-size:11px;font-weight:700;border:1px solid #e2e8f0;color:#0f172a">${val}</td>`;
+
+    const complianceHtml = alerts.length ? `
+      <div style="background:#fef2f2;border:1.5px solid #fca5a5;border-radius:6px;padding:10px 14px;margin-bottom:16px;">
+        <div style="font-size:11px;font-weight:800;color:#dc2626;margin-bottom:6px">⚠️ 30-DAY COMPLIANCE EXPIRY NOTICE — ACTION REQUIRED BEFORE DISPATCH:</div>
+        ${alerts.map(a => {
+          const left = daysLeft(a.date);
+          const expired = left !== null && left < 0;
+          return `<div style="font-size:11px;font-weight:700;color:#dc2626;margin-left:10px">• ${a.label}: ${expired ? `EXPIRED (${fmtD(a.date)})` : `Expires ${fmtD(a.date)} (${left}d left)`}</div>`;
+        }).join('')}
+      </div>` : '';
+
+    const bodyContent = `
+      <!-- HEADER -->
+      <div class="pdf-block" style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px">
+        <div>
+          <h2>KSP TRANSPORT SERVICES</h2>
+          <div class="subtitle">Official Fleet Truck Master &amp; Verification Record</div>
+        </div>
+        <div style="text-align:right;border:1.5px solid #1d4ed8;border-radius:6px;padding:8px 16px;min-width:160px">
+          <div style="font-size:11px;font-weight:800;color:#1d4ed8">STATUS: ${v.status}</div>
+          <div style="font-size:9.5px;color:#64748b;margin-top:2px">Generated: ${new Date().toLocaleDateString('en-IN',{day:'2-digit',month:'2-digit',year:'numeric'})}</div>
+          ${truckImg ? `<img src="${truckImg}" style="height:38px;margin-top:6px;border-radius:4px;object-fit:cover"/>` : ''}
+        </div>
+      </div>
+      <div class="pdf-block" style="border-top:2px solid #1d4ed8;margin-bottom:16px"></div>
+
+      ${complianceHtml ? `<div class="pdf-block">${complianceHtml}</div>` : ''}
+
+      <!-- SECTION 1 -->
+      <div class="pdf-block">
+        <div class="section-title">1. Vehicle Specifications</div>
+        <table style="margin-bottom:4px">
+          <tr>${cell('Lorry / Truck No', num)}${cell('Vehicle Type', v.vehicle_type || '\u2014')}</tr>
+          <tr>${cell('RC / Reg No', v.rc_number || '\u2014')}${cell('RC Registration Date', fmtD(rcRegDate) || '\u2014')}</tr>
+          <tr>${cellFull('Status', `<span style="color:${v.status === 'ACTIVE' ? '#16a34a' : '#dc2626'};font-weight:800">${v.status}</span>`)}</tr>
+        </table>
+      </div>
+
+      <!-- SECTION 2 -->
+      <div class="pdf-block">
+        <div class="section-title">2. Validity &amp; Compliance Dates</div>
+        <table style="margin-bottom:4px">
+          <tr>
+            ${cell('Fitness Cert (FC)', v.fc_expiry_date ? `${fmtD(v.fc_expiry_date)}${statusLabel(v.fc_expiry_date)}` : '\u2014')}
+            <td style="padding:8px 10px;font-size:10.5px;font-weight:700;color:#1e40af;text-transform:uppercase;white-space:nowrap;border:1px solid #e2e8f0;width:18%">Insurance Policy</td>
+            <td style="padding:6px 10px;font-size:11px;border:1px solid #e2e8f0;width:32%">
+              ${v.insurance_policy_number ? `<div style="font-weight:700;color:#0f172a;margin-bottom:2px">No: ${v.insurance_policy_number}</div>` : ''}
+              ${v.insurance_expiry_date ? `<div style="font-weight:700;color:#0f172a">${fmtD(v.insurance_expiry_date)}${statusLabel(v.insurance_expiry_date)}</div>` : '<span style="color:#94a3b8">\u2014</span>'}
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:8px 10px;font-size:10.5px;font-weight:700;color:#1e40af;text-transform:uppercase;white-space:nowrap;border:1px solid #e2e8f0;width:18%">Road Permit</td>
+            <td style="padding:6px 10px;font-size:11px;border:1px solid #e2e8f0;width:32%">
+              ${v.permit_number ? `<div style="font-weight:700;color:#0f172a;margin-bottom:2px">No: ${v.permit_number}</div>` : ''}
+              ${v.permit_expiry_date ? `<div style="font-weight:700;color:#0f172a">${fmtD(v.permit_expiry_date)}${statusLabel(v.permit_expiry_date)}</div>` : '<span style="color:#94a3b8">\u2014</span>'}
+            </td>
+            ${cell('Yearly Road Tax', v.tax_photo_url ? '<span style="color:#16a34a;font-weight:800">\u2714 Yes</span>' : '<span style="color:#dc2626;font-weight:700">\u2717 No</span>')}
+          </tr>
+          <tr>
+            ${cellFull('TDS Certificate', tdsCertUrl ? '<span style="color:#16a34a;font-weight:800">\u2714 Yes</span>' : '<span style="color:#dc2626;font-weight:700">\u2717 No</span>')}
+          </tr>
+        </table>
+      </div>
+
+      <!-- SECTION 3 -->
+      <div class="pdf-block">
+        <div class="section-title">3. Bank Account &amp; PAN Card Details</div>
+        <table style="margin-bottom:4px">
+          <tr>${cell('PAN Number', v.pan_number || '—')}${cell('Account Holder', v.account_holder_name || '—')}</tr>
+          <tr>${cell('Account Number', v.account_number || '—')}${cell('Bank Name', v.bank_name || '—')}</tr>
+          <tr>${cell('IFSC Code', v.ifsc_code || '—')}${cell('', '')}</tr>
+        </table>
+      </div>
+
+      <!-- SECTION 4 -->
+      <div class="pdf-block section-title">4. Submitted Document Verification Scans</div>
+
+      ${[  
+        { b64: rcFront,   label: 'Registration Certificate (RC Front)',  empty: 'No RC Front Uploaded',        pdf: isPdf(v.rc_photo_url) },
+        { b64: rcBack,    label: 'Registration Certificate (RC Back)',   empty: 'No RC Back Uploaded',         pdf: isPdf(v.rc_photo_back_url) },
+        { b64: fcImg,     label: 'Fitness Certificate (FC)',             empty: 'No FC Certificate Uploaded',  pdf: isPdf(v.fc_photo_url) },
+        { b64: insImg,    label: 'Insurance Document',                  empty: 'No Insurance Uploaded',       pdf: isPdf(v.insurance_photo_url) },
+        { b64: permitImg, label: 'Road Permit',                         empty: 'No Permit Uploaded',          pdf: isPdf(v.permit_photo_url) },
+        { b64: taxImg,    label: 'Road Tax Receipt (Yearly Tax)',        empty: 'No Tax Receipt Uploaded',     pdf: isPdf(v.tax_photo_url) },
+        { b64: panImg,    label: 'PAN Card',                            empty: 'No PAN Card Uploaded',        pdf: isPdf(v.pan_card_url) },
+        { b64: bankImg,   label: 'Bank Passbook / Cheque',              empty: 'No Bank Document Uploaded',   pdf: isPdf(v.account_photo_url) },
+        { b64: tdsPg1,    label: 'TDS Certificate — Page 1',            empty: 'No TDS Certificate Uploaded', pdf: isPdf(tdsCertUrl) },
+        ...(v.tds_certificate_url_2 ? [{ b64: tdsPg2, label: 'TDS Certificate — Page 2', empty: 'No TDS Page 2 Uploaded', pdf: isPdf(v.tds_certificate_url_2) }] : []),
+      ].map(d => `<div class="pdf-block doc-card">${makeImgBox(d.b64, d.label, d.empty, !!d.pdf)}</div>`).join('')}
+
+      <!-- FOOTER -->
+      <div class="pdf-block" style="margin-top:30px;display:flex;justify-content:space-between;align-items:flex-end;border-top:1px solid #e2e8f0;padding-top:16px">
+        <div>
+          <div class="sig-line"></div>
+          <div style="font-size:10px;color:#1d4ed8;font-weight:600;margin-top:4px">Fleet / Transport Manager</div>
+        </div>
+        <div style="text-align:right">
+          <div class="sig-line"></div>
+          <div style="font-size:10px;color:#1d4ed8;font-weight:600;margin-top:4px">Authorized Admin Signature</div>
+        </div>
+      </div>
+    `;
+
+    const html = `<!DOCTYPE html><html><head>
+      <title>KSP Transport — ${num}</title>
+      <style>
+        *{box-sizing:border-box;margin:0;padding:0}
+        body{font-family:'Segoe UI',Arial,sans-serif;color:#1e293b;background:#fff;padding:28px 32px;font-size:11px}
+        h2{font-size:16px;font-weight:900;color:#1d4ed8;margin-bottom:2px;letter-spacing:0.5px}
+        .subtitle{font-size:10.5px;color:#64748b;margin-bottom:0}
+        .section-title{font-size:12px;font-weight:800;color:#1d4ed8;border-bottom:2px solid #1d4ed8;padding-bottom:4px;margin:18px 0 10px;text-transform:uppercase;letter-spacing:0.5px}
+        table{border-collapse:collapse;width:100%}
+        td{vertical-align:top}
+        .doc-card{page-break-inside:avoid;break-inside:avoid;margin-bottom:14px}
+        .sig-line{border-top:1px solid #0f172a;display:inline-block;width:200px;margin-top:4px}
+        @media print{body{padding:16px 20px}@page{margin:12mm}}
+      </style>
+    </head><body>
+      ${bodyContent}
+    </body></html>`;
+
+    return { bodyContent, html };
+  };
+
+  const handlePrint = async () => {
+    setIsPrinting(true);
+    try {
+      const { html } = await buildRecord();
+      const win = window.open('', '_blank', 'width=900,height=1100');
+      if (!win) return;
+      win.document.write(html);
+      win.document.close();
+      win.focus();
+      setTimeout(() => { win.print(); }, 500);
+    } catch (e) {
+      console.error('Print error:', e);
+    } finally {
+      setIsPrinting(false);
+    }
+  };
+
+  const handleDownload = async () => {
+    setIsDownloading(true);
+    try {
+      const { bodyContent } = await buildRecord();
+      const { jsPDF } = await import('jspdf');
+      const html2canvas = (await import('html2canvas')).default;
+
+      // Off-screen container at exact A4 width
+      const RENDER_WIDTH = 794; // ~210mm @ 96dpi
+      const container = document.createElement('div');
+      container.style.cssText = `
+        position:fixed;left:-9999px;top:0;
+        width:${RENDER_WIDTH}px;background:#fff;
+        padding:24px 28px;box-sizing:border-box;z-index:-9999;
+      `;
+      container.innerHTML = `
+        <style>
+          *{box-sizing:border-box;margin:0;padding:0}
+          body,div,table{font-family:'Segoe UI',Arial,sans-serif;color:#1e293b;font-size:11px}
+          h2{font-size:16px;font-weight:900;color:#1d4ed8;margin-bottom:2px}
+          .subtitle{font-size:10.5px;color:#64748b}
+          .section-title{font-size:12px;font-weight:800;color:#1d4ed8;border-bottom:2px solid #1d4ed8;padding-bottom:4px;margin:16px 0 10px;text-transform:uppercase;letter-spacing:.5px}
+          table{border-collapse:collapse;width:100%;margin-bottom:4px}
+          td{vertical-align:top}
+          .doc-card{margin-bottom:14px}
+          .sig-line{border-top:1px solid #0f172a;display:inline-block;width:200px;margin-top:4px}
+        </style>
+        ${bodyContent}
+      `;
+      document.body.appendChild(container);
+      await new Promise(r => setTimeout(r, 200));
+
+      // Collect each pdf-block's position relative to container top
+      const containerTop = container.getBoundingClientRect().top;
+      const blocks = Array.from(container.querySelectorAll<HTMLElement>('.pdf-block'));
+
+      // Render the ENTIRE container as one high-res canvas (scale=2 for retina)
+      const fullCanvas = await html2canvas(container, {
+        scale: 2,
+        useCORS: true,
+        allowTaint: true,
+        logging: false,
+        windowWidth: RENDER_WIDTH,
+        backgroundColor: '#ffffff',
+      });
+
+      const scaleX = fullCanvas.width / container.offsetWidth;
+
+      // Map each block to canvas-pixel rows
+      const blockRanges = blocks.map(b => {
+        const r = b.getBoundingClientRect();
+        return {
+          top:    Math.max(0, Math.round((r.top    - containerTop) * scaleX)),
+          bottom: Math.min(fullCanvas.height, Math.round((r.bottom - containerTop) * scaleX)),
+        };
+      });
+
+      document.body.removeChild(container);
+
+      // A4 page in canvas pixels
+      const PAGE_H_PX  = Math.round(fullCanvas.width * (297 / 210));
+      const MARGIN_PX  = Math.round(fullCanvas.width * (10  / 210)); // 10mm top margin on subsequent pages
+
+      // Build page slices — break ONLY between blocks, never through one
+      const slices: Array<{ y: number; h: number; first: boolean }> = [];
+      let curY    = 0;
+      const totalH = fullCanvas.height;
+
+      while (curY < totalH) {
+        const isFirst  = slices.length === 0;
+        const pageRoom = isFirst ? PAGE_H_PX : (PAGE_H_PX - MARGIN_PX);
+        const rawEnd   = curY + pageRoom;
+
+        if (rawEnd >= totalH) {
+          slices.push({ y: curY, h: totalH - curY, first: isFirst });
+          break;
+        }
+
+        // Walk blocks to find the best split point: the bottom of the last block
+        // that fits entirely before rawEnd. Never split through a block.
+        let splitAt = rawEnd; // fallback: hard cut (no block straddles here)
+
+        for (let i = 0; i < blockRanges.length; i++) {
+          const { top, bottom } = blockRanges[i];
+          if (top < rawEnd && bottom > rawEnd) {
+            // This block would be cut — move split to just before it (if meaningful)
+            splitAt = top > curY + 30 ? top : rawEnd;
+            break;
+          }
+          // Keep track of the last block that fits fully — use it as a potential split point
+          if (bottom <= rawEnd) {
+            splitAt = bottom;
+          }
+        }
+
+        if (splitAt <= curY) splitAt = rawEnd; // safety
+
+        slices.push({ y: curY, h: splitAt - curY, first: isFirst });
+        curY = splitAt;
+      }
+
+      // Build PDF from slices
+      const pdf = new jsPDF('p', 'mm', 'a4');
+      const tmpCanvas = document.createElement('canvas');
+      tmpCanvas.width = fullCanvas.width;
+
+      for (let i = 0; i < slices.length; i++) {
+        const { y, h, first } = slices[i];
+        if (h <= 0) continue;
+
+        tmpCanvas.height = h;
+        const ctx = tmpCanvas.getContext('2d')!;
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, tmpCanvas.width, h);
+        ctx.drawImage(fullCanvas, 0, y, fullCanvas.width, h, 0, 0, fullCanvas.width, h);
+
+        const imgData  = tmpCanvas.toDataURL('image/jpeg', 0.97);
+        const imgHmm   = (h / fullCanvas.width) * 210;
+        const yOffsetMm = first ? 0 : 10;
+
+        if (i > 0) pdf.addPage();
+        pdf.addImage(imgData, 'JPEG', 0, yOffsetMm, 210, imgHmm, undefined, 'FAST');
+      }
+
+      const filename = `Vehicle_${num.replace(/[^a-zA-Z0-9]/g, '_')}_Master_Record.pdf`;
+      pdf.save(filename);
+
+      try {
+        const history = JSON.parse(localStorage.getItem('downloaded_vehicles') || '[]');
+        history.unshift({ lorry_number: num, downloaded_at: new Date().toISOString(), filename });
+        localStorage.setItem('downloaded_vehicles', JSON.stringify(history.slice(0, 50)));
+      } catch { /* ignore */ }
+
+    } catch (err) {
+      console.error('PDF download error:', err);
+      alert('PDF generation failed. Please try again.');
+    } finally {
+      setIsDownloading(false);
+    }
+  };
+
+
+  const handleShare = async () => {
+    const text = [
+      `🚛 Vehicle: ${num}`,
+      v.vehicle_type ? `Type: ${v.vehicle_type}` : '',
+      v.capacity_tons ? `Capacity: ${v.capacity_tons} Tons` : '',
+      `Status: ${v.status}`,
+      '',
+      `RC No: ${v.rc_number || '—'}`,
+      `FC Expiry: ${fmtForPrint(v.fc_expiry_date)}`,
+      `Insurance Expiry: ${fmtForPrint(v.insurance_expiry_date)}`,
+      `Permit Expiry: ${fmtForPrint(v.permit_expiry_date)}`,
+      `TDS Expiry: ${fmtForPrint(tdsExpiry) || '31 Mar (Yearly)'}`,
+      `Road Tax Expiry: ${fmtForPrint(v.tax_expiry_date) || '31 Mar (Yearly)'}`,
+      '',
+      `PAN: ${v.pan_number || '—'}  |  A/c: ${v.account_number || '—'}  |  IFSC: ${v.ifsc_code || '—'}`,
+    ].filter(Boolean).join('\n');
+
+    if (navigator.share) {
+      try { await navigator.share({ title: `Vehicle — ${num}`, text }); return; } catch {}
+    }
+    await navigator.clipboard.writeText(text);
+    alert('Vehicle details copied to clipboard!');
+  };
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+
+      {/* ── Hero Header ─────────────────────────────────────────────────── */}
+      <div style={{
+        background: 'linear-gradient(135deg, #1d4ed8 0%, #3b82f6 100%)',
+        borderRadius: '16px', padding: '20px 24px',
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        boxShadow: '0 4px 20px rgba(37,99,235,0.25)',
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+          {v.truck_image_url ? (
+            <div onClick={() => onZoom(v.truck_image_url!, `${num} — Truck Photo`)}
+              style={{
+                width: '72px', height: '56px', borderRadius: '10px', overflow: 'hidden',
+                border: '2px solid rgba(255,255,255,0.4)', cursor: 'zoom-in',
+              }}>
+              <img src={v.truck_image_url} alt={num} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+            </div>
+          ) : (
+            <div style={{
+              width: '72px', height: '56px', borderRadius: '10px',
+              background: 'rgba(255,255,255,0.15)', display: 'flex',
+              alignItems: 'center', justifyContent: 'center', border: '2px dashed rgba(255,255,255,0.4)',
+            }}>
+              <Truck size={28} color="rgba(255,255,255,0.7)" />
+            </div>
+          )}
+          <div>
+            <div style={{ fontSize: '10px', fontWeight: 700, color: 'rgba(255,255,255,0.7)', textTransform: 'uppercase', letterSpacing: '1px' }}>
+              Lorry / Truck Number
+            </div>
+            <div style={{ fontSize: '26px', fontWeight: 900, color: '#ffffff', letterSpacing: '1px', lineHeight: 1.2 }}>
+              {num}
+            </div>
+            {v.vehicle_type && (
+              <div style={{ fontSize: '12px', color: 'rgba(255,255,255,0.8)', marginTop: '2px' }}>{v.vehicle_type}</div>
+            )}
+          </div>
+        </div>
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '6px' }}>
+          <span style={{
+            padding: '5px 14px', borderRadius: '20px', fontSize: '12px', fontWeight: 700,
+            background: v.status === 'ACTIVE' ? 'rgba(220,252,231,0.95)' : 'rgba(254,226,226,0.95)',
+            color: v.status === 'ACTIVE' ? '#15803d' : '#b91c1c',
+            display: 'inline-flex', alignItems: 'center', gap: '5px',
+          }}>
+            <span style={{ width: '7px', height: '7px', borderRadius: '50%', background: v.status === 'ACTIVE' ? '#16a34a' : '#dc2626' }} />
+            {v.status}
+          </span>
+          {v.capacity_tons && (
+            <span style={{ fontSize: '12px', color: 'rgba(255,255,255,0.8)', fontWeight: 600 }}>
+              Capacity: {v.capacity_tons} Tons
+            </span>
+          )}
+        </div>
+      </div>
+
+      {/* ── Document Sections ────────────────────────────────────────────── */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+
+        {/* RC — Registration Certificate (Date of Regn, No Expiry) */}
+        <DocCard icon={<FileText size={15} color="#1d4ed8" />} label="RC — Registration Certificate" color="#eff6ff">
+          <InfoRow label="RC Number" value={v.rc_number} />
+          <InfoRow label="Date of Registration" value={fmtDate(rcRegDate)} />
+          {(v.rc_photo_url || v.rc_photo_back_url) && (
+            <div style={{ marginTop: '10px', display: 'grid', gridTemplateColumns: v.rc_photo_url && v.rc_photo_back_url ? '1fr 1fr' : '1fr', gap: '8px' }}>
+              {v.rc_photo_url && <div><div style={{ fontSize: '10px', color: '#64748b', fontWeight: 600, marginBottom: '4px' }}>RC FRONT</div><DocImage url={v.rc_photo_url} title={`${num} — RC Front`} onZoom={onZoom} /></div>}
+              {v.rc_photo_back_url && <div><div style={{ fontSize: '10px', color: '#64748b', fontWeight: 600, marginBottom: '4px' }}>RC BACK</div><DocImage url={v.rc_photo_back_url} title={`${num} — RC Back`} onZoom={onZoom} /></div>}
+            </div>
+          )}
+        </DocCard>
+
+        {/* FC — Fitness Certificate */}
+        <DocCard icon={<Shield size={15} color="#7c3aed" />} label="FC — Fitness Certificate" color="#f5f3ff">
+
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '5px 0', borderBottom: '1px dashed #f1f5f9' }}>
+            <span style={{ fontSize: '12px', color: '#64748b', fontWeight: 600 }}>FC Expiry</span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <span style={{ fontSize: '13px', color: v.fc_expiry_date ? '#0f172a' : '#94a3b8', fontWeight: 700 }}>
+                {fmtDate(v.fc_expiry_date) || '—'}
+              </span>
+              <ExpiryBadge date={v.fc_expiry_date} />
+            </div>
+          </div>
+          {v.fc_photo_url && (
+            <div style={{ marginTop: '10px' }}>
+              <div style={{ fontSize: '10px', color: '#64748b', fontWeight: 600, marginBottom: '4px' }}>FC CERTIFICATE</div>
+              <DocImage url={v.fc_photo_url} title={`${num} — FC Certificate`} onZoom={onZoom} />
+            </div>
+          )}
+        </DocCard>
+
+        {/* Insurance */}
+        <DocCard icon={<Shield size={15} color="#059669" />} label="Insurance" color="#ecfdf5">
+          <InfoRow label="Policy Number" value={v.insurance_policy_number} />
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '5px 0', borderBottom: '1px dashed #f1f5f9' }}>
+            <span style={{ fontSize: '12px', color: '#64748b', fontWeight: 600 }}>Expiry</span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <span style={{ fontSize: '13px', color: v.insurance_expiry_date ? '#0f172a' : '#94a3b8', fontWeight: 700 }}>
+                {fmtDate(v.insurance_expiry_date) || '—'}
+              </span>
+              <ExpiryBadge date={v.insurance_expiry_date} />
+            </div>
+          </div>
+          {v.insurance_photo_url && (
+            <div style={{ marginTop: '10px' }}>
+              <div style={{ fontSize: '10px', color: '#64748b', fontWeight: 600, marginBottom: '4px' }}>INSURANCE DOCUMENT</div>
+              <DocImage url={v.insurance_photo_url} title={`${num} — Insurance`} onZoom={onZoom} />
+            </div>
+          )}
+        </DocCard>
+
+        {/* Permit */}
+        <DocCard icon={<FileText size={15} color="#d97706" />} label="Permit" color="#fffbeb">
+          <InfoRow label="Permit Number" value={v.permit_number} />
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '5px 0', borderBottom: '1px dashed #f1f5f9' }}>
+            <span style={{ fontSize: '12px', color: '#64748b', fontWeight: 600 }}>Expiry</span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <span style={{ fontSize: '13px', color: v.permit_expiry_date ? '#0f172a' : '#94a3b8', fontWeight: 700 }}>
+                {fmtDate(v.permit_expiry_date) || '—'}
+              </span>
+              <ExpiryBadge date={v.permit_expiry_date} />
+            </div>
+          </div>
+          {v.permit_photo_url && (
+            <div style={{ marginTop: '10px' }}>
+              <div style={{ fontSize: '10px', color: '#64748b', fontWeight: 600, marginBottom: '4px' }}>PERMIT DOCUMENT</div>
+              <DocImage url={v.permit_photo_url} title={`${num} — Permit`} onZoom={onZoom} />
+            </div>
+          )}
+        </DocCard>
+
+        {/* TDS (formerly DTS) — Expires March 31st */}
+        <DocCard icon={<Hash size={15} color="#0891b2" />} label="TDS Certificate (Yearly: 31st March)" color="#ecfeff">
+
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '5px 0', borderBottom: '1px dashed #f1f5f9' }}>
+            <span style={{ fontSize: '12px', color: '#64748b', fontWeight: 600 }}>TDS Expiry</span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <span style={{ fontSize: '13px', color: tdsExpiry ? '#0f172a' : '#94a3b8', fontWeight: 700 }}>
+                {fmtDate(tdsExpiry) || '31 Mar (Yearly)'}
+              </span>
+              <ExpiryBadge date={tdsExpiry} />
+            </div>
+          </div>
+          {tdsCertUrl && (
+            <div style={{ marginTop: '10px' }}>
+              <div style={{ fontSize: '10px', color: '#64748b', fontWeight: 600, marginBottom: '4px' }}>TDS CERTIFICATE — PAGE 1</div>
+              <DocImage url={tdsCertUrl} title={`${num} — TDS Page 1`} onZoom={onZoom} />
+            </div>
+          )}
+          {v.tds_certificate_url_2 && (
+            <div style={{ marginTop: '10px' }}>
+              <div style={{ fontSize: '10px', color: '#64748b', fontWeight: 600, marginBottom: '4px' }}>TDS CERTIFICATE — PAGE 2</div>
+              <DocImage url={v.tds_certificate_url_2} title={`${num} — TDS Page 2`} onZoom={onZoom} />
+            </div>
+          )}
+        </DocCard>
+
+        {/* Road Tax — Expires March 31st */}
+        <DocCard icon={<FileText size={15} color="#be185d" />} label="Road Tax (Yearly: 31st March)" color="#fdf2f8">
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '5px 0', borderBottom: '1px dashed #f1f5f9' }}>
+            <span style={{ fontSize: '12px', color: '#64748b', fontWeight: 600 }}>Tax Expiry</span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <span style={{ fontSize: '13px', color: v.tax_expiry_date ? '#0f172a' : '#94a3b8', fontWeight: 700 }}>
+                {fmtDate(v.tax_expiry_date) || '31 Mar (Yearly)'}
+              </span>
+              <ExpiryBadge date={v.tax_expiry_date} />
+            </div>
+          </div>
+          {v.tax_photo_url && (
+            <div style={{ marginTop: '10px' }}>
+              <div style={{ fontSize: '10px', color: '#64748b', fontWeight: 600, marginBottom: '4px' }}>TAX RECEIPT</div>
+              <DocImage url={v.tax_photo_url} title={`${num} — Tax`} onZoom={onZoom} />
+            </div>
+          )}
+        </DocCard>
+      </div>
+
+      {/* ── PAN & Bank Details ─────────────────────────────────────────────── */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+
+        {/* PAN */}
+        <DocCard icon={<CreditCard size={15} color="#7c3aed" />} label="PAN Card" color="#f5f3ff">
+          <InfoRow label="PAN Number" value={v.pan_number} />
+          <InfoRow label="Cardholder Name" value={v.account_holder_name} />
+          {v.pan_card_url && (
+            <div style={{ marginTop: '10px' }}>
+              <div style={{ fontSize: '10px', color: '#64748b', fontWeight: 600, marginBottom: '4px' }}>PAN CARD</div>
+              <DocImage url={v.pan_card_url} title={`${num} — PAN Card`} onZoom={onZoom} />
+            </div>
+          )}
+        </DocCard>
+
+        {/* Bank */}
+        <DocCard icon={<Building size={15} color="#0f766e" />} label="Bank Account Details" color="#f0fdfa">
+          <InfoRow label="Account Holder" value={v.account_holder_name} />
+          <InfoRow label="Account Number" value={v.account_number} />
+          <InfoRow label="Bank Name" value={v.bank_name} />
+          <InfoRow label="IFSC Code" value={v.ifsc_code} />
+          {v.account_photo_url && (
+            <div style={{ marginTop: '10px' }}>
+              <div style={{ fontSize: '10px', color: '#64748b', fontWeight: 600, marginBottom: '4px' }}>BANK PASSBOOK / CHEQUE</div>
+              <DocImage url={v.account_photo_url} title={`${num} — Bank Proof`} onZoom={onZoom} />
+            </div>
+          )}
+        </DocCard>
+      </div>
+
+      {/* ── Footer ───────────────────────────────────────────────────────── */}
+      <div style={{
+        display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+        paddingTop: '14px', borderTop: '1px solid #e2e8f0',
+      }}>
+        {/* Action buttons: Share / Print / Download */}
+        <div style={{ display: 'flex', gap: '8px' }}>
+          <button
+            onClick={handleShare}
+            title="Share vehicle details"
+            style={{
+              display: 'inline-flex', alignItems: 'center', gap: '5px',
+              padding: '7px 14px', borderRadius: '8px', fontSize: '12.5px', fontWeight: 700,
+              border: '1.5px solid #cbd5e1', background: '#f8fafc', color: '#475569',
+              cursor: 'pointer', transition: 'all 0.15s',
+            }}
+            onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.background = '#e2e8f0'; }}
+            onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.background = '#f8fafc'; }}
+          >
+            <Share2 size={13} /> Share
+          </button>
+          <button
+            onClick={handlePrint}
+            disabled={isPrinting}
+            title="Print vehicle details"
+            style={{
+              display: 'inline-flex', alignItems: 'center', gap: '5px',
+              padding: '7px 14px', borderRadius: '8px', fontSize: '12.5px', fontWeight: 700,
+              border: '1.5px solid #cbd5e1', background: isPrinting ? '#f1f5f9' : '#f8fafc',
+              color: isPrinting ? '#94a3b8' : '#475569',
+              cursor: isPrinting ? 'not-allowed' : 'pointer', transition: 'all 0.15s',
+            }}
+            onMouseEnter={e => { if (!isPrinting) (e.currentTarget as HTMLButtonElement).style.background = '#e2e8f0'; }}
+            onMouseLeave={e => { if (!isPrinting) (e.currentTarget as HTMLButtonElement).style.background = '#f8fafc'; }}
+          >
+            {isPrinting ? <Loader2 size={13} className="animate-spin" /> : <Printer size={13} />} Print
+          </button>
+          <button
+            onClick={handleDownload}
+            disabled={isDownloading}
+            title="Download vehicle details as PDF to local storage"
+            style={{
+              display: 'inline-flex', alignItems: 'center', gap: '5px',
+              padding: '7px 14px', borderRadius: '8px', fontSize: '12.5px', fontWeight: 700,
+              border: '1.5px solid #cbd5e1', background: isDownloading ? '#f1f5f9' : '#f8fafc',
+              color: isDownloading ? '#94a3b8' : '#475569',
+              cursor: isDownloading ? 'not-allowed' : 'pointer', transition: 'all 0.15s',
+            }}
+            onMouseEnter={e => { if (!isDownloading) (e.currentTarget as HTMLButtonElement).style.background = '#e2e8f0'; }}
+            onMouseLeave={e => { if (!isDownloading) (e.currentTarget as HTMLButtonElement).style.background = '#f8fafc'; }}
+          >
+            {isDownloading ? <Loader2 size={13} className="animate-spin" /> : <Download size={13} />} Download PDF
+          </button>
+        </div>
+        {/* Edit / Close */}
+        <div style={{ display: 'flex', gap: '10px' }}>
+          <button className="btn btn-outline" onClick={onEdit} style={{ display: 'inline-flex', alignItems: 'center', gap: '5px' }}>
+            <Edit2 size={14} /> Edit Vehicle
+          </button>
+          <button className="btn btn-primary" onClick={onClose}>Close</button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
 export const VehiclesPage: React.FC = () => {
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
+  const [isLoading, setIsLoading] = useState(false);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState('');
-  const [isLoading, setIsLoading] = useState(false);
+  const [statusFilter, setStatusFilter] = useState('');
 
-  // Profile Modal State
-  const [profileVehicle, setProfileVehicle] = useState<Vehicle | null>(null);
+  // Expiring compliance count (for top alert banner)
+  const [expiringCount, setExpiringCount] = useState<number>(0);
 
-  // Add / Edit Modal State
+  // Modals
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [selectedVehicle, setSelectedVehicle] = useState<Vehicle | null>(null);
-  const [activeTab, setActiveTab] = useState<'basic' | 'docs' | 'compliance' | 'bank'>('basic');
-  const [ocrScanningField, setOcrScanningField] = useState<string | null>(null);
-  const [ocrResults, setOcrResults] = useState<Record<string, { date?: string; number?: string; confidence?: number }>>({});
+  const [viewVehicle, setViewVehicle] = useState<Vehicle | null>(null);
+  const [zoomImage, setZoomImage] = useState<{ url: string; title: string } | null>(null);
+  const [deleteConfirm, setDeleteConfirm] = useState<Vehicle | null>(null);
 
-  const [formData, setFormData] = useState({
+  // Auto-extraction state
+  const [extractingField, setExtractingField] = useState<string | null>(null);
+  const [autoFillNotice, setAutoFillNotice] = useState<{ message: string; type: 'success' | 'info' } | null>(null);
+
+  // Form state — all vehicle document fields
+  const emptyForm = () => ({
     lorry_number: '',
     vehicle_type: '',
     capacity_tons: '',
     goodshed_loading_expense: '',
     status: 'ACTIVE' as 'ACTIVE' | 'INACTIVE',
+    // Truck photo
+    truck_image_url: '',
+    // RC (Registration) - Date of Regn
     rc_number: '',
+    rc_reg_date: '',
+    rc_expiry_date: '',
     rc_photo_url: '',
+    rc_photo_back_url: '',
+    // FC (Fitness)
     fc_number: '',
     fc_expiry_date: '',
     fc_photo_url: '',
+    // Insurance
     insurance_policy_number: '',
     insurance_expiry_date: '',
     insurance_photo_url: '',
+    // Permit
     permit_number: '',
     permit_expiry_date: '',
     permit_photo_url: '',
-    tax_expiry_date: '',
+    // TDS (renamed from DTS) - yearly March 31st
+    tds_number: '',
+    tds_expiry_date: getNextMarch31st(),
+    tds_certificate_url: '',
+    tds_certificate_url_2: '',
+    dts_number: '',
+    dts_expiry_date: getNextMarch31st(),
+    dts_certificate_url: '',
+    // Road Tax - yearly March 31st
+    tax_expiry_date: getNextMarch31st(),
     tax_photo_url: '',
+    // PAN
     pan_number: '',
     pan_card_url: '',
-    dts_number: '',
-    dts_expiry_date: '',
-    dts_certificate_url: '',
+    // Bank
+    account_holder_name: '',
     account_number: '',
     bank_name: '',
     ifsc_code: '',
-    account_holder_name: '',
     account_photo_url: '',
   });
 
+  const [formData, setFormData] = useState(emptyForm());
+  const [formTab, setFormTab] = useState(0);
   const [formError, setFormError] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
-
-  // File Input Refs
-  const rcInputRef = useRef<HTMLInputElement>(null);
-  const fcInputRef = useRef<HTMLInputElement>(null);
-  const insInputRef = useRef<HTMLInputElement>(null);
-  const permitInputRef = useRef<HTMLInputElement>(null);
-  const taxInputRef = useRef<HTMLInputElement>(null);
-  const panInputRef = useRef<HTMLInputElement>(null);
-  const dtsInputRef = useRef<HTMLInputElement>(null);
-  const accInputRef = useRef<HTMLInputElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [activeUploadField, setActiveUploadField] = useState<string>('');
 
   useEffect(() => {
     loadVehicles();
-  }, [page, search]);
+    checkExpiringFleet();
+  }, [page, search, statusFilter]);
+
+  const checkExpiringFleet = async () => {
+    try {
+      const res = await vehicleService.getExpiringVehicles(30);
+      if (res.data) {
+        setExpiringCount(res.data.length);
+      }
+    } catch { /* silent */ }
+  };
 
   const loadVehicles = async () => {
     try {
@@ -1416,6 +1070,7 @@ export const VehiclesPage: React.FC = () => {
         page,
         limit: 10,
         search: search || undefined,
+        status: statusFilter || undefined,
       });
       setVehicles(res.data.items);
       setTotal(res.data.total);
@@ -1426,159 +1081,322 @@ export const VehiclesPage: React.FC = () => {
     }
   };
 
-  const handleFileUpload = async (
-    e: React.ChangeEvent<HTMLInputElement>,
-    fieldName: keyof typeof formData,
-    docType?: 'fc' | 'insurance' | 'permit' | 'dts' | 'pan' | 'rc' | 'tax' | 'bank',
-  ) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    try {
-      const b64 = await readAsBase64(file);
-      setFormData((prev) => ({ ...prev, [fieldName]: b64 }));
-      // Auto-trigger OCR for all documents
-      if (docType) {
-        runOcr(b64, fieldName, docType);
-      }
-    } catch (err) {
-      console.error('File read error', err);
-    }
+  const openCreateModal = () => {
+    setSelectedVehicle(null);
+    setFormData(emptyForm());
+    setFormTab(0);
+    setFormError('');
+    setAutoFillNotice(null);
+    setIsModalOpen(true);
   };
 
-  const runOcr = async (
-    imageData: string,
-    photoField: keyof typeof formData,
-    docType: 'fc' | 'insurance' | 'permit' | 'dts' | 'pan' | 'rc' | 'tax' | 'bank',
-  ) => {
-    setOcrScanningField(String(photoField));
-    try {
-      const { data } = await Tesseract.recognize(imageData, 'eng', {
-        logger: () => {},
-      });
-      const text = data.text;
-      const confidence = Math.round(data.confidence);
-
-      const extractedDate = docType !== 'pan' && docType !== 'rc' && docType !== 'bank'
-        ? parseIndianDate(text)
-        : null;
-
-      const extractedNumber = (docType !== 'tax' && docType !== 'bank')
-        ? extractDocNumber(text, docType as any)
-        : null;
-
-      let extractedBankAcc: string | null = null;
-      let extractedIfsc: string | null = null;
-      if (docType === 'bank') {
-        const accMatch = text.match(/\b\d{9,18}\b/);
-        const ifscMatch = text.match(/[A-Z]{4}0[A-Z0-9]{6}/i);
-        if (accMatch) extractedBankAcc = accMatch[0];
-        if (ifscMatch) extractedIfsc = ifscMatch[0].toUpperCase();
-      }
-
-      // Auto-fill the form fields
-      setFormData((prev) => {
-        const updated = { ...prev };
-        if (extractedDate) {
-          if (docType === 'fc') updated.fc_expiry_date = extractedDate;
-          else if (docType === 'insurance') updated.insurance_expiry_date = extractedDate;
-          else if (docType === 'permit') updated.permit_expiry_date = extractedDate;
-          else if (docType === 'dts') updated.dts_expiry_date = extractedDate;
-          else if (docType === 'tax') updated.tax_expiry_date = extractedDate;
-        }
-        if (extractedNumber) {
-          if (docType === 'fc') updated.fc_number = extractedNumber;
-          else if (docType === 'insurance') updated.insurance_policy_number = extractedNumber;
-          else if (docType === 'permit') updated.permit_number = extractedNumber;
-          else if (docType === 'dts') updated.dts_number = extractedNumber;
-          else if (docType === 'pan') updated.pan_number = extractedNumber;
-          else if (docType === 'rc') updated.rc_number = extractedNumber;
-        }
-        if (extractedBankAcc) updated.account_number = extractedBankAcc;
-        if (extractedIfsc) updated.ifsc_code = extractedIfsc;
-        return updated;
-      });
-
-      setOcrResults((prev) => ({
-        ...prev,
-        [String(photoField)]: {
-          date: extractedDate || undefined,
-          number: (extractedNumber || extractedBankAcc || extractedIfsc) || undefined,
-          confidence,
-        },
-      }));
-    } catch (err) {
-      console.error('OCR error', err);
-    } finally {
-      setOcrScanningField(null);
-    }
+  const openEditModal = (vehicle: Vehicle) => {
+    setSelectedVehicle(vehicle);
+    setFormData({
+      lorry_number: vehicle.lorry_number,
+      vehicle_type: vehicle.vehicle_type || '',
+      capacity_tons: vehicle.capacity_tons?.toString() || '',
+      goodshed_loading_expense: vehicle.goodshed_loading_expense?.toString() || '',
+      status: vehicle.status,
+      truck_image_url: vehicle.truck_image_url || '',
+      rc_number: vehicle.rc_number || '',
+      rc_reg_date: vehicle.rc_reg_date ? vehicle.rc_reg_date.split('T')[0] : (vehicle.rc_expiry_date ? vehicle.rc_expiry_date.split('T')[0] : ''),
+      rc_expiry_date: vehicle.rc_expiry_date ? vehicle.rc_expiry_date.split('T')[0] : '',
+      rc_photo_url: vehicle.rc_photo_url || '',
+      rc_photo_back_url: vehicle.rc_photo_back_url || '',
+      fc_number: vehicle.fc_number || '',
+      fc_expiry_date: vehicle.fc_expiry_date ? vehicle.fc_expiry_date.split('T')[0] : '',
+      fc_photo_url: vehicle.fc_photo_url || '',
+      insurance_policy_number: vehicle.insurance_policy_number || '',
+      insurance_expiry_date: vehicle.insurance_expiry_date ? vehicle.insurance_expiry_date.split('T')[0] : '',
+      insurance_photo_url: vehicle.insurance_photo_url || '',
+      permit_number: vehicle.permit_number || '',
+      permit_expiry_date: vehicle.permit_expiry_date ? vehicle.permit_expiry_date.split('T')[0] : '',
+      permit_photo_url: vehicle.permit_photo_url || '',
+      tds_number: vehicle.tds_number || vehicle.dts_number || '',
+      tds_expiry_date: vehicle.tds_expiry_date ? vehicle.tds_expiry_date.split('T')[0] : (vehicle.dts_expiry_date ? vehicle.dts_expiry_date.split('T')[0] : getNextMarch31st()),
+      tds_certificate_url: vehicle.tds_certificate_url || vehicle.dts_certificate_url || '',
+      tds_certificate_url_2: vehicle.tds_certificate_url_2 || '',
+      dts_number: vehicle.tds_number || vehicle.dts_number || '',
+      dts_expiry_date: vehicle.tds_expiry_date ? vehicle.tds_expiry_date.split('T')[0] : (vehicle.dts_expiry_date ? vehicle.dts_expiry_date.split('T')[0] : getNextMarch31st()),
+      dts_certificate_url: vehicle.tds_certificate_url || vehicle.dts_certificate_url || '',
+      tax_expiry_date: vehicle.tax_expiry_date ? vehicle.tax_expiry_date.split('T')[0] : getNextMarch31st(),
+      tax_photo_url: vehicle.tax_photo_url || '',
+      pan_number: vehicle.pan_number || '',
+      pan_card_url: vehicle.pan_card_url || '',
+      account_holder_name: vehicle.account_holder_name || '',
+      account_number: vehicle.account_number || '',
+      bank_name: vehicle.bank_name || '',
+      ifsc_code: vehicle.ifsc_code || '',
+      account_photo_url: vehicle.account_photo_url || '',
+    });
+    setFormTab(0);
+    setFormError('');
+    setAutoFillNotice(null);
+    setIsModalOpen(true);
   };
 
   const handleNextTab = () => {
-    setFormError('');
-    if (activeTab === 'basic') {
-      if (!formData.lorry_number.trim()) {
-        setFormError('Lorry / Truck Number is required before proceeding to upload documents.');
-        return;
-      }
-      setActiveTab('docs');
-    } else if (activeTab === 'docs') {
-      setActiveTab('compliance');
-    } else if (activeTab === 'compliance') {
-      setActiveTab('bank');
+    if (formTab === 0 && !formData.lorry_number?.trim()) {
+      setFormError('Please enter Truck / Lorry Number.');
+      return;
     }
+    setFormError('');
+    setFormTab((t) => Math.min(4, t + 1));
   };
 
   const handlePrevTab = () => {
     setFormError('');
-    if (activeTab === 'docs') setActiveTab('basic');
-    else if (activeTab === 'compliance') setActiveTab('docs');
-    else if (activeTab === 'bank') setActiveTab('compliance');
+    setFormTab((t) => Math.max(0, t - 1));
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (activeTab !== 'bank') {
-      handleNextTab();
+  const handleDocUpload = async (e: React.ChangeEvent<HTMLInputElement>, field: string) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    // Accept images, PDFs, Word documents
+    const allowed = [
+      'image/', 'application/pdf',
+      'application/msword',
+      'application/vnd.openxmlformats-officedocument.wordprocessingml',
+    ];
+    const isAllowed = allowed.some(t => file.type.startsWith(t)) ||
+      file.name.toLowerCase().endsWith('.pdf') ||
+      file.name.toLowerCase().endsWith('.doc') ||
+      file.name.toLowerCase().endsWith('.docx');
+
+    if (!isAllowed) {
+      setFormError('Please select an image, PDF, or Word document (.doc / .docx).');
       return;
     }
-    if (!formData.lorry_number.trim()) {
-      setFormError('Lorry number is required.');
-      setActiveTab('basic');
+    if (file.size > 25 * 1024 * 1024) {
+      setFormError('File size must be under 25 MB.');
       return;
     }
 
     try {
+      setFormError('');
+      const b64 = await readAsBase64(file);
+      setFormData((prev: any) => ({ ...prev, [field]: b64 }));
+
+      // Trigger automatic extraction via OCR
+      setExtractingField(field);
+      setAutoFillNotice({
+        message: '🔍 Scanning document & auto-extracting details with OCR...',
+        type: 'info',
+      });
+
+      const extractedText = await extractTextFromFileOrData(file);
+
+      if (extractedText && extractedText.trim().length > 0) {
+        if (field === 'rc_photo_url' || field === 'rc_photo_back_url') {
+          const parsed = parseRcDocument(extractedText);
+          setFormData((prev: any) => {
+            const nextRegDate = (field === 'rc_photo_url' && parsed.rc_reg_date)
+              ? parsed.rc_reg_date
+              : (prev.rc_reg_date || parsed.rc_reg_date);
+            return {
+              ...prev,
+              rc_number: parsed.rc_number || prev.rc_number,
+              rc_reg_date: nextRegDate,
+              rc_expiry_date: nextRegDate || prev.rc_expiry_date,
+              lorry_number: (!prev.lorry_number && parsed.rc_number) ? parsed.rc_number : prev.lorry_number,
+            };
+          });
+          const details = [
+            parsed.rc_number ? `RC No: ${parsed.rc_number}` : null,
+            parsed.rc_reg_date ? `Date of Regn: ${formatDateDMY(parsed.rc_reg_date)}` : null,
+          ].filter(Boolean).join(', ');
+          setAutoFillNotice({
+            message: details ? `✨ Auto-Extracted RC Details: ${details}` : '✨ RC Document uploaded. Please review fields.',
+            type: 'success',
+          });
+        } else if (field === 'fc_photo_url') {
+          const parsed = parseFcDocument(extractedText);
+          setFormData((prev: any) => ({
+            ...prev,
+            fc_number: parsed.fc_number || prev.fc_number,
+            fc_expiry_date: parsed.fc_expiry_date || prev.fc_expiry_date,
+            lorry_number: (!prev.lorry_number && parsed.fc_number) ? parsed.fc_number : prev.lorry_number,
+          }));
+          const details = [
+            parsed.fc_number ? `Regn / FC No: ${parsed.fc_number}` : null,
+            parsed.fc_expiry_date ? `Valid Upto: ${parsed.fc_expiry_date}` : null,
+          ].filter(Boolean).join(', ');
+          setAutoFillNotice({
+            message: details ? `✨ Auto-Extracted FC Details: ${details}` : '✨ FC Document uploaded.',
+            type: 'success',
+          });
+        } else if (field === 'tax_photo_url') {
+          const parsed = parseTaxDocument(extractedText);
+          setFormData((prev: any) => ({
+            ...prev,
+            tax_expiry_date: parsed.tax_expiry_date,
+            lorry_number: (!prev.lorry_number && parsed.vehicle_number) ? parsed.vehicle_number : prev.lorry_number,
+          }));
+          setAutoFillNotice({
+            message: `✨ Road Tax Expiry Auto-Set to March 31st (${parsed.tax_expiry_date})`,
+            type: 'success',
+          });
+        } else if (field === 'dts_certificate_url' || field === 'tds_certificate_url') {
+          const parsed = parseTdsDocument(extractedText);
+          setFormData((prev: any) => ({
+            ...prev,
+            tds_expiry_date: parsed.tds_expiry_date,
+            dts_expiry_date: parsed.tds_expiry_date,
+            tds_number: parsed.tds_number || prev.tds_number || prev.dts_number,
+            dts_number: parsed.tds_number || prev.tds_number || prev.dts_number,
+          }));
+          setAutoFillNotice({
+            message: `✨ TDS Expiry Auto-Set to March 31st (${parsed.tds_expiry_date})${parsed.tds_number ? ` · Cert: ${parsed.tds_number}` : ''}`,
+            type: 'success',
+          });
+        } else if (field === 'account_photo_url') {
+          const parsed = parseBankDocument(extractedText);
+          setFormData((prev: any) => ({
+            ...prev,
+            account_number: parsed.account_number || prev.account_number,
+            bank_name: parsed.bank_name || prev.bank_name,
+            ifsc_code: parsed.ifsc_code || prev.ifsc_code,
+            account_holder_name: parsed.account_holder_name || prev.account_holder_name,
+          }));
+          const details = [
+            parsed.bank_name ? `Bank: ${parsed.bank_name}` : null,
+            parsed.account_number ? `A/C: ${parsed.account_number}` : null,
+            parsed.ifsc_code ? `IFSC: ${parsed.ifsc_code}` : null,
+          ].filter(Boolean).join(' · ');
+          setAutoFillNotice({
+            message: details ? `✨ Auto-Extracted Bank Details: ${details}` : '✨ Bank Document uploaded.',
+            type: 'success',
+          });
+        } else if (field === 'pan_card_url') {
+          const parsed = parsePanDocument(extractedText);
+          setFormData((prev: any) => ({
+            ...prev,
+            pan_number: parsed.pan_number || prev.pan_number,
+            account_holder_name: parsed.account_holder_name || prev.account_holder_name,
+          }));
+          const details = [
+            parsed.pan_number ? `PAN: ${parsed.pan_number}` : null,
+            parsed.account_holder_name ? `Name: ${parsed.account_holder_name}` : null,
+          ].filter(Boolean).join(' · ');
+          setAutoFillNotice({
+            message: details ? `✨ Auto-Extracted PAN Details: ${details}` : '✨ PAN Card uploaded.',
+            type: 'success',
+          });
+        } else if (field === 'insurance_photo_url') {
+          const parsed = parseInsuranceDocument(extractedText);
+          setFormData((prev: any) => ({
+            ...prev,
+            insurance_policy_number: parsed.policy_number || prev.insurance_policy_number,
+            insurance_expiry_date: parsed.expiry_date || prev.insurance_expiry_date,
+          }));
+          const details = [
+            parsed.insurer_name ? `Insurer: ${parsed.insurer_name}` : null,
+            parsed.policy_number ? `Policy: ${parsed.policy_number}` : null,
+            parsed.expiry_date ? `Valid Upto: ${formatDateDMY(parsed.expiry_date)}` : null,
+          ].filter(Boolean).join(' · ');
+          setAutoFillNotice({
+            message: details ? `✨ Auto-Extracted Insurance Details: ${details}` : '✨ Insurance document uploaded.',
+            type: 'success',
+          });
+        } else if (field === 'permit_photo_url') {
+          const parsed = parsePermitDocument(extractedText);
+          setFormData((prev: any) => ({
+            ...prev,
+            permit_number: parsed.permit_number || prev.permit_number,
+            permit_expiry_date: parsed.expiry_date || prev.permit_expiry_date,
+          }));
+          const details = [
+            parsed.permit_number ? `Permit No: ${parsed.permit_number}` : null,
+            parsed.expiry_date ? `Valid Till: ${formatDateDMY(parsed.expiry_date)}` : null,
+          ].filter(Boolean).join(' · ');
+          setAutoFillNotice({
+            message: details ? `✨ Auto-Extracted Permit Details: ${details}` : '✨ Permit document uploaded.',
+            type: 'success',
+          });
+        } else if (field === 'truck_image_url') {
+          const vNumMatch = extractedText.match(/(?:[A-Z]{2}[ -]?[0-9]{1,2}[ -]?[A-Z]{1,3}[ -]?[0-9]{4})/i);
+          if (vNumMatch) {
+            const formatted = formatVehicleNumber(vNumMatch[0]);
+            setFormData((prev: any) => ({
+              ...prev,
+              lorry_number: !prev.lorry_number ? formatted : prev.lorry_number,
+            }));
+            setAutoFillNotice({ message: `✨ Detected Truck Number: ${formatted}`, type: 'success' });
+          } else {
+            setAutoFillNotice({ message: '✨ Truck photo uploaded.', type: 'info' });
+          }
+        }
+      } else {
+        // Fallback default rules
+        if (field === 'tax_photo_url') {
+          setFormData((prev: any) => ({ ...prev, tax_expiry_date: getNextMarch31st() }));
+          setAutoFillNotice({ message: `✨ Road Tax Expiry Auto-Set to March 31st (${getNextMarch31st()})`, type: 'success' });
+        } else if (field === 'dts_certificate_url' || field === 'tds_certificate_url') {
+          setFormData((prev: any) => ({ ...prev, tds_expiry_date: getNextMarch31st(), dts_expiry_date: getNextMarch31st() }));
+          setAutoFillNotice({ message: `✨ TDS Expiry Auto-Set to March 31st (${getNextMarch31st()})`, type: 'success' });
+        } else {
+          setAutoFillNotice({ message: '✨ Document uploaded successfully.', type: 'info' });
+        }
+      }
+    } catch (err: any) {
+      console.error('OCR Extraction error:', err);
+      setAutoFillNotice({ message: 'Document uploaded (manual review encouraged).', type: 'info' });
+    } finally {
+      setExtractingField(null);
+      e.target.value = '';
+    }
+  };
+
+  const triggerUpload = (field: string) => {
+    setActiveUploadField(field);
+    setTimeout(() => fileInputRef.current?.click(), 50);
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!formData.lorry_number.trim()) { setFormError('Truck / Lorry number is required.'); return; }
+    try {
       setIsSubmitting(true);
       setFormError('');
-      const payload: Partial<Vehicle> = {
+      const payload: any = {
         lorry_number: formData.lorry_number.trim().toUpperCase(),
-        vehicle_type: formData.vehicle_type || undefined,
-        capacity_tons: formData.capacity_tons ? parseFloat(formData.capacity_tons) : undefined,
+        vehicle_type: formData.vehicle_type || null,
+        capacity_tons: formData.capacity_tons ? parseFloat(formData.capacity_tons) : null,
         goodshed_loading_expense: formData.goodshed_loading_expense ? parseFloat(formData.goodshed_loading_expense) : 0,
         status: formData.status,
-        rc_number: formData.rc_number || undefined,
-        rc_photo_url: formData.rc_photo_url || undefined,
-        fc_number: formData.fc_number || undefined,
-        fc_expiry_date: formData.fc_expiry_date || undefined,
-        fc_photo_url: formData.fc_photo_url || undefined,
-        insurance_policy_number: formData.insurance_policy_number || undefined,
-        insurance_expiry_date: formData.insurance_expiry_date || undefined,
-        insurance_photo_url: formData.insurance_photo_url || undefined,
-        permit_number: formData.permit_number || undefined,
-        permit_expiry_date: formData.permit_expiry_date || undefined,
-        permit_photo_url: formData.permit_photo_url || undefined,
-        tax_expiry_date: formData.tax_expiry_date || undefined,
-        tax_photo_url: formData.tax_photo_url || undefined,
-        pan_number: formData.pan_number ? formData.pan_number.toUpperCase() : undefined,
-        pan_card_url: formData.pan_card_url || undefined,
-        dts_number: formData.dts_number || undefined,
-        dts_expiry_date: formData.dts_expiry_date || undefined,
-        dts_certificate_url: formData.dts_certificate_url || undefined,
-        account_number: formData.account_number || undefined,
-        bank_name: formData.bank_name || undefined,
-        ifsc_code: formData.ifsc_code ? formData.ifsc_code.toUpperCase() : undefined,
-        account_holder_name: formData.account_holder_name || undefined,
-        account_photo_url: formData.account_photo_url || undefined,
+        truck_image_url: formData.truck_image_url || null,
+        rc_number: formData.rc_number || null,
+        rc_reg_date: formData.rc_reg_date || formData.rc_expiry_date || null,
+        rc_expiry_date: formData.rc_reg_date || formData.rc_expiry_date || null,
+        rc_photo_url: formData.rc_photo_url || null,
+        rc_photo_back_url: formData.rc_photo_back_url || null,
+        fc_number: formData.fc_number || null,
+        fc_expiry_date: formData.fc_expiry_date || null,
+        fc_photo_url: formData.fc_photo_url || null,
+        insurance_policy_number: formData.insurance_policy_number || null,
+        insurance_expiry_date: formData.insurance_expiry_date || null,
+        insurance_photo_url: formData.insurance_photo_url || null,
+        permit_number: formData.permit_number || null,
+        permit_expiry_date: formData.permit_expiry_date || null,
+        permit_photo_url: formData.permit_photo_url || null,
+        tds_number: formData.tds_number || formData.dts_number || null,
+        tds_expiry_date: formData.tds_expiry_date || formData.dts_expiry_date || null,
+        tds_certificate_url: formData.tds_certificate_url || formData.dts_certificate_url || null,
+        tds_certificate_url_2: formData.tds_certificate_url_2 || null,
+        dts_number: formData.tds_number || formData.dts_number || null,
+        dts_expiry_date: formData.tds_expiry_date || formData.dts_expiry_date || null,
+        dts_certificate_url: formData.tds_certificate_url || formData.dts_certificate_url || null,
+        tax_expiry_date: formData.tax_expiry_date || null,
+        tax_photo_url: formData.tax_photo_url || null,
+        pan_number: formData.pan_number || null,
+        pan_card_url: formData.pan_card_url || null,
+        account_holder_name: formData.account_holder_name || null,
+        account_number: formData.account_number || null,
+        bank_name: formData.bank_name || null,
+        ifsc_code: formData.ifsc_code || null,
+        account_photo_url: formData.account_photo_url || null,
       };
 
       if (selectedVehicle) {
@@ -1588,110 +1406,118 @@ export const VehiclesPage: React.FC = () => {
       }
       setIsModalOpen(false);
       setSelectedVehicle(null);
-      resetForm();
       loadVehicles();
+      checkExpiringFleet();
     } catch (err: any) {
-      setFormError(err.message || 'Failed to save vehicle.');
+      setFormError(err.response?.data?.message || 'Failed to save truck. Please try again.');
     } finally {
       setIsSubmitting(false);
     }
   };
 
   const handleDeleteVehicle = async (vehicle: Vehicle) => {
-    if (!confirm(`Are you sure you want to delete truck/lorry "${vehicle.lorry_number}"?`)) return;
     try {
       await vehicleService.deleteVehicle(vehicle.id);
+      setDeleteConfirm(null);
+      if (viewVehicle?.id === vehicle.id) {
+        setViewVehicle(null);
+      }
       loadVehicles();
+      checkExpiringFleet();
     } catch (err: any) {
-      alert(err.message || 'Failed to delete vehicle.');
+      alert(err.response?.data?.message || 'Failed to delete vehicle.');
     }
   };
 
-  const openCreateModal = () => {
-    setSelectedVehicle(null);
-    resetForm();
-    setActiveTab('basic');
-    setIsModalOpen(true);
-  };
-
-  const openEditModal = (vehicle: Vehicle) => {
-    setSelectedVehicle(vehicle);
-    setFormData({
-      lorry_number: vehicle.lorry_number || '',
-      vehicle_type: vehicle.vehicle_type || '',
-      capacity_tons: vehicle.capacity_tons ? String(vehicle.capacity_tons) : '',
-      goodshed_loading_expense: vehicle.goodshed_loading_expense !== undefined ? String(vehicle.goodshed_loading_expense) : '0',
-      status: vehicle.status || 'ACTIVE',
-      rc_number: vehicle.rc_number || '',
-      rc_photo_url: vehicle.rc_photo_url || '',
-      fc_number: vehicle.fc_number || '',
-      fc_expiry_date: vehicle.fc_expiry_date ? vehicle.fc_expiry_date.slice(0, 10) : '',
-      fc_photo_url: vehicle.fc_photo_url || '',
-      insurance_policy_number: vehicle.insurance_policy_number || '',
-      insurance_expiry_date: vehicle.insurance_expiry_date ? vehicle.insurance_expiry_date.slice(0, 10) : '',
-      insurance_photo_url: vehicle.insurance_photo_url || '',
-      permit_number: vehicle.permit_number || '',
-      permit_expiry_date: vehicle.permit_expiry_date ? vehicle.permit_expiry_date.slice(0, 10) : '',
-      permit_photo_url: vehicle.permit_photo_url || '',
-      tax_expiry_date: vehicle.tax_expiry_date ? vehicle.tax_expiry_date.slice(0, 10) : '',
-      tax_photo_url: vehicle.tax_photo_url || '',
-      pan_number: vehicle.pan_number || '',
-      pan_card_url: vehicle.pan_card_url || '',
-      dts_number: vehicle.dts_number || '',
-      dts_expiry_date: vehicle.dts_expiry_date ? vehicle.dts_expiry_date.slice(0, 10) : '',
-      dts_certificate_url: vehicle.dts_certificate_url || '',
-      account_number: vehicle.account_number || '',
-      bank_name: vehicle.bank_name || '',
-      ifsc_code: vehicle.ifsc_code || '',
-      account_holder_name: vehicle.account_holder_name || '',
-      account_photo_url: vehicle.account_photo_url || '',
-    });
-    setFormError('');
-    setActiveTab('basic');
-    setIsModalOpen(true);
-  };
-
-  const resetForm = () => {
-    setFormData({
-      lorry_number: '',
-      vehicle_type: '',
-      capacity_tons: '',
-      goodshed_loading_expense: '',
-      status: 'ACTIVE',
-      rc_number: '',
-      rc_photo_url: '',
-      fc_number: '',
-      fc_expiry_date: '',
-      fc_photo_url: '',
-      insurance_policy_number: '',
-      insurance_expiry_date: '',
-      insurance_photo_url: '',
-      permit_number: '',
-      permit_expiry_date: '',
-      permit_photo_url: '',
-      tax_expiry_date: '',
-      tax_photo_url: '',
-      pan_number: '',
-      pan_card_url: '',
-      dts_number: '',
-      dts_expiry_date: '',
-      dts_certificate_url: '',
-      account_number: '',
-      bank_name: '',
-      ifsc_code: '',
-      account_holder_name: '',
-      account_photo_url: '',
-    });
-    setFormError('');
+  const handleToggleStatus = async (vehicle: Vehicle) => {
+    const newStatus = vehicle.status === 'ACTIVE' ? 'INACTIVE' : 'ACTIVE';
+    try {
+      await vehicleService.updateStatus(vehicle.id, newStatus);
+      loadVehicles();
+      if (viewVehicle?.id === vehicle.id) {
+        setViewVehicle({ ...viewVehicle, status: newStatus });
+      }
+    } catch (err: any) {
+      alert(err.response?.data?.message || 'Failed to update status.');
+    }
   };
 
   const columns: Column<Vehicle>[] = [
     {
-      header: 'Lorry / Truck Number',
+      header: 'Truck Image',
+      render: (v) => (
+        <div style={{ display: 'flex', alignItems: 'center' }}>
+          {v.truck_image_url ? (
+            <div
+              style={{
+                position: 'relative',
+                width: '76px',
+                height: '52px',
+                borderRadius: '8px',
+                overflow: 'hidden',
+                border: '1.5px solid #e2e8f0',
+                cursor: 'pointer',
+                boxShadow: '0 2px 6px rgba(0,0,0,0.06)',
+                backgroundColor: '#f1f5f9',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+              }}
+              onClick={() => setZoomImage({ url: v.truck_image_url!, title: `${v.lorry_number} — Truck Photo` })}
+              title="Click to view full image"
+            >
+              <img
+                src={v.truck_image_url}
+                alt={v.lorry_number}
+                style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+              />
+              <div
+                style={{
+                  position: 'absolute',
+                  inset: 0,
+                  background: 'rgba(0,0,0,0.25)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  opacity: 0,
+                  transition: 'opacity 0.2s ease',
+                }}
+                onMouseEnter={(e) => (e.currentTarget.style.opacity = '1')}
+                onMouseLeave={(e) => (e.currentTarget.style.opacity = '0')}
+              >
+                <ZoomIn size={18} color="#ffffff" />
+              </div>
+            </div>
+          ) : (
+            <div
+              style={{
+                width: '76px',
+                height: '52px',
+                borderRadius: '8px',
+                background: '#f8fafc',
+                border: '1.5px dashed #cbd5e1',
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                justifyContent: 'center',
+                color: '#94a3b8',
+                gap: '2px',
+              }}
+              title="No image uploaded"
+            >
+              <Truck size={20} color="#94a3b8" />
+              <span style={{ fontSize: '9.5px', fontWeight: 600 }}>No Image</span>
+            </div>
+          )}
+        </div>
+      ),
+    },
+    {
+      header: 'Truck / Lorry Number',
       accessor: 'lorry_number',
       render: (v) => (
         <button
-          onClick={() => setProfileVehicle(v)}
+          onClick={() => setViewVehicle(v)}
           style={{
             background: 'none',
             border: 'none',
@@ -1700,196 +1526,100 @@ export const VehiclesPage: React.FC = () => {
             textAlign: 'left',
             color: '#1d4ed8',
             fontWeight: 800,
-            fontSize: '14px',
+            fontSize: '15px',
+            letterSpacing: '0.3px',
             display: 'inline-flex',
             alignItems: 'center',
-            gap: '6px',
-            whiteSpace: 'nowrap',
-            lineHeight: 1,
+            gap: '8px',
           }}
-          title="Click to view truck documents and details"
+          title="Click to view all truck documents & compliance details"
         >
-          <Truck size={16} color="#2563eb" />
+          <Truck size={17} color="#2563eb" />
           <span>{v.lorry_number}</span>
         </button>
       ),
     },
     {
-      header: 'Type & Capacity',
-      accessor: 'vehicle_type',
+      header: 'Road Tax Expiry',
       render: (v) => (
-        <span style={{ fontWeight: 600 }}>
-          {v.vehicle_type || '—'}
-          {v.capacity_tons ? <span style={{ color: '#64748b', fontWeight: 400 }}> · {v.capacity_tons}T</span> : null}
-        </span>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
+          <span style={{ fontSize: '13px', fontWeight: 700, color: '#334155' }}>
+            {fmtDate(v.tax_expiry_date) || '31 Mar (Yearly)'}
+          </span>
+          <ExpiryBadge date={v.tax_expiry_date} />
+        </div>
       ),
     },
     {
-      header: 'FC Expiry',
-      accessor: 'fc_expiry_date',
+      header: 'TDS Expiry',
       render: (v) => {
-        const days = getDaysDifference(v.fc_expiry_date);
-        if (!v.fc_expiry_date) return <span style={{ color: '#94a3b8' }}>—</span>;
-        const isExp = days !== null && days < 0;
-        const isSoon = days !== null && days >= 0 && days <= 45;
+        const d = v.tds_expiry_date || v.dts_expiry_date;
         return (
-          <span
-            style={{
-              padding: '3px 8px',
-              borderRadius: '6px',
-              fontSize: '11.5px',
-              fontWeight: 700,
-              background: isExp ? '#fee2e2' : isSoon ? '#fef3c7' : '#ecfdf5',
-              color: isExp ? '#b91c1c' : isSoon ? '#b45309' : '#047857',
-              border: `1px solid ${isExp ? '#fca5a5' : isSoon ? '#fde68a' : '#a7f3d0'}`,
-            }}
-          >
-            {toIST(v.fc_expiry_date)} {isExp ? '⚠ Expired' : isSoon ? `(${days}d)` : '✓'}
-          </span>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
+            <span style={{ fontSize: '13px', fontWeight: 700, color: '#334155' }}>
+              {fmtDate(d) || '31 Mar (Yearly)'}
+            </span>
+            <ExpiryBadge date={d} />
+          </div>
         );
       },
-    },
-    {
-      header: 'Insurance Expiry',
-      accessor: 'insurance_expiry_date',
-      render: (v) => {
-        const days = getDaysDifference(v.insurance_expiry_date);
-        if (!v.insurance_expiry_date) return <span style={{ color: '#94a3b8' }}>—</span>;
-        const isExp = days !== null && days < 0;
-        const isSoon = days !== null && days >= 0 && days <= 45;
-        return (
-          <span
-            style={{
-              padding: '3px 8px',
-              borderRadius: '6px',
-              fontSize: '11.5px',
-              fontWeight: 700,
-              background: isExp ? '#fee2e2' : isSoon ? '#fef3c7' : '#ecfdf5',
-              color: isExp ? '#b91c1c' : isSoon ? '#b45309' : '#047857',
-              border: `1px solid ${isExp ? '#fca5a5' : isSoon ? '#fde68a' : '#a7f3d0'}`,
-            }}
-          >
-            {toIST(v.insurance_expiry_date)} {isExp ? '⚠ Expired' : isSoon ? `(${days}d)` : '✓'}
-          </span>
-        );
-      },
-    },
-    {
-      header: 'Compliance Alert',
-      render: (v) => {
-        const docs = [
-          { name: 'FC', d: getDaysDifference(v.fc_expiry_date) },
-          { name: 'Ins', d: getDaysDifference(v.insurance_expiry_date) },
-          { name: 'Permit', d: getDaysDifference(v.permit_expiry_date) },
-          { name: 'Tax', d: getDaysDifference(v.tax_expiry_date) },
-          { name: 'DTS', d: getDaysDifference(v.dts_expiry_date) },
-        ].filter(x => x.d !== null);
-
-        const expired = docs.filter(x => x.d! < 0);
-        const soon = docs.filter(x => x.d! >= 0 && x.d! <= 45);
-
-        if (expired.length > 0) {
-          return (
-            <span
-              style={{
-                padding: '3px 8px',
-                borderRadius: '6px',
-                fontSize: '11px',
-                fontWeight: 700,
-                background: '#fee2e2',
-                color: '#b91c1c',
-                border: '1px solid #fca5a5',
-              }}
-              title={expired.map(e => `${e.name} expired`).join(', ')}
-            >
-              ❌ {expired[0].name} Expired {expired.length > 1 ? `+${expired.length - 1}` : ''}
-            </span>
-          );
-        }
-        if (soon.length > 0) {
-          return (
-            <span
-              style={{
-                padding: '3px 8px',
-                borderRadius: '6px',
-                fontSize: '11px',
-                fontWeight: 700,
-                background: '#fef3c7',
-                color: '#b45309',
-                border: '1px solid #fde68a',
-              }}
-              title={soon.map(s => `${s.name} in ${s.d}d`).join(', ')}
-            >
-              ⚠️ {soon[0].name} ({soon[0].d}d) {soon.length > 1 ? `+${soon.length - 1}` : ''}
-            </span>
-          );
-        }
-        if (docs.length > 0) {
-          return (
-            <span
-              style={{
-                padding: '3px 8px',
-                borderRadius: '6px',
-                fontSize: '11px',
-                fontWeight: 700,
-                background: '#ecfdf5',
-                color: '#047857',
-                border: '1px solid #a7f3d0',
-              }}
-            >
-              ✓ All Valid
-            </span>
-          );
-        }
-        return <span style={{ color: '#94a3b8', fontSize: '11px' }}>Pending Docs</span>;
-      },
-    },
-    {
-      header: 'Goodshed Loading (₹)',
-      accessor: 'goodshed_loading_expense',
-      render: (v) => (
-        <span style={{ fontWeight: 700, color: '#1e40af', background: '#eff6ff', padding: '4px 8px', borderRadius: '6px' }}>
-          {formatCurrency(v.goodshed_loading_expense)}
-        </span>
-      ),
     },
     {
       header: 'Status',
       accessor: 'status',
       render: (v) => (
-        <span
+        <button
+          onClick={() => handleToggleStatus(v)}
           style={{
-            padding: '3px 10px',
+            padding: '4px 12px',
             borderRadius: '20px',
-            fontSize: '11px',
+            fontSize: '11.5px',
             fontWeight: 700,
+            border: 'none',
+            cursor: 'pointer',
             background: v.status === 'ACTIVE' ? '#dcfce7' : '#fee2e2',
             color: v.status === 'ACTIVE' ? '#15803d' : '#b91c1c',
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: '5px',
           }}
+          title="Click to toggle status"
         >
+          <span
+            style={{
+              width: '7px',
+              height: '7px',
+              borderRadius: '50%',
+              background: v.status === 'ACTIVE' ? '#16a34a' : '#dc2626',
+            }}
+          />
           {v.status}
-        </span>
+        </button>
       ),
     },
     {
       header: 'Actions',
       render: (v) => (
-        <div style={{ display: 'flex', gap: '6px', flexWrap: 'nowrap', alignItems: 'center' }}>
+        <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
           <button
-            onClick={() => setProfileVehicle(v)}
+            onClick={() => setViewVehicle(v)}
             className="btn btn-outline btn-sm"
-            title="View Truck Details & Documents"
-            style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', color: '#2563eb', whiteSpace: 'nowrap' }}
+            style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', color: '#2563eb' }}
+            title="View Truck Details, RC, FC, Road Tax, TDS & Bank Info"
           >
             <Eye size={14} /> View
           </button>
-          <button onClick={() => openEditModal(v)} className="btn btn-outline btn-sm" title="Edit Vehicle">
-            <Edit2 size={14} />
+          <button
+            onClick={() => openEditModal(v)}
+            className="btn btn-outline btn-sm"
+            title="Edit Truck & Upload Documents"
+          >
+            <Edit2 size={14} /> Edit
           </button>
           <button
-            onClick={() => handleDeleteVehicle(v)}
+            onClick={() => setDeleteConfirm(v)}
             className="btn btn-danger btn-sm"
-            title="Delete Vehicle"
+            title="Delete Truck"
           >
             <Trash2 size={14} />
           </button>
@@ -1898,321 +1628,60 @@ export const VehiclesPage: React.FC = () => {
     },
   ];
 
-  const UploadCard = ({
-    title, subtitle, previewUrl, inputRef, fieldName,
-  }: {
-    title: string;
-    subtitle: string;
-    previewUrl?: string;
-    inputRef: React.RefObject<HTMLInputElement | null>;
-    fieldName: keyof typeof formData;
-  }) => (
-    <div
-      style={{
-        border: '1.5px solid #e2e8f0',
-        borderRadius: '12px',
-        padding: '14px',
-        background: previewUrl ? '#f0fdf4' : '#ffffff',
-        borderColor: previewUrl ? '#86efac' : '#e2e8f0',
-        display: 'flex',
-        flexDirection: 'column',
-        alignItems: 'center',
-        gap: '8px',
-        textAlign: 'center',
-      }}
-    >
-      <input
-        type="file"
-        ref={inputRef}
-        accept="image/*,application/pdf"
-        style={{ display: 'none' }}
-        onChange={(e) => handleFileUpload(e, fieldName)}
-      />
-      <div style={{ fontWeight: 700, fontSize: '12.5px', color: '#1e293b' }}>{title}</div>
-      <div style={{ fontSize: '11px', color: '#64748b' }}>{subtitle}</div>
-
-      {previewUrl ? (
-        <div style={{ width: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px' }}>
-          <img
-            src={previewUrl}
-            alt={title}
-            style={{ width: '100%', height: '90px', objectFit: 'contain', borderRadius: '6px', border: '1px solid #bbf7d0' }}
-          />
-          <div style={{ display: 'flex', gap: '8px' }}>
-            <button
-              type="button"
-              onClick={() => inputRef.current?.click()}
-              style={{ fontSize: '11px', padding: '3px 10px', borderRadius: '6px', background: '#dbeafe', color: '#1d4ed8', border: 'none', cursor: 'pointer', fontWeight: 600 }}
-            >
-              Change
-            </button>
-            <button
-              type="button"
-              onClick={() => setFormData((prev) => ({ ...prev, [fieldName]: '' }))}
-              style={{ fontSize: '11px', padding: '3px 10px', borderRadius: '6px', background: '#fee2e2', color: '#b91c1c', border: 'none', cursor: 'pointer', fontWeight: 600 }}
-            >
-              Remove
-            </button>
-          </div>
-        </div>
-      ) : (
-        <button
-          type="button"
-          onClick={() => inputRef.current?.click()}
-          style={{
-            marginTop: '6px',
-            border: '1.5px dashed #cbd5e1',
-            borderRadius: '8px',
-            background: '#f8fafc',
-            padding: '16px 20px',
-            width: '100%',
-            cursor: 'pointer',
-            display: 'flex',
-            flexDirection: 'column',
-            alignItems: 'center',
-            gap: '4px',
-            color: '#64748b',
-          }}
-        >
-          <Camera size={20} color="#94a3b8" />
-          <span style={{ fontSize: '11.5px', fontWeight: 600 }}>Click to Upload</span>
-        </button>
-      )}
-    </div>
-  );
-
-  // Smart OCR-enabled card for compliance documents
-  const SmartDocCard = ({
-    title,
-    subtitle,
-    iconColor,
-    previewUrl,
-    inputRef,
-    photoField,
-    docType,
-    extractedDateField,
-    extractedNumberField,
-    extractedDateLabel,
-    extractedNumberLabel,
-  }: {
-    title: string;
-    subtitle: string;
-    iconColor: string;
-    previewUrl: string;
-    inputRef: React.RefObject<HTMLInputElement | null>;
-    photoField: keyof typeof formData;
-    docType: 'fc' | 'insurance' | 'permit' | 'dts' | 'tax' | 'rc' | 'pan' | 'bank';
-    extractedDateField?: keyof typeof formData;
-    extractedNumberField?: keyof typeof formData;
-    extractedDateLabel?: string;
-    extractedNumberLabel?: string;
-  }) => {
-    const isScanning = ocrScanningField === String(photoField);
-    const result = ocrResults[String(photoField)];
-    const hasResult = !!result;
-
-    return (
-      <div
-        style={{
-          border: `1.5px solid ${previewUrl ? '#a7f3d0' : '#e2e8f0'}`,
-          borderRadius: '14px',
-          background: previewUrl ? '#f0fdf4' : '#fafbfc',
-          overflow: 'hidden',
-        }}
-      >
-        {/* Card header */}
-        <div
-          style={{
-            background: previewUrl ? iconColor + '18' : '#f1f5f9',
-            borderBottom: `1.5px solid ${previewUrl ? '#a7f3d0' : '#e2e8f0'}`,
-            padding: '10px 14px',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-          }}
-        >
-          <div>
-            <div style={{ fontWeight: 800, fontSize: '13px', color: '#1e293b' }}>{title}</div>
-            <div style={{ fontSize: '11px', color: '#64748b' }}>{subtitle}</div>
-          </div>
-          {previewUrl && (
-            <CheckCircle size={16} color="#22c55e" />
-          )}
-        </div>
-
-        <div style={{ padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
-          {/* Hidden file input */}
-          <input
-            type="file"
-            ref={inputRef}
-            accept="image/*"
-            style={{ display: 'none' }}
-            onChange={(e) => handleFileUpload(e, photoField, docType)}
-          />
-
-          {/* Image preview / upload zone */}
-          {previewUrl ? (
-            <div style={{ position: 'relative' }}>
-              <img
-                src={previewUrl}
-                alt={title}
-                style={{
-                  width: '100%', height: '100px', objectFit: 'contain',
-                  borderRadius: '8px', border: '1px solid #bbf7d0', background: '#fff',
-                }}
-              />
-              <div style={{ display: 'flex', gap: '6px', marginTop: '6px' }}>
-                <button
-                  type="button"
-                  onClick={() => inputRef.current?.click()}
-                  style={{ flex: 1, fontSize: '11px', padding: '4px 8px', borderRadius: '6px', background: '#dbeafe', color: '#1d4ed8', border: 'none', cursor: 'pointer', fontWeight: 600 }}
-                >
-                  Change
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setFormData((prev) => ({ ...prev, [photoField]: '' }));
-                    setOcrResults((prev) => { const n = {...prev}; delete n[String(photoField)]; return n; });
-                  }}
-                  style={{ fontSize: '11px', padding: '4px 8px', borderRadius: '6px', background: '#fee2e2', color: '#b91c1c', border: 'none', cursor: 'pointer', fontWeight: 600 }}
-                >
-                  Remove
-                </button>
-                <button
-                  type="button"
-                  onClick={() => runOcr(previewUrl, photoField, docType as any)}
-                  disabled={isScanning}
-                  title="Re-scan document with OCR"
-                  style={{ fontSize: '11px', padding: '4px 8px', borderRadius: '6px', background: '#f0fdf4', color: '#15803d', border: '1px solid #86efac', cursor: 'pointer', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '4px' }}
-                >
-                  {isScanning ? <Loader size={11} style={{ animation: 'spin 1s linear infinite' }} /> : <RefreshCw size={11} />}
-                  {isScanning ? 'Scanning...' : 'Re-scan'}
-                </button>
-              </div>
-            </div>
-          ) : (
-            <button
-              type="button"
-              onClick={() => inputRef.current?.click()}
-              style={{
-                border: '2px dashed #cbd5e1', borderRadius: '10px',
-                background: '#f8fafc', padding: '18px 12px',
-                width: '100%', cursor: 'pointer',
-                display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '6px',
-              }}
-            >
-              <Camera size={22} color="#94a3b8" />
-              <span style={{ fontSize: '12px', fontWeight: 700, color: '#64748b' }}>Upload Document</span>
-              <span style={{ fontSize: '10.5px', color: '#94a3b8' }}>Auto-scans for date &amp; number</span>
-            </button>
-          )}
-
-          {/* OCR scanning indicator */}
-          {isScanning && (
-            <div
-              style={{
-                background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: '8px',
-                padding: '8px 12px', display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px', color: '#1d4ed8',
-              }}
-            >
-              <Loader size={14} style={{ animation: 'spin 1s linear infinite', flexShrink: 0 }} />
-              <span style={{ fontWeight: 600 }}>Scanning document with OCR…</span>
-            </div>
-          )}
-
-          {/* OCR result badge */}
-          {hasResult && !isScanning && (
-            <div
-              style={{
-                background: (result.date || result.number) ? '#f0fdf4' : '#fffbeb',
-                border: `1px solid ${(result.date || result.number) ? '#86efac' : '#fde68a'}`,
-                borderRadius: '8px',
-                padding: '8px 12px',
-                fontSize: '11.5px',
-              }}
-            >
-              <div style={{ fontWeight: 700, color: (result.date || result.number) ? '#15803d' : '#92400e', marginBottom: '4px', display: 'flex', alignItems: 'center', gap: '5px' }}>
-                {(result.date || result.number) ? <CheckCircle size={12} /> : <AlertCircle size={12} />}
-                OCR Scan — {result.confidence}% confidence
-              </div>
-              {result.date && extractedDateField && (
-                <div style={{ color: '#166534' }}>
-                  📅 {extractedDateLabel || 'Expiry'}: <strong>{result.date}</strong>
-                  <span style={{ color: '#6b7280', marginLeft: '6px' }}>(auto-filled)</span>
-                </div>
-              )}
-              {result.number && extractedNumberField && (
-                <div style={{ color: '#166534', marginTop: '2px' }}>
-                  🔢 {extractedNumberLabel || 'Number'}: <strong style={{ fontFamily: 'monospace' }}>{result.number}</strong>
-                  <span style={{ color: '#6b7280', marginLeft: '6px' }}>(auto-filled)</span>
-                </div>
-              )}
-              {!result.date && !result.number && (
-                <div style={{ color: '#92400e' }}>Could not extract details. Please fill manually in the Compliance tab.</div>
-              )}
-            </div>
-          )}
-
-          {/* Extracted field inputs (inline) */}
-          {extractedDateField && (
-            <div>
-              <label style={{ fontSize: '11px', fontWeight: 700, color: '#475569', display: 'block', marginBottom: '3px' }}>
-                {extractedDateLabel || 'Expiry Date'}
-              </label>
-              <input
-                type="date"
-                className="form-control"
-                style={{ fontSize: '12px', padding: '5px 10px' }}
-                value={(formData as any)[extractedDateField] || ''}
-                onChange={(e) => setFormData((prev) => ({ ...prev, [extractedDateField]: e.target.value }))}
-              />
-            </div>
-          )}
-
-          {extractedNumberField && (
-            <div>
-              <label style={{ fontSize: '11px', fontWeight: 700, color: '#475569', display: 'block', marginBottom: '3px' }}>
-                {extractedNumberLabel || 'Document Number'}
-              </label>
-              <input
-                type="text"
-                className="form-control"
-                style={{ fontSize: '12px', padding: '5px 10px', fontFamily: 'monospace' }}
-                value={(formData as any)[extractedNumberField] || ''}
-                onChange={(e) => setFormData((prev) => ({ ...prev, [extractedNumberField]: e.target.value }))}
-                placeholder="Enter or edit"
-              />
-            </div>
-          )}
-        </div>
-      </div>
-    );
-  };
-
-
   return (
     <div>
-      <div className="card-header" style={{ marginBottom: '24px' }}>
+      {/* ── Header ──────────────────────────────────────────────────────── */}
+      <div className="card-header" style={{ marginBottom: '20px' }}>
         <div>
-          <h2 style={{ fontSize: '22px', fontWeight: 800 }}>Truck / Lorry Master</h2>
-          <p style={{ color: 'var(--text-muted)', fontSize: '13.5px' }}>
-            Maintain fleet trucks, registration numbers, loading expenses, compliance validities & documents
+          <h2 style={{ fontSize: '22px', fontWeight: 800, display: 'flex', alignItems: 'center', gap: '10px' }}>
+            <Truck size={26} color="#2563eb" />
+            Truck / Fleet Master
+          </h2>
+          <p style={{ color: 'var(--text-muted)', fontSize: '13.5px', marginTop: '4px' }}>
+            Manage fleet trucks, compliance documents (RC, FC, Road Tax, TDS), with automatic OCR field extraction
           </p>
         </div>
-        <button onClick={openCreateModal} className="btn btn-primary">
+        <button onClick={openCreateModal} className="btn btn-primary" style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
           <Plus size={18} /> Add New Truck
         </button>
       </div>
 
+      {/* ── Fleet Compliance Alert Banner (Road Tax & TDS March 31st Notification) ── */}
+      {expiringCount > 0 && (
+        <div style={{
+          background: 'linear-gradient(135deg, #fffbeb 0%, #fef3c7 100%)',
+          border: '1.5px solid #fde68a', borderRadius: '12px', padding: '12px 18px',
+          marginBottom: '20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          gap: '12px', flexWrap: 'wrap', boxShadow: '0 2px 8px rgba(217,119,6,0.1)'
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+            <div style={{
+              width: '36px', height: '36px', borderRadius: '8px', background: '#f59e0b',
+              display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0
+            }}>
+              <AlertTriangle size={20} color="#fff" />
+            </div>
+            <div>
+              <div style={{ fontWeight: 800, fontSize: '14px', color: '#92400e' }}>
+                Fleet Expiry Alert: {expiringCount} vehicle{expiringCount > 1 ? 's' : ''} have upcoming document renewals
+              </div>
+              <div style={{ fontSize: '12px', color: '#b45309', marginTop: '2px' }}>
+                Road Tax and TDS expire on <strong>March 31st</strong> every year &bull; Notifications active 1 month prior
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Table Card ──────────────────────────────────────────────────── */}
       <div className="card">
-        <div className="search-filter-bar" style={{ marginBottom: '16px' }}>
-          <div className="search-input-wrapper">
-            <Search />
+        <div className="search-filter-bar" style={{ marginBottom: '18px', display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
+          <div className="search-input-wrapper" style={{ flex: 1, minWidth: '240px' }}>
+            <Search size={18} />
             <input
               type="text"
               className="form-control"
-              placeholder="Search by truck / lorry number, type..."
+              placeholder="Search by truck number..."
               value={search}
               onChange={(e) => {
                 setSearch(e.target.value);
@@ -2220,6 +1689,20 @@ export const VehiclesPage: React.FC = () => {
               }}
             />
           </div>
+
+          <select
+            className="form-control"
+            style={{ width: '160px' }}
+            value={statusFilter}
+            onChange={(e) => {
+              setStatusFilter(e.target.value);
+              setPage(1);
+            }}
+          >
+            <option value="">All Status</option>
+            <option value="ACTIVE">Active Only</option>
+            <option value="INACTIVE">Inactive Only</option>
+          </select>
         </div>
 
         <DataTable
@@ -2236,566 +1719,519 @@ export const VehiclesPage: React.FC = () => {
       {/* ── Add / Edit Truck Modal ───────────────────────────────────────── */}
       <Modal
         isOpen={isModalOpen}
-        onClose={() => setIsModalOpen(false)}
-        title={selectedVehicle ? `Edit Truck: ${selectedVehicle.lorry_number}` : 'Add New Truck & Compliance'}
+        onClose={() => { setIsModalOpen(false); setSelectedVehicle(null); }}
+        title={selectedVehicle ? `Edit Truck: ${selectedVehicle.lorry_number}` : 'Add New Truck'}
+        maxWidth="780px"
       >
-        {formError && (
-          <div style={{ color: '#b91c1c', background: '#fef2f2', padding: '10px 14px', borderRadius: '8px', marginBottom: '16px', fontSize: '13px', fontWeight: 600 }}>
-            {formError}
-          </div>
-        )}
+        {/* Shared hidden file input */}
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="image/*,.pdf,.doc,.docx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+          style={{ display: 'none' }}
+          onChange={(e) => handleDocUpload(e, activeUploadField)}
+        />
 
-        {/* Tab Navigation */}
-        <div style={{ display: 'flex', borderBottom: '2px solid #e2e8f0', marginBottom: '18px', gap: '8px' }}>
-          <button
-            type="button"
-            onClick={() => setActiveTab('basic')}
-            style={{
-              padding: '8px 16px',
-              border: 'none',
-              background: 'none',
-              cursor: 'pointer',
-              fontWeight: 700,
-              fontSize: '13px',
-              color: activeTab === 'basic' ? '#2563eb' : '#64748b',
-              borderBottom: activeTab === 'basic' ? '2.5px solid #2563eb' : '2.5px solid transparent',
-              marginBottom: '-2px',
-            }}
-          >
-            1. Basic Specs
-          </button>
-          <button
-            type="button"
-            onClick={() => setActiveTab('docs')}
-            style={{
-              padding: '8px 16px',
-              border: 'none',
-              background: 'none',
-              cursor: 'pointer',
-              fontWeight: 700,
-              fontSize: '13px',
-              color: activeTab === 'docs' ? '#2563eb' : '#64748b',
-              borderBottom: activeTab === 'docs' ? '2.5px solid #2563eb' : '2.5px solid transparent',
-              marginBottom: '-2px',
-            }}
-          >
-            2. Upload Documents (Auto-OCR)
-          </button>
-          <button
-            type="button"
-            onClick={() => setActiveTab('compliance')}
-            style={{
-              padding: '8px 16px',
-              border: 'none',
-              background: 'none',
-              cursor: 'pointer',
-              fontWeight: 700,
-              fontSize: '13px',
-              color: activeTab === 'compliance' ? '#2563eb' : '#64748b',
-              borderBottom: activeTab === 'compliance' ? '2.5px solid #2563eb' : '2.5px solid transparent',
-              marginBottom: '-2px',
-            }}
-          >
-            3. Compliance &amp; Validities
-          </button>
-          <button
-            type="button"
-            onClick={() => setActiveTab('bank')}
-            style={{
-              padding: '8px 16px',
-              border: 'none',
-              background: 'none',
-              cursor: 'pointer',
-              fontWeight: 700,
-              fontSize: '13px',
-              color: activeTab === 'bank' ? '#2563eb' : '#64748b',
-              borderBottom: activeTab === 'bank' ? '2.5px solid #2563eb' : '2.5px solid transparent',
-              marginBottom: '-2px',
-            }}
-          >
-            4. Bank &amp; PAN (Final Step)
-          </button>
-        </div>
+        <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '0' }}>
 
-        <form onSubmit={handleSubmit}>
-          {/* TAB 1: BASIC SPECS */}
-          {activeTab === 'basic' && (
-            <div>
-              <div className="grid-cols-2" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px', marginBottom: '14px' }}>
-                <div className="form-group">
-                  <label className="form-label">Lorry / Truck Number *</label>
-                  <input
-                    type="text"
-                    className="form-control"
-                    required
-                    placeholder="e.g. TN 33 U 5619"
-                    value={formData.lorry_number}
-                    onChange={(e) => setFormData({ ...formData, lorry_number: e.target.value.toUpperCase() })}
-                  />
-                </div>
-
-                <div className="form-group">
-                  <label className="form-label">Vehicle Type / Endorsement</label>
-                  <input
-                    type="text"
-                    className="form-control"
-                    placeholder="e.g. 10 Wheeler Taurus, 12 Wheeler Lorry"
-                    value={formData.vehicle_type}
-                    onChange={(e) => setFormData({ ...formData, vehicle_type: e.target.value })}
-                  />
-                </div>
+          {/* Auto-fill feedback banner */}
+          {autoFillNotice && (
+            <div style={{
+              background: autoFillNotice.type === 'success' ? '#f0fdf4' : '#eff6ff',
+              border: `1.5px solid ${autoFillNotice.type === 'success' ? '#86efac' : '#bfdbfe'}`,
+              color: autoFillNotice.type === 'success' ? '#166534' : '#1e40af',
+              padding: '10px 14px', borderRadius: '10px', fontSize: '13px',
+              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+              marginBottom: '16px', gap: '10px',
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <Sparkles size={16} />
+                <span style={{ fontWeight: 700 }}>{autoFillNotice.message}</span>
               </div>
+              <button
+                type="button"
+                onClick={() => setAutoFillNotice(null)}
+                style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'inherit', padding: '2px' }}
+              >
+                <X size={14} />
+              </button>
+            </div>
+          )}
 
-              <div className="grid-cols-3" style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '14px', marginBottom: '14px' }}>
-                <div className="form-group">
-                  <label className="form-label">Capacity (Tons)</label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    min="0"
-                    className="form-control"
-                    placeholder="e.g. 25.5"
+          {/* Error banner */}
+          {formError && (
+            <div style={{ background: '#fef2f2', border: '1px solid #fecaca', color: '#b91c1c', padding: '10px 14px', borderRadius: '8px', fontSize: '13px', display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '16px' }}>
+              <AlertCircle size={16} /><span>{formError}</span>
+            </div>
+          )}
+
+          {/* Tab Nav */}
+          <div style={{ display: 'flex', gap: '4px', marginBottom: '20px', borderBottom: '2px solid #e2e8f0', paddingBottom: '0', overflowX: 'auto' }}>
+            {['🚛 Basic Info', '📄 RC', '🛡️ FC / Insurance / Permit', '🔖 TDS / Road Tax', '💳 PAN / Bank'].map((t, i) => (
+              <button key={i} type="button" onClick={() => setFormTab(i)}
+                style={{
+                  padding: '8px 14px', fontSize: '12.5px', fontWeight: 700, border: 'none', cursor: 'pointer',
+                  borderBottom: formTab === i ? '2.5px solid #2563eb' : '2.5px solid transparent',
+                  background: 'transparent', color: formTab === i ? '#1d4ed8' : '#64748b',
+                  borderRadius: '4px 4px 0 0', whiteSpace: 'nowrap',
+                }}>{t}</button>
+            ))}
+          </div>
+
+          {/* ── Tab 0: Basic Info ─────────────────────────────── */}
+          {formTab === 0 && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '18px' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px' }}>
+                <div className="form-group" style={{ margin: 0, gridColumn: '1 / -1' }}>
+                  <label className="form-label" style={{ fontWeight: 700, fontSize: '13px' }}>Truck / Lorry Number <span style={{ color: '#ef4444' }}>*</span></label>
+                  <input type="text" className="form-control"
+                    placeholder="e.g. TN 33 AE 1357"
+                    value={formData.lorry_number}
+                    onChange={e => setFormData((p: any) => ({ ...p, lorry_number: e.target.value.toUpperCase() }))}
+                    style={{ textTransform: 'uppercase', fontWeight: 800, letterSpacing: '1px', fontSize: '16px' }}
+                    autoFocus required />
+                </div>
+                <div className="form-group" style={{ margin: 0 }}>
+                  <label className="form-label" style={{ fontWeight: 700, fontSize: '13px' }}>Vehicle Type</label>
+                  <input type="text" className="form-control" placeholder="e.g. Lorry, Trailer"
+                    value={formData.vehicle_type}
+                    onChange={e => setFormData((p: any) => ({ ...p, vehicle_type: e.target.value }))} />
+                </div>
+                <div className="form-group" style={{ margin: 0 }}>
+                  <label className="form-label" style={{ fontWeight: 700, fontSize: '13px' }}>Capacity (Tons)</label>
+                  <input type="number" className="form-control" placeholder="e.g. 12"
                     value={formData.capacity_tons}
-                    onChange={(e) => setFormData({ ...formData, capacity_tons: e.target.value })}
-                  />
+                    onChange={e => setFormData((p: any) => ({ ...p, capacity_tons: e.target.value }))} />
                 </div>
-
-                <div className="form-group">
-                  <label className="form-label">Goodshed Loading Exp. (₹) *</label>
-                  <input
-                    type="number"
-                    step="1"
-                    min="0"
-                    required
-                    className="form-control"
-                    placeholder="e.g. 500 or 1280"
+                <div className="form-group" style={{ margin: 0 }}>
+                  <label className="form-label" style={{ fontWeight: 700, fontSize: '13px' }}>Goodshed Loading Expense (₹)</label>
+                  <input type="number" className="form-control" placeholder="e.g. 500"
                     value={formData.goodshed_loading_expense}
-                    onChange={(e) => setFormData({ ...formData, goodshed_loading_expense: e.target.value })}
-                  />
+                    onChange={e => setFormData((p: any) => ({ ...p, goodshed_loading_expense: e.target.value }))} />
                 </div>
-
-                <div className="form-group">
-                  <label className="form-label">Status</label>
-                  <select
-                    className="form-control form-select"
-                    value={formData.status}
-                    onChange={(e) => setFormData({ ...formData, status: e.target.value as any })}
-                  >
+                <div className="form-group" style={{ margin: 0 }}>
+                  <label className="form-label" style={{ fontWeight: 700, fontSize: '13px' }}>Status</label>
+                  <select className="form-control" value={formData.status}
+                    onChange={e => setFormData((p: any) => ({ ...p, status: e.target.value as 'ACTIVE' | 'INACTIVE' }))}>
                     <option value="ACTIVE">ACTIVE</option>
                     <option value="INACTIVE">INACTIVE</option>
                   </select>
                 </div>
               </div>
+
+              {/* Truck Photo */}
+              <div className="form-group" style={{ margin: 0 }}>
+                <label className="form-label" style={{ fontWeight: 700, fontSize: '13px', marginBottom: '8px' }}>🚛 Truck Photo</label>
+                <ImageUploadField
+                  value={formData.truck_image_url}
+                  label="Click to upload Truck Photo"
+                  isExtracting={extractingField === 'truck_image_url'}
+                  onUpload={() => triggerUpload('truck_image_url')}
+                  onRemove={() => setFormData((p: any) => ({ ...p, truck_image_url: '' }))}
+                />
+              </div>
             </div>
           )}
 
-          {/* TAB 2: DOCUMENT PHOTOS with Smart OCR */}
-          {activeTab === 'docs' && (
-            <div style={{ maxHeight: '60vh', overflowY: 'auto', padding: '4px' }}>
+          {/* ── Tab 1: RC (Auto-Extracts RC No & Date of Regn) ─────── */}
+          {formTab === 1 && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '18px' }}>
+              <div style={{ padding: '12px 14px', background: '#eff6ff', borderRadius: '10px', border: '1px solid #bfdbfe', fontSize: '12.5px', color: '#1e40af' }}>
+                ✨ <strong>Smart Auto-Extraction:</strong> Uploading the RC document automatically extracts the <strong>RC Number</strong> and <strong>Date of Registration</strong>. Note: RC documents do not expire; only registration date applies.
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px' }}>
+                <div className="form-group" style={{ margin: 0 }}>
+                  <label className="form-label" style={{ fontWeight: 700, fontSize: '13px' }}>RC Number (Regn No)</label>
+                  <input type="text" className="form-control" placeholder="e.g. TN 33 AE 1357"
+                    value={formData.rc_number}
+                    onChange={e => setFormData((p: any) => ({ ...p, rc_number: e.target.value.toUpperCase() }))} />
+                </div>
+                <div className="form-group" style={{ margin: 0 }}>
+                  <label className="form-label" style={{ fontWeight: 700, fontSize: '13px' }}>Date of Registration (Date of Regn)</label>
+                  <DateField
+                    value={formData.rc_reg_date}
+                    onChange={e => setFormData((p: any) => ({ ...p, rc_reg_date: e.target.value, rc_expiry_date: e.target.value }))}
+                  />
+                  {formData.rc_reg_date ? (
+                    <div style={{ marginTop: '5px', fontSize: '12px', fontWeight: 700, color: '#15803d', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <span>✓ Regn Date:</span>
+                      <span style={{ background: '#dcfce7', color: '#166534', padding: '2px 8px', borderRadius: '6px', border: '1px solid #bbf7d0', fontFamily: 'monospace', fontSize: '12.5px' }}>
+                        {formatDateDMY(formData.rc_reg_date)} (DD-MM-YYYY)
+                      </span>
+                    </div>
+                  ) : (
+                    <span style={{ fontSize: '11px', color: '#64748b' }}>Date of registration as stated on the RC (Format: DD-MM-YYYY, No expiry date)</span>
+                  )}
+                </div>
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px' }}>
+                <div className="form-group" style={{ margin: 0 }}>
+                  <label className="form-label" style={{ fontWeight: 700, fontSize: '13px', marginBottom: '8px' }}>📄 RC Front Photo / PDF / Word</label>
+                  <ImageUploadField
+                    value={formData.rc_photo_url}
+                    label="Upload RC Front (Auto-extracts RC No & Regn Date)"
+                    isExtracting={extractingField === 'rc_photo_url'}
+                    onUpload={() => triggerUpload('rc_photo_url')}
+                    onRemove={() => setFormData((p: any) => ({ ...p, rc_photo_url: '' }))}
+                  />
+                </div>
+                <div className="form-group" style={{ margin: 0 }}>
+                  <label className="form-label" style={{ fontWeight: 700, fontSize: '13px', marginBottom: '8px' }}>📄 RC Back Photo / PDF / Word</label>
+                  <ImageUploadField
+                    value={formData.rc_photo_back_url}
+                    label="Upload RC Back"
+                    isExtracting={extractingField === 'rc_photo_back_url'}
+                    onUpload={() => triggerUpload('rc_photo_back_url')}
+                    onRemove={() => setFormData((p: any) => ({ ...p, rc_photo_back_url: '' }))}
+                  />
+                </div>
+              </div>
+            </div>
+          )}
 
-              {/* Info banner */}
-              <div
-                style={{
-                  background: 'linear-gradient(135deg, #eff6ff, #f0fdf4)',
-                  border: '1px solid #bfdbfe',
-                  borderRadius: '12px',
-                  padding: '12px 16px',
-                  marginBottom: '16px',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '12px',
-                }}
-              >
-                <ScanLine size={22} color="#2563eb" style={{ flexShrink: 0 }} />
-                <div>
-                  <div style={{ fontWeight: 800, fontSize: '13px', color: '#1e3a8a' }}>Smart OCR Document Scanner</div>
-                  <div style={{ fontSize: '11.5px', color: '#3b5bdb', marginTop: '2px' }}>
-                    Upload a clear photo of each document — the system will automatically scan and extract the expiry date and document number for you.
+          {/* ── Tab 2: FC / Insurance / Permit ─────────────────── */}
+          {formTab === 2 && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '22px' }}>
+              {/* FC */}
+              <div style={{ padding: '14px', background: '#f5f3ff', borderRadius: '12px', border: '1.5px solid #ede9fe' }}>
+                <div style={{ fontWeight: 800, fontSize: '13px', color: '#6d28d9', marginBottom: '8px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <Shield size={14} /> FC — Fitness Certificate
+                </div>
+                <div style={{ fontSize: '12px', color: '#5b21b6', marginBottom: '10px' }}>
+                  ✨ Uploading FC automatically extracts the <strong>Expiry Date</strong>.
+                </div>
+                <div style={{ marginBottom: '12px' }}>
+                  <div className="form-group" style={{ margin: 0 }}>
+                    <label className="form-label" style={{ fontWeight: 700, fontSize: '12.5px' }}>FC Expiry Date</label>
+                    <DateField
+                      value={formData.fc_expiry_date}
+                      onChange={e => setFormData((p: any) => ({ ...p, fc_expiry_date: e.target.value }))}
+                    />
+                    {formData.fc_expiry_date && (
+                      <div style={{ marginTop: '4px', fontSize: '11.5px', fontWeight: 700, color: '#15803d', display: 'flex', alignItems: 'center', gap: '5px' }}>
+                        <span>✓ Valid Upto:</span>
+                        <span style={{ background: '#dcfce7', color: '#166534', padding: '1px 6px', borderRadius: '5px', border: '1px solid #bbf7d0', fontFamily: 'monospace' }}>
+                          {formatDateDMY(formData.fc_expiry_date)} (DD-MM-YYYY)
+                        </span>
+                      </div>
+                    )}
                   </div>
                 </div>
-              </div>
-
-              {/* Compliance docs with OCR (2 columns) */}
-              <div style={{ fontWeight: 800, fontSize: '12px', color: '#475569', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '10px' }}>
-                📋 Compliance Documents (Auto-Scanned)
-              </div>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px', marginBottom: '18px' }}>
-                <SmartDocCard
-                  title="Fitness Certificate (FC)"
-                  subtitle="FC scan — auto-extracts expiry & number"
-                  iconColor="#10b981"
-                  previewUrl={formData.fc_photo_url}
-                  inputRef={fcInputRef}
-                  photoField="fc_photo_url"
-                  docType="fc"
-                  extractedDateField="fc_expiry_date"
-                  extractedNumberField="fc_number"
-                  extractedDateLabel="FC Expiry Date"
-                  extractedNumberLabel="FC Certificate Number"
-                />
-                <SmartDocCard
-                  title="Insurance Policy"
-                  subtitle="Insurance document — extracts expiry & policy no"
-                  iconColor="#6366f1"
-                  previewUrl={formData.insurance_photo_url}
-                  inputRef={insInputRef}
-                  photoField="insurance_photo_url"
-                  docType="insurance"
-                  extractedDateField="insurance_expiry_date"
-                  extractedNumberField="insurance_policy_number"
-                  extractedDateLabel="Insurance Expiry Date"
-                  extractedNumberLabel="Policy Number"
-                />
-                <SmartDocCard
-                  title="Road Permit"
-                  subtitle="National / State Permit — extracts expiry & permit no"
-                  iconColor="#f59e0b"
-                  previewUrl={formData.permit_photo_url}
-                  inputRef={permitInputRef}
-                  photoField="permit_photo_url"
-                  docType="permit"
-                  extractedDateField="permit_expiry_date"
-                  extractedNumberField="permit_number"
-                  extractedDateLabel="Permit Expiry Date"
-                  extractedNumberLabel="Permit Number"
-                />
-                <SmartDocCard
-                  title="Yearly Road Tax"
-                  subtitle="Tax token / receipt — extracts tax expiry date"
-                  iconColor="#ef4444"
-                  previewUrl={formData.tax_photo_url}
-                  inputRef={taxInputRef}
-                  photoField="tax_photo_url"
-                  docType="tax"
-                  extractedDateField="tax_expiry_date"
-                  extractedDateLabel="Tax Expiry Date"
-                />
-                <SmartDocCard
-                  title="DTS Certificate"
-                  subtitle="DTS / Pollution cert — extracts expiry & cert no"
-                  iconColor="#8b5cf6"
-                  previewUrl={formData.dts_certificate_url}
-                  inputRef={dtsInputRef}
-                  photoField="dts_certificate_url"
-                  docType="dts"
-                  extractedDateField="dts_expiry_date"
-                  extractedNumberField="dts_number"
-                  extractedDateLabel="DTS Expiry Date"
-                  extractedNumberLabel="DTS Certificate Number"
-                />
-                <SmartDocCard
-                  title="RC Photo"
-                  subtitle="Registration Certificate — extracts RC number"
-                  iconColor="#3b82f6"
-                  previewUrl={formData.rc_photo_url}
-                  inputRef={rcInputRef}
-                  photoField="rc_photo_url"
-                  docType="rc"
-                  extractedNumberField="rc_number"
-                  extractedNumberLabel="RC Number"
+                <label className="form-label" style={{ fontWeight: 700, fontSize: '12.5px', marginBottom: '6px' }}>FC Certificate Photo / PDF / Word</label>
+                <ImageUploadField
+                  value={formData.fc_photo_url}
+                  label="Upload FC Certificate (Auto-extracts Regn No & Expiry)"
+                  isExtracting={extractingField === 'fc_photo_url'}
+                  onUpload={() => triggerUpload('fc_photo_url')}
+                  onRemove={() => setFormData((p: any) => ({ ...p, fc_photo_url: '' }))}
                 />
               </div>
 
-              {/* ID / Banking docs */}
-              <div style={{ fontWeight: 800, fontSize: '12px', color: '#475569', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '10px' }}>
-                🏦 ID &amp; Banking Documents
-              </div>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '14px' }}>
-                <SmartDocCard
-                  title="PAN Card"
-                  subtitle="PAN card photo — extracts PAN number"
-                  iconColor="#f59e0b"
-                  previewUrl={formData.pan_card_url}
-                  inputRef={panInputRef}
-                  photoField="pan_card_url"
-                  docType="pan"
-                  extractedNumberField="pan_number"
-                  extractedNumberLabel="PAN Number"
+              {/* Insurance */}
+              <div style={{ padding: '14px', background: '#ecfdf5', borderRadius: '12px', border: '1.5px solid #bbf7d0' }}>
+                <div style={{ fontWeight: 800, fontSize: '13px', color: '#065f46', marginBottom: '12px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <Shield size={14} /> Insurance
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '12px' }}>
+                  <div className="form-group" style={{ margin: 0 }}>
+                    <label className="form-label" style={{ fontWeight: 700, fontSize: '12.5px' }}>Policy Number</label>
+                    <input type="text" className="form-control" placeholder="Policy Number"
+                      value={formData.insurance_policy_number} onChange={e => setFormData((p: any) => ({ ...p, insurance_policy_number: e.target.value }))} />
+                  </div>
+                  <div className="form-group" style={{ margin: 0 }}>
+                    <label className="form-label" style={{ fontWeight: 700, fontSize: '12.5px' }}>Insurance Expiry Date</label>
+                    <DateField
+                      value={formData.insurance_expiry_date}
+                      onChange={e => setFormData((p: any) => ({ ...p, insurance_expiry_date: e.target.value }))}
+                    />
+                    {formData.insurance_expiry_date && (
+                      <div style={{ marginTop: '4px', fontSize: '11.5px', fontWeight: 700, color: '#15803d', display: 'flex', alignItems: 'center', gap: '5px' }}>
+                        <span>✓ Expiry:</span>
+                        <span style={{ background: '#dcfce7', color: '#166534', padding: '1px 6px', borderRadius: '5px', border: '1px solid #bbf7d0', fontFamily: 'monospace' }}>
+                          {formatDateDMY(formData.insurance_expiry_date)} (DD-MM-YYYY)
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+                <label className="form-label" style={{ fontWeight: 700, fontSize: '12.5px', marginBottom: '6px' }}>Insurance Document Photo / PDF / Word</label>
+                <ImageUploadField
+                  value={formData.insurance_photo_url}
+                  label="Upload Insurance Document"
+                  isExtracting={extractingField === 'insurance_photo_url'}
+                  onUpload={() => triggerUpload('insurance_photo_url')}
+                  onRemove={() => setFormData((p: any) => ({ ...p, insurance_photo_url: '' }))}
                 />
-                <SmartDocCard
-                  title="Bank Document"
-                  subtitle="Passbook / Cheque — extracts account no & IFSC"
-                  iconColor="#0284c7"
-                  previewUrl={formData.account_photo_url}
-                  inputRef={accInputRef}
-                  photoField="account_photo_url"
-                  docType="bank"
-                  extractedNumberField="account_number"
-                  extractedNumberLabel="Account Number"
+              </div>
+
+              {/* Permit */}
+              <div style={{ padding: '14px', background: '#fffbeb', borderRadius: '12px', border: '1.5px solid #fde68a' }}>
+                <div style={{ fontWeight: 800, fontSize: '13px', color: '#92400e', marginBottom: '12px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <FileText size={14} /> Permit
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '12px' }}>
+                  <div className="form-group" style={{ margin: 0 }}>
+                    <label className="form-label" style={{ fontWeight: 700, fontSize: '12.5px' }}>Permit Number</label>
+                    <input type="text" className="form-control" placeholder="Permit Number"
+                      value={formData.permit_number} onChange={e => setFormData((p: any) => ({ ...p, permit_number: e.target.value }))} />
+                  </div>
+                  <div className="form-group" style={{ margin: 0 }}>
+                    <label className="form-label" style={{ fontWeight: 700, fontSize: '12.5px' }}>Permit Expiry Date</label>
+                    <DateField
+                      value={formData.permit_expiry_date}
+                      onChange={e => setFormData((p: any) => ({ ...p, permit_expiry_date: e.target.value }))}
+                    />
+                    {formData.permit_expiry_date && (
+                      <div style={{ marginTop: '4px', fontSize: '11.5px', fontWeight: 700, color: '#15803d', display: 'flex', alignItems: 'center', gap: '5px' }}>
+                        <span>✓ Expiry:</span>
+                        <span style={{ background: '#dcfce7', color: '#166534', padding: '1px 6px', borderRadius: '5px', border: '1px solid #bbf7d0', fontFamily: 'monospace' }}>
+                          {formatDateDMY(formData.permit_expiry_date)} (DD-MM-YYYY)
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+                <label className="form-label" style={{ fontWeight: 700, fontSize: '12.5px', marginBottom: '6px' }}>Permit Document Photo / PDF / Word</label>
+                <ImageUploadField
+                  value={formData.permit_photo_url}
+                  label="Upload Permit Document"
+                  isExtracting={extractingField === 'permit_photo_url'}
+                  onUpload={() => triggerUpload('permit_photo_url')}
+                  onRemove={() => setFormData((p: any) => ({ ...p, permit_photo_url: '' }))}
                 />
               </div>
             </div>
           )}
 
-          {/* TAB 3: COMPLIANCE & VALIDITIES */}
-          {activeTab === 'compliance' && (
-            <div>
-              <div
-                style={{
-                  background: '#f0fdf4',
-                  border: '1px solid #bbf7d0',
-                  borderRadius: '10px',
-                  padding: '10px 14px',
-                  marginBottom: '16px',
-                  fontSize: '12px',
-                  color: '#166534',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '8px',
-                }}
-              >
-                <span>ℹ️</span>
-                <span>
-                  <strong>Compliance numbers &amp; expiry dates</strong> have been auto-extracted from your uploaded documents in Step 2. Verify or adjust if needed.
-                </span>
-              </div>
-
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px', marginBottom: '14px' }}>
-                <div className="form-group">
-                  <label className="form-label">Fitness Certificate (FC) Number</label>
-                  <input
-                    type="text"
-                    className="form-control"
-                    placeholder="FC No"
-                    value={formData.fc_number}
-                    onChange={(e) => setFormData({ ...formData, fc_number: e.target.value })}
-                  />
+          {/* ── Tab 3: TDS / Road Tax (Expires March 31st yearly) ── */}
+          {formTab === 3 && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '22px' }}>
+              {/* Road Tax */}
+              <div style={{ padding: '16px', background: '#fdf2f8', borderRadius: '14px', border: '1.5px solid #f9a8d4' }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
+                  <div style={{ fontWeight: 800, fontSize: '13.5px', color: '#9d174d', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <FileText size={15} /> Yearly Road Tax (Expires March 31st)
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setFormData((p: any) => ({ ...p, tax_expiry_date: getNextMarch31st() }))}
+                    style={{
+                      fontSize: '11px', fontWeight: 700, padding: '3px 10px', borderRadius: '6px',
+                      background: '#fce7f3', border: '1px solid #f472b6', color: '#be185d', cursor: 'pointer',
+                    }}
+                  >
+                    Set to March 31st ({getNextMarch31st()})
+                  </button>
                 </div>
-                <div className="form-group">
-                  <label className="form-label" style={{ color: '#b91c1c' }}>FC Expiry Date</label>
-                  <input
-                    type="date"
-                    className="form-control"
-                    value={formData.fc_expiry_date}
-                    onChange={(e) => setFormData({ ...formData, fc_expiry_date: e.target.value })}
-                  />
+                <div style={{ fontSize: '12px', color: '#831843', marginBottom: '12px', background: '#fbcfe8', padding: '6px 10px', borderRadius: '6px' }}>
+                  📌 <strong>Rule:</strong> Road Tax expires on <strong>March 31st</strong> every year for all vehicles. Automated notification triggers 1 month prior (March 1st).
                 </div>
-              </div>
-
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px', marginBottom: '14px' }}>
-                <div className="form-group">
-                  <label className="form-label">Insurance Policy Number</label>
-                  <input
-                    type="text"
-                    className="form-control"
-                    placeholder="Policy No"
-                    value={formData.insurance_policy_number}
-                    onChange={(e) => setFormData({ ...formData, insurance_policy_number: e.target.value })}
-                  />
-                </div>
-                <div className="form-group">
-                  <label className="form-label" style={{ color: '#b91c1c' }}>Insurance Expiry Date</label>
-                  <input
-                    type="date"
-                    className="form-control"
-                    value={formData.insurance_expiry_date}
-                    onChange={(e) => setFormData({ ...formData, insurance_expiry_date: e.target.value })}
-                  />
-                </div>
-              </div>
-
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px', marginBottom: '14px' }}>
-                <div className="form-group">
-                  <label className="form-label">Permit Number</label>
-                  <input
-                    type="text"
-                    className="form-control"
-                    placeholder="Permit No"
-                    value={formData.permit_number}
-                    onChange={(e) => setFormData({ ...formData, permit_number: e.target.value })}
-                  />
-                </div>
-                <div className="form-group">
-                  <label className="form-label" style={{ color: '#b91c1c' }}>Permit Expiry Date</label>
-                  <input
-                    type="date"
-                    className="form-control"
-                    value={formData.permit_expiry_date}
-                    onChange={(e) => setFormData({ ...formData, permit_expiry_date: e.target.value })}
-                  />
-                </div>
-              </div>
-
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px', marginBottom: '14px' }}>
-                <div className="form-group">
-                  <label className="form-label" style={{ color: '#b91c1c' }}>Yearly Road Tax Expiry Date</label>
-                  <input
-                    type="date"
-                    className="form-control"
+                <div className="form-group" style={{ margin: '0 0 12px' }}>
+                  <label className="form-label" style={{ fontWeight: 700, fontSize: '12.5px' }}>Tax Expiry Date</label>
+                  <DateField
                     value={formData.tax_expiry_date}
-                    onChange={(e) => setFormData({ ...formData, tax_expiry_date: e.target.value })}
+                    onChange={e => setFormData((p: any) => ({ ...p, tax_expiry_date: e.target.value }))}
                   />
+                  {formData.tax_expiry_date && (
+                    <div style={{ marginTop: '4px', fontSize: '11.5px', fontWeight: 700, color: '#15803d', display: 'flex', alignItems: 'center', gap: '5px' }}>
+                      <span>✓ Tax Expiry:</span>
+                      <span style={{ background: '#dcfce7', color: '#166534', padding: '1px 6px', borderRadius: '5px', border: '1px solid #bbf7d0', fontFamily: 'monospace' }}>
+                        {formatDateDMY(formData.tax_expiry_date)} (DD-MM-YYYY)
+                      </span>
+                    </div>
+                  )}
                 </div>
-                <div className="form-group">
-                  <label className="form-label">DTS / Hazardous Certificate Expiry</label>
-                  <input
-                    type="date"
-                    className="form-control"
-                    value={formData.dts_expiry_date}
-                    onChange={(e) => setFormData({ ...formData, dts_expiry_date: e.target.value })}
+                <label className="form-label" style={{ fontWeight: 700, fontSize: '12.5px', marginBottom: '6px' }}>Road Tax Receipt (Image / PDF / Word)</label>
+                <ImageUploadField
+                  value={formData.tax_photo_url}
+                  label="Upload Tax Receipt (Auto-sets March 31st Expiry)"
+                  isExtracting={extractingField === 'tax_photo_url'}
+                  onUpload={() => triggerUpload('tax_photo_url')}
+                  onRemove={() => setFormData((p: any) => ({ ...p, tax_photo_url: '' }))}
+                />
+              </div>
+
+              {/* TDS (formerly DTS) */}
+              <div style={{ padding: '16px', background: '#ecfeff', borderRadius: '14px', border: '1.5px solid #a5f3fc' }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
+                  <div style={{ fontWeight: 800, fontSize: '13.5px', color: '#0e7490', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <Hash size={15} /> TDS Certificate (Expires March 31st)
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setFormData((p: any) => ({ ...p, tds_expiry_date: getNextMarch31st(), dts_expiry_date: getNextMarch31st() }))}
+                    style={{
+                      fontSize: '11px', fontWeight: 700, padding: '3px 10px', borderRadius: '6px',
+                      background: '#cffafe', border: '1px solid #22d3ee', color: '#0891b2', cursor: 'pointer',
+                    }}
+                  >
+                    Set to March 31st ({getNextMarch31st()})
+                  </button>
+                </div>
+                <div style={{ fontSize: '12px', color: '#164e63', marginBottom: '12px', background: '#cffafe', padding: '6px 10px', borderRadius: '6px' }}>
+                  📌 <strong>Rule:</strong> TDS Certificate expires on <strong>March 31st</strong> every financial year. Automated notification triggers 1 month prior (March 1st).
+                </div>
+                <div style={{ marginBottom: '12px' }}>
+                  <div className="form-group" style={{ margin: 0 }}>
+                    <label className="form-label" style={{ fontWeight: 700, fontSize: '12.5px' }}>TDS Expiry Date</label>
+                    <DateField
+                      value={formData.tds_expiry_date || formData.dts_expiry_date}
+                      onChange={e => setFormData((p: any) => ({ ...p, tds_expiry_date: e.target.value, dts_expiry_date: e.target.value }))}
+                    />
+                    {(formData.tds_expiry_date || formData.dts_expiry_date) && (
+                      <div style={{ marginTop: '4px', fontSize: '11.5px', fontWeight: 700, color: '#15803d', display: 'flex', alignItems: 'center', gap: '5px' }}>
+                        <span>✓ TDS Expiry:</span>
+                        <span style={{ background: '#dcfce7', color: '#166534', padding: '1px 6px', borderRadius: '5px', border: '1px solid #bbf7d0', fontFamily: 'monospace' }}>
+                          {formatDateDMY(formData.tds_expiry_date || formData.dts_expiry_date)} (DD-MM-YYYY)
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+                <label className="form-label" style={{ fontWeight: 700, fontSize: '12.5px', marginBottom: '6px' }}>TDS Certificate — Page 1 (Photo / PDF / Word)</label>
+                <ImageUploadField
+                  value={formData.tds_certificate_url || formData.dts_certificate_url}
+                  label="Upload TDS Certificate Page 1 (Auto-extracts Number & March 31st Expiry)"
+                  isExtracting={extractingField === 'tds_certificate_url' || extractingField === 'dts_certificate_url'}
+                  onUpload={() => triggerUpload('tds_certificate_url')}
+                  onRemove={() => setFormData((p: any) => ({ ...p, tds_certificate_url: '', dts_certificate_url: '' }))}
+                />
+                <div style={{ marginTop: '12px' }}>
+                  <label className="form-label" style={{ fontWeight: 700, fontSize: '12.5px', marginBottom: '6px' }}>TDS Certificate — Page 2 (Photo / PDF / Word)</label>
+                  <ImageUploadField
+                    value={formData.tds_certificate_url_2}
+                    label="Upload TDS Certificate Page 2"
+                    isExtracting={extractingField === 'tds_certificate_url_2'}
+                    onUpload={() => triggerUpload('tds_certificate_url_2')}
+                    onRemove={() => setFormData((p: any) => ({ ...p, tds_certificate_url_2: '' }))}
                   />
                 </div>
               </div>
             </div>
           )}
 
-          {/* TAB 4: BANK & PAN */}
-          {activeTab === 'bank' && (
-            <div>
-              <div
-                style={{
-                  background: '#eff6ff',
-                  border: '1px solid #bfdbfe',
-                  borderRadius: '10px',
-                  padding: '10px 14px',
-                  marginBottom: '16px',
-                  fontSize: '12px',
-                  color: '#1e40af',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '8px',
-                }}
-              >
-                <span>ℹ️</span>
-                <span>
-                  <strong>Step 4 (Final Step):</strong> Verify bank account and PAN details before saving this truck to the fleet.
-                </span>
+          {/* ── Tab 4: PAN / Bank ─────────────────────────────── */}
+          {formTab === 4 && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '22px' }}>
+              {/* PAN */}
+              <div style={{ padding: '14px', background: '#f5f3ff', borderRadius: '12px', border: '1.5px solid #ede9fe' }}>
+                <div style={{ fontWeight: 800, fontSize: '13px', color: '#6d28d9', marginBottom: '8px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <CreditCard size={14} /> PAN Card
+                </div>
+                <div style={{ fontSize: '12px', color: '#5b21b6', marginBottom: '10px' }}>
+                  ✨ Uploading PAN Card automatically extracts the <strong>PAN Number</strong> and <strong>Name</strong>.
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '12px' }}>
+                  <div className="form-group" style={{ margin: 0 }}>
+                    <label className="form-label" style={{ fontWeight: 700, fontSize: '12.5px' }}>PAN Number</label>
+                    <input type="text" className="form-control" placeholder="e.g. ABCDE1234F"
+                      value={formData.pan_number}
+                      onChange={e => setFormData((p: any) => ({ ...p, pan_number: e.target.value.toUpperCase() }))}
+                      style={{ textTransform: 'uppercase', letterSpacing: '1px', fontWeight: 700 }} />
+                  </div>
+                  <div className="form-group" style={{ margin: 0 }}>
+                    <label className="form-label" style={{ fontWeight: 700, fontSize: '12.5px' }}>Name on PAN</label>
+                    <input type="text" className="form-control" placeholder="Cardholder Name"
+                      value={formData.account_holder_name}
+                      onChange={e => setFormData((p: any) => ({ ...p, account_holder_name: e.target.value }))} />
+                  </div>
+                </div>
+                <label className="form-label" style={{ fontWeight: 700, fontSize: '12.5px', marginBottom: '6px' }}>PAN Card Photo / PDF / Word</label>
+                <ImageUploadField
+                  value={formData.pan_card_url}
+                  label="Upload PAN Card (Auto-extracts PAN & Name)"
+                  isExtracting={extractingField === 'pan_card_url'}
+                  onUpload={() => triggerUpload('pan_card_url')}
+                  onRemove={() => setFormData((p: any) => ({ ...p, pan_card_url: '' }))}
+                />
               </div>
 
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px', marginBottom: '14px' }}>
-                <div className="form-group">
-                  <label className="form-label">Bank Account Holder Name</label>
-                  <input
-                    type="text"
-                    className="form-control"
-                    placeholder="Name as in Bank Account"
-                    value={formData.account_holder_name}
-                    onChange={(e) => setFormData({ ...formData, account_holder_name: e.target.value })}
-                  />
+              {/* Bank */}
+              <div style={{ padding: '14px', background: '#f0fdfa', borderRadius: '12px', border: '1.5px solid #99f6e4' }}>
+                <div style={{ fontWeight: 800, fontSize: '13px', color: '#134e4a', marginBottom: '8px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <Building size={14} /> Bank Account Details
                 </div>
-                <div className="form-group">
-                  <label className="form-label">Bank Name</label>
-                  <input
-                    type="text"
-                    className="form-control"
-                    placeholder="e.g. State Bank of India, HDFC"
-                    value={formData.bank_name}
-                    onChange={(e) => setFormData({ ...formData, bank_name: e.target.value })}
-                  />
+                <div style={{ fontSize: '12px', color: '#0f766e', marginBottom: '10px' }}>
+                  ✨ Uploading Passbook or Cheque automatically extracts <strong>Account Number</strong>, <strong>Bank Name</strong>, and <strong>IFSC Code</strong>.
                 </div>
-              </div>
-
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px', marginBottom: '14px' }}>
-                <div className="form-group">
-                  <label className="form-label">Account Number</label>
-                  <input
-                    type="text"
-                    className="form-control"
-                    placeholder="Bank Account Number"
-                    value={formData.account_number}
-                    onChange={(e) => setFormData({ ...formData, account_number: e.target.value })}
-                    style={{ fontFamily: 'monospace' }}
-                  />
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '12px' }}>
+                  <div className="form-group" style={{ margin: 0 }}>
+                    <label className="form-label" style={{ fontWeight: 700, fontSize: '12.5px' }}>Account Holder Name</label>
+                    <input type="text" className="form-control" placeholder="Name"
+                      value={formData.account_holder_name} onChange={e => setFormData((p: any) => ({ ...p, account_holder_name: e.target.value }))} />
+                  </div>
+                  <div className="form-group" style={{ margin: 0 }}>
+                    <label className="form-label" style={{ fontWeight: 700, fontSize: '12.5px' }}>Account Number</label>
+                    <input type="text" className="form-control" placeholder="Account Number"
+                      value={formData.account_number} onChange={e => setFormData((p: any) => ({ ...p, account_number: e.target.value }))} />
+                  </div>
+                  <div className="form-group" style={{ margin: 0 }}>
+                    <label className="form-label" style={{ fontWeight: 700, fontSize: '12.5px' }}>Bank Name</label>
+                    <input type="text" className="form-control" placeholder="e.g. State Bank of India"
+                      value={formData.bank_name} onChange={e => setFormData((p: any) => ({ ...p, bank_name: e.target.value }))} />
+                  </div>
+                  <div className="form-group" style={{ margin: 0 }}>
+                    <label className="form-label" style={{ fontWeight: 700, fontSize: '12.5px' }}>IFSC Code</label>
+                    <input type="text" className="form-control" placeholder="e.g. SBIN0001234"
+                      value={formData.ifsc_code}
+                      onChange={e => setFormData((p: any) => ({ ...p, ifsc_code: e.target.value.toUpperCase() }))}
+                      style={{ textTransform: 'uppercase', letterSpacing: '1px' }} />
+                  </div>
                 </div>
-                <div className="form-group">
-                  <label className="form-label">IFSC Code</label>
-                  <input
-                    type="text"
-                    className="form-control"
-                    placeholder="e.g. SBIN0001234"
-                    value={formData.ifsc_code}
-                    onChange={(e) => setFormData({ ...formData, ifsc_code: e.target.value.toUpperCase() })}
-                    style={{ fontFamily: 'monospace' }}
-                  />
-                </div>
-              </div>
-
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px', marginBottom: '14px' }}>
-                <div className="form-group">
-                  <label className="form-label">PAN Card Number</label>
-                  <input
-                    type="text"
-                    className="form-control"
-                    placeholder="e.g. ABCDE1234F"
-                    value={formData.pan_number}
-                    onChange={(e) => setFormData({ ...formData, pan_number: e.target.value.toUpperCase() })}
-                    style={{ fontFamily: 'monospace' }}
-                  />
-                </div>
-                <div className="form-group">
-                  <label className="form-label">DTS Certificate Number</label>
-                  <input
-                    type="text"
-                    className="form-control"
-                    placeholder="DTS / Pollution / Safety Cert No"
-                    value={formData.dts_number}
-                    onChange={(e) => setFormData({ ...formData, dts_number: e.target.value })}
-                  />
-                </div>
+                <label className="form-label" style={{ fontWeight: 700, fontSize: '12.5px', marginBottom: '6px' }}>Bank Passbook / Cancelled Cheque (Image / PDF / Word)</label>
+                <ImageUploadField
+                  value={formData.account_photo_url}
+                  label="Upload Passbook / Cheque (Auto-extracts Acc No, Bank & IFSC)"
+                  isExtracting={extractingField === 'account_photo_url'}
+                  onUpload={() => triggerUpload('account_photo_url')}
+                  onRemove={() => setFormData((p: any) => ({ ...p, account_photo_url: '' }))}
+                />
               </div>
             </div>
           )}
 
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '20px', borderTop: '1px solid #e2e8f0', paddingTop: '16px' }}>
+          {/* Footer */}
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '10px', paddingTop: '20px', marginTop: '20px', borderTop: '1px solid #e2e8f0' }}>
             <div>
-              {activeTab !== 'basic' && (
+              {formTab > 0 && (
                 <button
                   type="button"
-                  onClick={handlePrevTab}
                   className="btn btn-outline"
-                  style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
+                  onClick={handlePrevTab}
+                  style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}
                 >
-                  ← Back
+                  ← Previous
                 </button>
               )}
             </div>
 
             <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
-              <button type="button" onClick={() => setIsModalOpen(false)} className="btn btn-outline">
+              <button
+                type="button"
+                className="btn btn-outline"
+                onClick={() => { setIsModalOpen(false); setSelectedVehicle(null); setFormError(''); }}
+              >
                 Cancel
               </button>
 
-              {activeTab === 'basic' && (
+              {formTab < 4 ? (
                 <button
                   type="button"
-                  onClick={handleNextTab}
                   className="btn btn-primary"
-                  style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
-                >
-                  Next Step: Upload Documents →
-                </button>
-              )}
-
-              {activeTab === 'docs' && (
-                <button
-                  type="button"
                   onClick={handleNextTab}
-                  className="btn btn-primary"
-                  style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
+                  style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}
                 >
-                  Next Step: Review Compliance →
+                  Next →
                 </button>
-              )}
-
-              {activeTab === 'compliance' && (
-                <button
-                  type="button"
-                  onClick={handleNextTab}
-                  className="btn btn-primary"
-                  style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
-                >
-                  Next Step: Bank &amp; PAN Details →
-                </button>
-              )}
-
-              {activeTab === 'bank' && (
+              ) : (
                 <button
                   type="submit"
                   className="btn btn-primary"
                   disabled={isSubmitting}
-                  style={{ display: 'flex', alignItems: 'center', gap: '6px', background: '#16a34a', borderColor: '#16a34a' }}
+                  style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}
                 >
-                  {isSubmitting ? 'Saving...' : selectedVehicle ? '✓ Update Truck' : '✓ Save Truck'}
+                  <CheckCircle size={15} />
+                  {isSubmitting ? 'Saving...' : selectedVehicle ? 'Update Truck' : 'Save Truck'}
                 </button>
               )}
             </div>
@@ -2803,15 +2239,145 @@ export const VehiclesPage: React.FC = () => {
         </form>
       </Modal>
 
-      {/* ── Truck Profile View, Print & Download Modal ────────────────────── */}
-      <TruckProfileModal
-        vehicle={profileVehicle}
-        onClose={() => setProfileVehicle(null)}
-        onEdit={(v) => {
-          setProfileVehicle(null);
-          openEditModal(v);
-        }}
-      />
+      {/* ── View Vehicle Detail Modal ─────────────────────────────────────── */}
+      {viewVehicle && (
+        <Modal
+          isOpen={!!viewVehicle}
+          onClose={() => setViewVehicle(null)}
+          title={`Vehicle Details — ${viewVehicle.lorry_number}`}
+          maxWidth="860px"
+        >
+          <VehicleDetailPanel
+            vehicle={viewVehicle}
+            onEdit={() => { const v = viewVehicle; setViewVehicle(null); openEditModal(v); }}
+            onClose={() => setViewVehicle(null)}
+            onZoom={(url, title) => setZoomImage({ url, title })}
+          />
+        </Modal>
+      )}
+
+      {/* ── Zoom Image Lightbox ─────────────────────────────────────────── */}
+      {zoomImage && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            zIndex: 99999,
+            background: 'rgba(0,0,0,0.88)',
+            backdropFilter: 'blur(8px)',
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: '20px',
+          }}
+          onClick={() => setZoomImage(null)}
+        >
+          <div
+            style={{
+              position: 'absolute',
+              top: '16px',
+              right: '20px',
+              display: 'flex',
+              gap: '10px',
+            }}
+          >
+            <a
+              href={zoomImage.url}
+              download={`${zoomImage.title}.jpg`}
+              onClick={(e) => e.stopPropagation()}
+              style={{
+                background: 'rgba(255,255,255,0.18)',
+                color: '#fff',
+                padding: '8px 14px',
+                borderRadius: '8px',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '6px',
+                fontSize: '13px',
+                textDecoration: 'none',
+                fontWeight: 600,
+              }}
+            >
+              <Download size={16} /> Download
+            </a>
+            <button
+              onClick={() => setZoomImage(null)}
+              style={{
+                background: 'rgba(255,255,255,0.18)',
+                color: '#fff',
+                border: 'none',
+                borderRadius: '50%',
+                width: '38px',
+                height: '38px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                cursor: 'pointer',
+              }}
+            >
+              <X size={20} />
+            </button>
+          </div>
+
+          <div
+            style={{
+              color: '#ffffff',
+              fontSize: '16px',
+              fontWeight: 700,
+              marginBottom: '14px',
+              textShadow: '0 2px 4px rgba(0,0,0,0.5)',
+            }}
+          >
+            {zoomImage.title}
+          </div>
+
+          <img
+            src={zoomImage.url}
+            alt={zoomImage.title}
+            style={{
+              maxWidth: '92vw',
+              maxHeight: '82vh',
+              objectFit: 'contain',
+              borderRadius: '10px',
+              boxShadow: '0 20px 50px rgba(0,0,0,0.6)',
+            }}
+            onClick={(e) => e.stopPropagation()}
+          />
+        </div>
+      )}
+
+      {/* ── Delete Confirmation Modal ────────────────────────────────────── */}
+      {deleteConfirm && (
+        <Modal
+          isOpen={!!deleteConfirm}
+          onClose={() => setDeleteConfirm(null)}
+          title="Delete Truck"
+          maxWidth="440px"
+        >
+          <div>
+            <p style={{ fontSize: '14px', color: '#334155', lineHeight: 1.5, marginBottom: '20px' }}>
+              Are you sure you want to delete truck{' '}
+              <strong style={{ color: '#0f172a' }}>{deleteConfirm.lorry_number}</strong>? This action
+              cannot be undone.
+            </p>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
+              <button className="btn btn-outline" onClick={() => setDeleteConfirm(null)}>
+                Cancel
+              </button>
+              <button
+                className="btn btn-danger"
+                onClick={() => handleDeleteVehicle(deleteConfirm)}
+                style={{ display: 'inline-flex', alignItems: 'center', gap: '5px' }}
+              >
+                <Trash2 size={15} /> Delete Truck
+              </button>
+            </div>
+          </div>
+        </Modal>
+      )}
     </div>
   );
 };
+
+export default VehiclesPage;

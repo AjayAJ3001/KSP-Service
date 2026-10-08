@@ -35,10 +35,11 @@ export interface KrishiUnit {
   unitNumber: number; // 1 to 9
   name: string;
   routeId: number;
-  ratePerTon: number; // 50 for 1-4, 60 for 5-9
+  ratePerTon: number; // fallback default; overridden by admin panel at runtime
   keywords: string[];
 }
 
+// Fallback defaults — actual rates are fetched from admin panel's unloading_rates table at runtime
 export const KRISHI_UNITS: KrishiUnit[] = [
   { unitNumber: 1, name: 'SIPCOT', routeId: 7, ratePerTon: 50, keywords: ['SIPCOT'] },
   { unitNumber: 2, name: 'RGS - VAVIKADAI', routeId: 8, ratePerTon: 50, keywords: ['RGS', 'VAVIKADAI'] },
@@ -132,17 +133,21 @@ export const DriverExpensesScreen: React.FC<{ route: any; navigation: any }> = (
   );
   const goodsWeight = parseFloat(String(trip.goods_weight || 0)) || 0;
 
+  // Dynamic unloading rates fetched from admin panel (updated at loadExpenses time)
+  const [dynamicKrishiUnits, setDynamicKrishiUnits] = useState<KrishiUnit[]>(KRISHI_UNITS);
+
   // Auto-detected Krishi unit (1 to 9) strictly from Step 1 (via route_id or to_location)
   const activeKrishiUnit = (() => {
     if (isKrishiParty) {
-      let matched = KRISHI_UNITS.find((u) => u.routeId === trip.route_id);
+      const units = dynamicKrishiUnits;
+      let matched = units.find((u) => u.routeId === trip.route_id);
       if (!matched && trip.to_location) {
         const locUpper = trip.to_location.toUpperCase();
-        matched = KRISHI_UNITS.find((u) =>
+        matched = units.find((u) =>
           u.keywords.some((kw) => locUpper.includes(kw.toUpperCase()))
         );
       }
-      return matched || KRISHI_UNITS[0];
+      return matched || units[0];
     }
     return null;
   })();
@@ -205,9 +210,49 @@ export const DriverExpensesScreen: React.FC<{ route: any; navigation: any }> = (
       setAdvancePaid(res.data.advance_paid || 0);
       setBalanceToDriver(res.data.balance_to_driver || 0);
 
-      // 1. Resolve truck loading amount from trip or vehicle lookup
-      let loadingExp = parseFloat(String(trip.goodshed_loading_expense || 0)) || 0;
-      if (loadingExp <= 0 && trip.vehicle_id) {
+      // 2. Resolve cleaning charge from admin panel per destination unit
+      //    Matched by active Krishi unit keywords or trip's to_location.
+      let cleaningExp = 0;
+      try {
+        const cleaningRates = await mobileLookupService.getCleaningExpenseRates();
+        if (cleaningRates.data && cleaningRates.data.length > 0) {
+          let matched: typeof cleaningRates.data[0] | undefined;
+
+          // Priority 1: match using all keywords of the active Krishi unit
+          if (activeKrishiUnit) {
+            matched = cleaningRates.data.find((cr) =>
+              cr.unit_name &&
+              activeKrishiUnit.keywords.some((kw) =>
+                cr.unit_name.toUpperCase().includes(kw.toUpperCase()) ||
+                kw.toUpperCase().includes(cr.unit_name.toUpperCase())
+              )
+            );
+          }
+
+          // Priority 2: match by trip's to_location against unit_name
+          if (!matched && trip.to_location) {
+            const locUpper = trip.to_location.toUpperCase();
+            matched = cleaningRates.data.find((cr) =>
+              cr.unit_name &&
+              (locUpper.includes(cr.unit_name.toUpperCase()) ||
+               cr.unit_name.toUpperCase().split(/[\s\-–]+/).some((word: string) => locUpper.includes(word)))
+            );
+          }
+
+          if (matched) {
+            cleaningExp = parseFloat(String(matched.cleaning_charge)) || 0;
+          }
+        }
+      } catch (e) {
+        console.log('Could not fetch cleaning expense rates:', e);
+      }
+      setTruckCleaningAmount(cleaningExp);
+
+      // 1. Resolve truck loading amount — ALWAYS from the selected truck's goodshed_loading_expense
+      //    Loading is truck-specific. cleaning_expense_rates.loading_expense is NOT used here.
+      let loadingExp = 0;
+      if (trip.vehicle_id) {
+        // Primary: fetch the selected truck's loading expense directly
         try {
           const vRes = await mobileLookupService.getVehicles();
           const vehicle = vRes.data.items.find((v) => v.id === trip.vehicle_id);
@@ -218,15 +263,45 @@ export const DriverExpensesScreen: React.FC<{ route: any; navigation: any }> = (
           console.log('Could not fetch vehicle lookup:', e);
         }
       }
+      // Fallback: trip-level loading expense (if vehicle lookup failed)
+      if (loadingExp <= 0) {
+        loadingExp = parseFloat(String(trip.goodshed_loading_expense || 0)) || 0;
+      }
 
       setTruckLoadingAmount(loadingExp);
 
-      // 2. Resolve mapped cleaning charge from business matrix
-      let cleaningExp = 0;
-      if (loadingExp === 500) cleaningExp = 30;
-      else if (loadingExp === 1000) cleaningExp = 50;
-      else if (loadingExp === 1280) cleaningExp = 100;
-      setTruckCleaningAmount(cleaningExp);
+      // 3b. Fetch unloading rates from admin panel and override KRISHI_UNITS ratePerTon
+      if (isKrishiParty) {
+        try {
+          const unloadingRes = await mobileLookupService.getUnloadingRates(trip.party_id);
+          if (unloadingRes.data && unloadingRes.data.length > 0) {
+            // Merge fetched rates into KRISHI_UNITS by matching route_id or unit_name keywords
+            const updatedUnits = KRISHI_UNITS.map((ku) => {
+              // Try to match by route_id first
+              let fetched = unloadingRes.data.find(
+                (ur) => ur.route_id !== null && ur.route_id === ku.routeId
+              );
+              // Fallback: match by unit_name keyword
+              if (!fetched) {
+                fetched = unloadingRes.data.find((ur) =>
+                  ur.unit_name &&
+                  ku.keywords.some((kw) =>
+                    ur.unit_name.toUpperCase().includes(kw.toUpperCase()) ||
+                    kw.toUpperCase().includes(ur.unit_name.toUpperCase())
+                  )
+                );
+              }
+              if (fetched && fetched.rate_per_ton !== undefined) {
+                return { ...ku, ratePerTon: parseFloat(String(fetched.rate_per_ton)) || ku.ratePerTon };
+              }
+              return ku;
+            });
+            setDynamicKrishiUnits(updatedUnits);
+          }
+        } catch (e) {
+          console.log('Could not fetch unloading rates from admin panel, using defaults:', e);
+        }
+      }
 
       // 3. Resolve Driver Bata rate from master (default 15% / 0.1500)
       let bataMultiplier = 0.15;
@@ -292,7 +367,9 @@ export const DriverExpensesScreen: React.FC<{ route: any; navigation: any }> = (
               : prev.CLEANING_CHARGE.amount,
           description:
             existingCleaning.length === 0 && prev.CLEANING_CHARGE.description === '' && cleaningExp > 0
-              ? `Cleaning charge for ${trip.lorry_number || 'truck'}`
+              ? activeKrishiUnit
+                ? `Cleaning charge: Unit ${activeKrishiUnit.unitNumber} - ${activeKrishiUnit.name}`
+                : `Cleaning charge for ${trip.to_location || trip.lorry_number || 'truck'}`
               : prev.CLEANING_CHARGE.description,
         },
       }));
@@ -339,6 +416,27 @@ export const DriverExpensesScreen: React.FC<{ route: any; navigation: any }> = (
             },
           }));
           setAutoFilledCategories((s) => new Set(s).add('UNLOADING'));
+        }
+      }
+
+      // When opening CLEANING_CHARGE, auto-fill amount and unit-specific description
+      if (catKey === 'CLEANING_CHARGE' && truckCleaningAmount > 0) {
+        const existingCleaning = expenses.filter(
+          (e) => e.expense_type === 'CLEANING_CHARGE' || e.expense_type === 'CLEANING'
+        );
+        if (existingCleaning.length === 0) {
+          setCategoryInputs((inputs) => ({
+            ...inputs,
+            CLEANING_CHARGE: {
+              amount: inputs.CLEANING_CHARGE.amount || String(truckCleaningAmount),
+              description:
+                inputs.CLEANING_CHARGE.description ||
+                (activeKrishiUnit
+                  ? `Cleaning charge: Unit ${activeKrishiUnit.unitNumber} - ${activeKrishiUnit.name}`
+                  : `Cleaning charge for ${trip.to_location || trip.lorry_number || 'truck'}`),
+            },
+          }));
+          setAutoFilledCategories((s) => new Set(s).add('CLEANING_CHARGE'));
         }
       }
 

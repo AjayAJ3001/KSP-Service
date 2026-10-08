@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -9,10 +9,12 @@ import {
   KeyboardAvoidingView,
   Platform,
   ScrollView,
+  Modal,
 } from 'react-native';
-import { Truck, Eye, EyeOff, Lock, User as UserIcon, AlertCircle } from 'lucide-react-native';
+import { Truck, Eye, EyeOff, Lock, User as UserIcon, AlertCircle, Server, CheckCircle2, XCircle, Wifi } from 'lucide-react-native';
 import { useAuth } from '../context/AuthContext';
 import { COLORS, SPACING, RADIUS, SHADOWS } from '../constants/theme';
+import { getServerBaseUrl, setServerBaseUrl, checkServerHealth, CURRENT_WIFI_IP } from '../services/api';
 
 export const LoginScreen: React.FC<{ navigation: any }> = ({ navigation }) => {
   const [username, setUsername] = useState('');
@@ -21,7 +23,19 @@ export const LoginScreen: React.FC<{ navigation: any }> = ({ navigation }) => {
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
 
+  // Server settings modal state
+  const [currentServerUrl, setCurrentServerUrl] = useState(getServerBaseUrl());
+  const [showServerModal, setShowServerModal] = useState(false);
+  const [customServerUrl, setCustomServerUrl] = useState(getServerBaseUrl());
+  const [testResult, setTestResult] = useState<{ ok: boolean; message: string } | null>(null);
+  const [testingConnection, setTestingConnection] = useState(false);
+
   const { login } = useAuth();
+
+  useEffect(() => {
+    setCurrentServerUrl(getServerBaseUrl());
+    setCustomServerUrl(getServerBaseUrl());
+  }, []);
 
   const handleLogin = async () => {
     if (!username.trim() || !password.trim()) {
@@ -35,10 +49,42 @@ export const LoginScreen: React.FC<{ navigation: any }> = ({ navigation }) => {
       await login(username.trim(), password);
       navigation.replace('MainTabs');
     } catch (err: any) {
-      setError(err.message || 'Invalid username or password.');
+      const msg = err.message || 'Invalid username or password.';
+      setError(
+        msg.includes('Network') || msg.includes('server')
+          ? `${msg}\nTap "API Settings" below if IP changed.`
+          : msg
+      );
     } finally {
       setIsLoading(false);
     }
+  };
+
+  const handleTestConnection = async (urlToTest?: string) => {
+    setTestingConnection(true);
+    setTestResult(null);
+    try {
+      const target = urlToTest || customServerUrl;
+      const res = await checkServerHealth(target);
+      setTestResult({
+        ok: res.ok,
+        message: res.ok ? '✅ Server connected successfully!' : `❌ ${res.message || 'Cannot reach server'}`,
+      });
+    } catch (e: any) {
+      setTestResult({ ok: false, message: `❌ ${e.message || 'Failed to connect'}` });
+    } finally {
+      setTestingConnection(false);
+    }
+  };
+
+  const handleSaveServerUrl = async (newUrl?: string) => {
+    const url = newUrl || customServerUrl;
+    const saved = await setServerBaseUrl(url);
+    setCurrentServerUrl(saved);
+    setCustomServerUrl(saved);
+    setShowServerModal(false);
+    setTestResult(null);
+    setError('');
   };
 
   return (
@@ -126,10 +172,147 @@ export const LoginScreen: React.FC<{ navigation: any }> = ({ navigation }) => {
           </TouchableOpacity>
         </View>
 
+        {/* Server Connection Badge */}
+        <TouchableOpacity
+          style={styles.serverStatusBtn}
+          onPress={() => {
+            setCustomServerUrl(getServerBaseUrl());
+            setTestResult(null);
+            setShowServerModal(true);
+          }}
+        >
+          <Server size={14} color="#94a3b8" />
+          <Text style={styles.serverStatusText} numberOfLines={1}>
+            API: {currentServerUrl}
+          </Text>
+        </TouchableOpacity>
+
         <Text style={styles.footerNote}>
           KSP Transport Management System • Secure JWT Access
         </Text>
       </ScrollView>
+
+      {/* Server Configuration Modal */}
+      <Modal visible={showServerModal} transparent animationType="slide">
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalCard}>
+            <View style={styles.modalHeader}>
+              <View style={styles.modalTitleRow}>
+                <Server size={20} color={COLORS.primary} />
+                <Text style={styles.modalTitle}>Backend Server Settings</Text>
+              </View>
+              <TouchableOpacity onPress={() => setShowServerModal(false)}>
+                <Text style={styles.modalClose}>✕</Text>
+              </TouchableOpacity>
+            </View>
+
+            <Text style={styles.modalSub}>
+              Select connection mode or enter your computer's IP address:
+            </Text>
+
+            {/* Presets */}
+            <View style={styles.presetRow}>
+              <TouchableOpacity
+                style={[
+                  styles.presetBtn,
+                  customServerUrl.includes('localhost') && styles.presetBtnActive,
+                ]}
+                onPress={() => {
+                  const url = 'http://localhost:5000/api';
+                  setCustomServerUrl(url);
+                  handleTestConnection(url);
+                }}
+              >
+                <Server size={16} color={customServerUrl.includes('localhost') ? COLORS.white : COLORS.primary} />
+                <Text
+                  style={[
+                    styles.presetText,
+                    customServerUrl.includes('localhost') && styles.presetTextActive,
+                  ]}
+                >
+                  USB Cable (localhost)
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[
+                  styles.presetBtn,
+                  customServerUrl.includes(CURRENT_WIFI_IP) && styles.presetBtnActive,
+                ]}
+                onPress={() => {
+                  const url = `http://${CURRENT_WIFI_IP}:5000/api`;
+                  setCustomServerUrl(url);
+                  handleTestConnection(url);
+                }}
+              >
+                <Wifi size={16} color={customServerUrl.includes(CURRENT_WIFI_IP) ? COLORS.white : COLORS.primary} />
+                <Text
+                  style={[
+                    styles.presetText,
+                    customServerUrl.includes(CURRENT_WIFI_IP) && styles.presetTextActive,
+                  ]}
+                >
+                  Wi-Fi ({CURRENT_WIFI_IP})
+                </Text>
+              </TouchableOpacity>
+            </View>
+
+            {/* Custom URL Input */}
+            <View style={styles.inputGroup}>
+              <Text style={styles.label}>Server Base URL</Text>
+              <TextInput
+                style={styles.modalInput}
+                value={customServerUrl}
+                onChangeText={setCustomServerUrl}
+                placeholder="http://10.180.228.146:5000/api"
+                placeholderTextColor={COLORS.textLight}
+                autoCapitalize="none"
+                autoCorrect={false}
+              />
+            </View>
+
+            {/* Test Connection Button */}
+            <TouchableOpacity
+              style={styles.testBtn}
+              onPress={() => handleTestConnection()}
+              disabled={testingConnection}
+            >
+              {testingConnection ? (
+                <ActivityIndicator size="small" color={COLORS.primary} />
+              ) : (
+                <Text style={styles.testBtnText}>Test Connection</Text>
+              )}
+            </TouchableOpacity>
+
+            {/* Test Result Box */}
+            {testResult && (
+              <View
+                style={[
+                  styles.testResultBox,
+                  testResult.ok ? styles.testResultSuccess : styles.testResultError,
+                ]}
+              >
+                <Text
+                  style={[
+                    styles.testResultText,
+                    testResult.ok ? styles.testResultTextSuccess : styles.testResultTextError,
+                  ]}
+                >
+                  {testResult.message}
+                </Text>
+              </View>
+            )}
+
+            {/* Save Button */}
+            <TouchableOpacity
+              style={styles.saveBtn}
+              onPress={() => handleSaveServerUrl()}
+            >
+              <Text style={styles.saveBtnText}>Save & Apply</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </KeyboardAvoidingView>
   );
 };
@@ -262,10 +445,160 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     letterSpacing: 1,
   },
+  serverStatusBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    marginTop: SPACING.lg,
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+    borderRadius: RADIUS.full,
+    alignSelf: 'center',
+  },
+  serverStatusText: {
+    color: '#94a3b8',
+    fontSize: 11,
+    fontWeight: '600',
+  },
   footerNote: {
     textAlign: 'center',
     color: '#64748b',
     fontSize: 12,
-    marginTop: SPACING.xl,
+    marginTop: SPACING.sm,
+  },
+
+  /* Modal Styles */
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.65)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: SPACING.lg,
+  },
+  modalCard: {
+    backgroundColor: COLORS.white,
+    borderRadius: RADIUS.xl,
+    padding: SPACING.xl,
+    width: '100%',
+    maxWidth: 420,
+    ...SHADOWS.lg,
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: SPACING.xs,
+  },
+  modalTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: '800',
+    color: COLORS.primary,
+  },
+  modalClose: {
+    fontSize: 20,
+    color: COLORS.textMuted,
+    padding: 4,
+  },
+  modalSub: {
+    fontSize: 13,
+    color: COLORS.textMuted,
+    marginBottom: SPACING.md,
+  },
+  presetRow: {
+    flexDirection: 'column',
+    gap: 8,
+    marginBottom: SPACING.md,
+  },
+  presetBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    borderRadius: RADIUS.md,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    backgroundColor: COLORS.surface,
+  },
+  presetBtnActive: {
+    backgroundColor: COLORS.primary,
+    borderColor: COLORS.primary,
+  },
+  presetText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: COLORS.primary,
+  },
+  presetTextActive: {
+    color: COLORS.white,
+  },
+  modalInput: {
+    height: 44,
+    backgroundColor: COLORS.surface,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    borderRadius: RADIUS.md,
+    paddingHorizontal: 12,
+    fontSize: 14,
+    color: COLORS.text,
+  },
+  testBtn: {
+    height: 40,
+    borderRadius: RADIUS.md,
+    borderWidth: 1,
+    borderColor: COLORS.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: SPACING.sm,
+  },
+  testBtnText: {
+    color: COLORS.primary,
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  testResultBox: {
+    borderRadius: RADIUS.md,
+    padding: SPACING.sm,
+    marginBottom: SPACING.sm,
+  },
+  testResultSuccess: {
+    backgroundColor: '#dcfce7',
+    borderWidth: 1,
+    borderColor: '#86efac',
+  },
+  testResultError: {
+    backgroundColor: '#fee2e2',
+    borderWidth: 1,
+    borderColor: '#fca5a5',
+  },
+  testResultText: {
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  testResultTextSuccess: {
+    color: '#15803d',
+  },
+  testResultTextError: {
+    color: '#b91c1c',
+  },
+  saveBtn: {
+    backgroundColor: COLORS.accent,
+    height: 46,
+    borderRadius: RADIUS.md,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: SPACING.xs,
+  },
+  saveBtnText: {
+    color: COLORS.white,
+    fontSize: 15,
+    fontWeight: '800',
   },
 });

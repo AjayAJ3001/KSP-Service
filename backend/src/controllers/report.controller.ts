@@ -4,7 +4,7 @@ import { asyncHandler } from '../middleware/errorHandler';
 import { AuthRequest } from '../middleware/auth';
 
 export const getTripReport = asyncHandler(async (req: AuthRequest, res: Response): Promise<void> => {
-  const { from_date, to_date, party_id, driver_id, vehicle_id, status } = req.query;
+  const { from_date, to_date, party_id, driver_id, vehicle_id, unit_id, status } = req.query;
 
   let conditions = ['1=1'];
   const params: any[] = [];
@@ -15,6 +15,7 @@ export const getTripReport = asyncHandler(async (req: AuthRequest, res: Response
   if (party_id) { conditions.push(`t.party_id = $${paramIdx}`); params.push(party_id); paramIdx++; }
   if (driver_id) { conditions.push(`t.driver_id = $${paramIdx}`); params.push(driver_id); paramIdx++; }
   if (vehicle_id) { conditions.push(`t.vehicle_id = $${paramIdx}`); params.push(vehicle_id); paramIdx++; }
+  if (unit_id) { conditions.push(`t.unit_id = $${paramIdx}`); params.push(unit_id); paramIdx++; }
   if (status) { conditions.push(`t.status = $${paramIdx}`); params.push(status); paramIdx++; }
 
   const where = conditions.join(' AND ');
@@ -113,6 +114,7 @@ export const getAuditLogs = asyncHandler(async (req: AuthRequest, res: Response)
   const limit = parseInt(req.query.limit as string) || 50;
   const offset = (page - 1) * limit;
   const module = req.query.module as string;
+  const source = (req.query.source as string || '').toUpperCase();
   const from_date = req.query.from_date as string;
   const to_date = req.query.to_date as string;
 
@@ -120,6 +122,11 @@ export const getAuditLogs = asyncHandler(async (req: AuthRequest, res: Response)
   const params: any[] = [];
   let paramIdx = 1;
 
+  if (source && source !== 'ALL') {
+    conditions.push(`al.source = $${paramIdx}`);
+    params.push(source);
+    paramIdx++;
+  }
   if (module) { conditions.push(`al.module = $${paramIdx}`); params.push(module); paramIdx++; }
   if (from_date) { conditions.push(`al.created_at::date >= $${paramIdx}`); params.push(from_date); paramIdx++; }
   if (to_date) { conditions.push(`al.created_at::date <= $${paramIdx}`); params.push(to_date); paramIdx++; }
@@ -128,8 +135,17 @@ export const getAuditLogs = asyncHandler(async (req: AuthRequest, res: Response)
   const countResult = await query(`SELECT COUNT(*) FROM audit_logs al WHERE ${where}`, params);
   const total = parseInt(countResult.rows[0].count);
 
+  const countsResult = await query(
+    `SELECT 
+       COUNT(*) as total_all,
+       COUNT(*) FILTER (WHERE source = 'ADMIN') as total_admin,
+       COUNT(*) FILTER (WHERE source = 'MOBILE') as total_mobile
+     FROM audit_logs`
+  );
+  const counts = countsResult.rows[0] || { total_all: 0, total_admin: 0, total_mobile: 0 };
+
   const result = await query(
-    `SELECT al.*, u.username, u.name as user_name
+    `SELECT al.*, u.username, u.name as user_name, u.role as user_role
      FROM audit_logs al
      LEFT JOIN users u ON al.user_id = u.id
      WHERE ${where}
@@ -140,6 +156,6 @@ export const getAuditLogs = asyncHandler(async (req: AuthRequest, res: Response)
   res.json({
     success: true,
     message: 'Audit logs retrieved.',
-    data: { items: result.rows, total, page, limit, totalPages: Math.ceil(total / limit) },
+    data: { items: result.rows, total, page, limit, totalPages: Math.ceil(total / limit), counts },
   });
 });

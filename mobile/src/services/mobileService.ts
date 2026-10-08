@@ -36,6 +36,10 @@ export const mobileLookupService = {
     const res = await api.get('/vehicles', { params: { limit: 100, status: 'ACTIVE' } });
     return res.data;
   },
+  getExpiringVehicles: async (days: number = 30): Promise<ApiResponse<Vehicle[]>> => {
+    const res = await api.get('/vehicles/expiring', { params: { days } });
+    return res.data;
+  },
   getDrivers: async (): Promise<ApiResponse<{ items: Driver[] }>> => {
     const res = await api.get('/drivers', { params: { limit: 100, status: 'ACTIVE' } });
     return res.data;
@@ -66,6 +70,16 @@ export const mobileLookupService = {
   },
   getEffectiveOtherExpenseLimit: async (partyId?: number): Promise<ApiResponse<{ id: number; party_id: number | null; max_amount: number; description?: string }>> => {
     const res = await api.get('/other-expense-limits/effective', { params: { party_id: partyId } });
+    return res.data;
+  },
+  getCleaningExpenseRates: async (): Promise<ApiResponse<{ id: number; unit_name: string; cleaning_charge: number; loading_expense?: number; status: string }[]>> => {
+    const res = await api.get('/cleaning-expense-rates', { params: { status: 'ACTIVE' } });
+    return res.data;
+  },
+  getUnloadingRates: async (partyId?: number): Promise<ApiResponse<{ id: number; party_id: number; unit_number: number | null; unit_name: string; route_id: number | null; rate_per_ton: number; description?: string; status: string; party_name?: string }[]>> => {
+    const params: any = { status: 'ACTIVE' };
+    if (partyId) params.party_id = partyId;
+    const res = await api.get('/unloading-rates', { params });
     return res.data;
   },
 };

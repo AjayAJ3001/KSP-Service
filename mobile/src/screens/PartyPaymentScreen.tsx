@@ -9,6 +9,7 @@ import {
 import { ArrowLeft, ArrowRight, FileText } from 'lucide-react-native';
 import { Trip } from '../types';
 import { COLORS, SPACING, RADIUS, SHADOWS } from '../constants/theme';
+import { formatDateDMY } from '../utils/dateUtils';
 
 export const PartyPaymentScreen: React.FC<{ route: any; navigation: any }> = ({
   route,
@@ -59,7 +60,7 @@ export const PartyPaymentScreen: React.FC<{ route: any; navigation: any }> = ({
         <View style={styles.infoRow}>
           <Text style={styles.infoLabel}>Trip Date:</Text>
           <Text style={styles.infoValue}>
-            {new Date(trip.trip_date).toLocaleDateString('en-IN')}
+            {formatDateDMY(trip.trip_date)}
           </Text>
         </View>
 

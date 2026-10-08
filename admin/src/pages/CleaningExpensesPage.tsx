@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Droplets, Plus, Edit2, Trash2, Info } from 'lucide-react';
+import { Droplets, Plus, Edit2, Trash2 } from 'lucide-react';
 import { cleaningExpenseRateService } from '../services/adminService';
 import { CleaningExpenseRate } from '../types';
 import { DataTable, Column } from '../components/Common/DataTable';
@@ -13,7 +13,7 @@ export const CleaningExpensesPage: React.FC = () => {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [selectedRate, setSelectedRate] = useState<CleaningExpenseRate | null>(null);
   const [formData, setFormData] = useState({
-    loading_expense: '',
+    unit_name: '',
     cleaning_charge: '',
     description: '',
     status: 'ACTIVE' as 'ACTIVE' | 'INACTIVE',
@@ -39,12 +39,12 @@ export const CleaningExpensesPage: React.FC = () => {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!formData.loading_expense || !formData.cleaning_charge) {
-      setFormError('Loading expense and cleaning charge are required.');
+    if (!formData.unit_name.trim()) {
+      setFormError('Destination / Unit Name is required.');
       return;
     }
-    if (parseFloat(formData.loading_expense) < 0) {
-      setFormError('Loading expense must be a positive number.');
+    if (!formData.cleaning_charge) {
+      setFormError('Cleaning charge is required.');
       return;
     }
     if (parseFloat(formData.cleaning_charge) < 0) {
@@ -55,8 +55,8 @@ export const CleaningExpensesPage: React.FC = () => {
     try {
       setIsSubmitting(true);
       setFormError('');
-      const payload = {
-        loading_expense: parseFloat(formData.loading_expense),
+      const payload: Partial<CleaningExpenseRate> = {
+        unit_name: formData.unit_name.trim(),
         cleaning_charge: parseFloat(formData.cleaning_charge),
         description: formData.description.trim() || undefined,
         status: formData.status,
@@ -81,7 +81,7 @@ export const CleaningExpensesPage: React.FC = () => {
   const handleDelete = async (rate: CleaningExpenseRate) => {
     if (
       !confirm(
-        `Are you sure you want to delete the cleaning expense rate for Loading Expense Rs.${rate.loading_expense}?`
+        `Are you sure you want to delete the cleaning expense rate for "${rate.unit_name}"?`
       )
     )
       return;
@@ -102,7 +102,7 @@ export const CleaningExpensesPage: React.FC = () => {
   const openEditModal = (rate: CleaningExpenseRate) => {
     setSelectedRate(rate);
     setFormData({
-      loading_expense: String(rate.loading_expense),
+      unit_name: rate.unit_name,
       cleaning_charge: String(rate.cleaning_charge),
       description: rate.description || '',
       status: rate.status,
@@ -112,7 +112,7 @@ export const CleaningExpensesPage: React.FC = () => {
   };
 
   const resetForm = () => {
-    setFormData({ loading_expense: '', cleaning_charge: '', description: '', status: 'ACTIVE' });
+    setFormData({ unit_name: '', cleaning_charge: '', description: '', status: 'ACTIVE' });
     setFormError('');
   };
 
@@ -131,21 +131,18 @@ export const CleaningExpensesPage: React.FC = () => {
       ),
     },
     {
-      header: 'Loading Expense (Rs.)',
-      accessor: 'loading_expense',
+      header: 'Destination / Unit Name',
+      accessor: 'unit_name',
       render: (r) => (
         <span
           style={{
             fontWeight: 700,
-            fontSize: '15px',
-            color: 'var(--accent)',
-            background: '#eff6ff',
-            padding: '4px 12px',
-            borderRadius: '8px',
-            letterSpacing: '0.5px',
+            fontSize: '14px',
+            color: 'var(--text)',
+            letterSpacing: '0.3px',
           }}
         >
-          {fmt(r.loading_expense)}
+          {r.unit_name}
         </span>
       ),
     },
@@ -167,6 +164,7 @@ export const CleaningExpensesPage: React.FC = () => {
         </span>
       ),
     },
+
     {
       header: 'Description / Note',
       accessor: (r) => r.description || <span style={{ color: 'var(--text-muted)', fontStyle: 'italic' }}>—</span>,
@@ -201,36 +199,12 @@ export const CleaningExpensesPage: React.FC = () => {
             Cleaning Expense Rates
           </h2>
           <p style={{ color: 'var(--text-muted)', fontSize: '13.5px', marginTop: '4px' }}>
-            Define cleaning charges based on each truck's loading expense slab (Goodshed Loading Expense)
+            Configure cleaning charges per destination / unit ({rates.length} destinations configured)
           </p>
         </div>
         <button onClick={openCreateModal} className="btn btn-primary">
-          <Plus size={18} /> Add Slab
+          <Plus size={18} /> Add Cleaning Rate
         </button>
-      </div>
-
-      {/* Info Banner */}
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'flex-start',
-          gap: '10px',
-          background: '#eff6ff',
-          border: '1px solid #bfdbfe',
-          borderRadius: '10px',
-          padding: '12px 16px',
-          marginBottom: '20px',
-          fontSize: '13px',
-          color: '#1e40af',
-        }}
-      >
-        <Info size={16} style={{ marginTop: '2px', flexShrink: 0 }} />
-        <div>
-          <strong>How it works:</strong> Each truck has a <em>Goodshed Loading Expense</em> (set in the Vehicles master).
-          When a truck is used on a trip, its loading expense amount is looked up here to automatically determine the
-          cleaning charge. E.g., a truck with Loading Expense <strong>Rs. 500</strong> gets a Cleaning Charge of{' '}
-          <strong>Rs. 30</strong>.
-        </div>
       </div>
 
       {/* Data Table */}
@@ -250,8 +224,8 @@ export const CleaningExpensesPage: React.FC = () => {
             }}
           >
             <Droplets size={40} style={{ opacity: 0.25, marginBottom: '12px' }} />
-            <p style={{ fontWeight: 600 }}>No cleaning expense slabs configured yet.</p>
-            <p style={{ fontSize: '13px' }}>Click "Add Slab" to add your first rate.</p>
+            <p style={{ fontWeight: 600 }}>No cleaning expense rates configured yet.</p>
+            <p style={{ fontSize: '13px' }}>Click "Add Cleaning Rate" to add your first rate.</p>
           </div>
         )}
       </div>
@@ -278,30 +252,21 @@ export const CleaningExpensesPage: React.FC = () => {
         )}
 
         <form onSubmit={handleSubmit}>
-          {/* Loading Expense */}
+          {/* Unit Name / Destination */}
           <div className="form-group">
             <label className="form-label">
-              Loading Expense Amount (Rs.) *
-              <span
-                style={{
-                  marginLeft: '8px',
-                  fontSize: '11.5px',
-                  color: 'var(--text-muted)',
-                  fontWeight: 400,
-                }}
-              >
-                Truck's Goodshed Loading Expense (e.g. 500, 1000, 1280)
+              Destination / Unit Name *
+              <span style={{ marginLeft: '8px', fontSize: '11.5px', color: 'var(--text-muted)', fontWeight: 400 }}>
+                e.g. SIPCOT, RGS - VAVIKADAI, NAMAKKAL
               </span>
             </label>
             <input
-              type="number"
-              step="1"
-              min="0"
+              type="text"
               required
               className="form-control"
-              placeholder="e.g. 500"
-              value={formData.loading_expense}
-              onChange={(e) => setFormData({ ...formData, loading_expense: e.target.value })}
+              placeholder="e.g. SIPCOT"
+              value={formData.unit_name}
+              onChange={(e) => setFormData({ ...formData, unit_name: e.target.value })}
             />
           </div>
 
@@ -309,15 +274,8 @@ export const CleaningExpensesPage: React.FC = () => {
           <div className="form-group">
             <label className="form-label">
               Cleaning Charge (Rs.) *
-              <span
-                style={{
-                  marginLeft: '8px',
-                  fontSize: '11.5px',
-                  color: 'var(--text-muted)',
-                  fontWeight: 400,
-                }}
-              >
-                Charge applied when truck uses this slab (e.g. 30, 50, 1000)
+              <span style={{ marginLeft: '8px', fontSize: '11.5px', color: 'var(--text-muted)', fontWeight: 400 }}>
+                Charge applied per trip to this destination
               </span>
             </label>
             <input
@@ -338,7 +296,7 @@ export const CleaningExpensesPage: React.FC = () => {
             <input
               type="text"
               className="form-control"
-              placeholder="e.g. Loading Rs.500 → Cleaning Rs.30"
+              placeholder="e.g. SIPCOT - Cleaning Rs.30"
               value={formData.description}
               onChange={(e) => setFormData({ ...formData, description: e.target.value })}
             />

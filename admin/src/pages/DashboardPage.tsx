@@ -17,6 +17,7 @@ import { dashboardService } from '../services/adminService';
 import { DashboardData, Trip } from '../types';
 import { StatCard } from '../components/Common/StatCard';
 import { StatusBadge } from '../components/Common/StatusBadge';
+import { formatDateDMY } from '../utils/dateUtils';
 
 export const DashboardPage: React.FC = () => {
   const [data, setData] = useState<DashboardData | null>(null);
@@ -75,7 +76,77 @@ export const DashboardPage: React.FC = () => {
         </div>
       </div>
 
+      {/* ── 30-Day Compliance Expiry Alerts ──────────────────────────── */}
+      {data?.compliance_alerts && data.compliance_alerts.length > 0 && (() => {
+        const fmtD = (d?: string | null) => {
+          if (!d) return null;
+          return new Date(d).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
+        };
+        const dLeft = (d?: string | null) => {
+          if (!d) return null;
+          return Math.ceil((new Date(d).getTime() - Date.now()) / 86400000);
+        };
+        const docBadge = (label: string, date?: string | null): string | null => {
+          if (!date) return null;
+          const left = dLeft(date);
+          if (left === null || left > 30) return null;
+          const expired = left < 0;
+          const bg = expired ? '#fef2f2' : '#fffbeb';
+          const color = expired ? '#b91c1c' : '#92400e';
+          const border = expired ? '#fca5a5' : '#fcd34d';
+          const text = expired ? `EXPIRED ${Math.abs(left)}d ago` : left === 0 ? 'Expires TODAY' : `${left}d left`;
+          return `<span style="display:inline-flex;align-items:center;gap:4px;background:${bg};color:${color};border:1px solid ${border};border-radius:6px;padding:2px 8px;font-size:11px;font-weight:700;white-space:nowrap">${expired ? '❌' : '⚠️'} ${label}: ${fmtD(date)} (${text})</span>`;
+        };
+        return (
+          <div style={{
+            background: '#fff7ed', border: '2px solid #f97316',
+            borderRadius: '12px', padding: '16px 20px', marginBottom: '24px',
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '12px' }}>
+              <AlertTriangle size={20} color="#ea580c" />
+              <span style={{ fontSize: '14px', fontWeight: 800, color: '#c2410c' }}>
+                COMPLIANCE EXPIRY ALERT — {data.compliance_alerts.length} Vehicle{data.compliance_alerts.length > 1 ? 's' : ''} Require Attention (Within 30 Days)
+              </span>
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              {data.compliance_alerts.map((a) => {
+                const badges = [
+                  docBadge('FC', a.fc_expiry_date),
+                  docBadge('Insurance', a.insurance_expiry_date),
+                  docBadge('Permit', a.permit_expiry_date),
+                  docBadge('Road Tax', a.tax_expiry_date),
+                ].filter(Boolean);
+                if (!badges.length) return null;
+                return (
+                  <div key={a.lorry_number} style={{
+                    display: 'flex', alignItems: 'center', gap: '10px',
+                    background: '#fff', borderRadius: '8px', padding: '8px 14px',
+                    border: '1px solid #fed7aa', flexWrap: 'wrap',
+                  }}>
+                    <span style={{
+                      fontWeight: 800, fontSize: '13px', color: '#1e293b',
+                      background: '#f1f5f9', padding: '4px 10px', borderRadius: '6px',
+                      minWidth: '110px', textAlign: 'center',
+                    }}>🚛 {a.lorry_number}</span>
+                    <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}
+                      dangerouslySetInnerHTML={{ __html: badges.join('') }} />
+                  </div>
+                );
+              })}
+            </div>
+            <div style={{ marginTop: '10px', fontSize: '12px', color: '#7c3aed', fontWeight: 600 }}>
+              → Go to{' '}
+              <button onClick={() => navigate('/vehicles')} style={{ background: 'none', border: 'none', color: '#7c3aed', fontWeight: 700, cursor: 'pointer', textDecoration: 'underline', fontSize: '12px', padding: 0 }}>
+                Fleet Vehicles
+              </button>
+              {' '}to renew documents.
+            </div>
+          </div>
+        );
+      })()}
+
       {/* Primary KPI Stats Grid */}
+
       <div className="grid-cols-4" style={{ marginBottom: '24px' }}>
         <StatCard
           title="Today's Trips"
@@ -221,7 +292,7 @@ export const DashboardPage: React.FC = () => {
               ) : (
                 data.recent_trips.map((trip: Trip) => (
                   <tr key={trip.id}>
-                    <td>{new Date(trip.trip_date).toLocaleDateString('en-IN')}</td>
+                    <td>{formatDateDMY(trip.trip_date)}</td>
                     <td><strong>{trip.lorry_number}</strong></td>
                     <td>{trip.party_name}</td>
                     <td>

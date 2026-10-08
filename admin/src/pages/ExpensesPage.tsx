@@ -4,6 +4,7 @@ import { tripService, expenseService } from '../services/adminService';
 import { Trip, DriverExpense } from '../types';
 import { Modal } from '../components/Common/Modal';
 import { StatusBadge } from '../components/Common/StatusBadge';
+import { formatDateDMY } from '../utils/dateUtils';
 
 export const ExpensesPage: React.FC = () => {
   const [trips, setTrips] = useState<Trip[]>([]);
@@ -182,7 +183,7 @@ export const ExpensesPage: React.FC = () => {
             <option value="">-- Choose a Trip --</option>
             {trips.map((t) => (
               <option key={t.id} value={t.id}>
-                Trip #{t.id} — {t.lorry_number} ({t.driver_name}) | {t.to_location || t.from_location} ({new Date(t.trip_date).toLocaleDateString('en-IN')})
+                Trip #{t.id} — {t.lorry_number} ({t.driver_name}) | {t.to_location || t.from_location} ({formatDateDMY(t.trip_date)})
               </option>
             ))}
           </select>
@@ -275,7 +276,7 @@ export const ExpensesPage: React.FC = () => {
                         <td>{exp.description || '—'}</td>
                         <td style={{ fontWeight: 700, fontSize: '14px' }}>{formatCurrency(exp.amount)}</td>
                         <td>{exp.created_by_name || 'System User'}</td>
-                        <td>{exp.created_at ? new Date(exp.created_at).toLocaleDateString('en-IN') : '—'}</td>
+                        <td>{exp.created_at ? formatDateDMY(exp.created_at) : '—'}</td>
                         <td>
                           <div style={{ display: 'flex', gap: '6px' }}>
                             <button onClick={() => openEditModal(exp)} className="btn btn-outline btn-sm" title="Edit">

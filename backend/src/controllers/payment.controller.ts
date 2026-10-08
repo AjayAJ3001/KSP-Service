@@ -38,16 +38,25 @@ export const addPayment = asyncHandler(async (req: AuthRequest, res: Response): 
     if (tripResult.rows.length === 0) throw new AppError('Trip not found.', 404);
     const trip = tripResult.rows[0];
 
-    if (trip.status === 'SETTLED' || trip.status === 'CANCELLED') {
-      throw new AppError('Cannot add payment to a settled or cancelled trip.', 400);
+    if (trip.status === 'CANCELLED') {
+      throw new AppError('Cannot add payment to a cancelled trip.', 400);
     }
 
-    const newTotal = parseFloat(trip.total_received) + parseFloat(received_amount);
-    const balance_due = parseFloat(trip.total_freight) - newTotal;
+    const currentReceived = parseFloat(trip.total_received) || 0;
+    const totalFreight = parseFloat(trip.total_freight) || 0;
+    const remainingBalance = totalFreight - currentReceived;
 
-    if (newTotal > parseFloat(trip.total_freight)) {
-      throw new AppError(`Payment amount exceeds remaining balance of ₹${balance_due.toFixed(2)}.`, 400);
+    if (remainingBalance <= 0) {
+      throw new AppError('This trip is already fully paid.', 400);
     }
+
+    const amount = parseFloat(received_amount);
+    if (amount > remainingBalance + 0.01) {
+      throw new AppError(`Payment amount exceeds remaining balance of ?${remainingBalance.toFixed(2)}.`, 400);
+    }
+
+    const newTotal = currentReceived + amount;
+    const balance_due = Math.max(0, totalFreight - newTotal);
 
     // Determine payment status
     const payment_status = balance_due <= 0 ? 'RECEIVED' : 'PARTIAL';

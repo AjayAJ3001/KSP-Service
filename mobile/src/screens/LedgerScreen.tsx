@@ -11,6 +11,7 @@ import { BookOpen, Building2, TrendingUp, AlertCircle } from 'lucide-react-nativ
 import { mobileLookupService, mobilePaymentService } from '../services/mobileService';
 import { Party } from '../types';
 import { COLORS, SPACING, RADIUS, SHADOWS } from '../constants/theme';
+import { formatDateDMY } from '../utils/dateUtils';
 
 export const LedgerScreen: React.FC = () => {
   const [parties, setParties] = useState<Party[]>([]);
@@ -130,7 +131,7 @@ export const LedgerScreen: React.FC = () => {
             <View key={idx} style={styles.entryCard}>
               <View style={styles.entryHeader}>
                 <Text style={styles.entryDate}>
-                  {new Date(entry.trip_date).toLocaleDateString('en-IN')}
+                  {formatDateDMY(entry.trip_date)}
                 </Text>
                 <View
                   style={[

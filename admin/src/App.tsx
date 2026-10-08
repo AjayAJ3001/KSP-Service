@@ -10,9 +10,6 @@ import { DriversPage } from './pages/DriversPage';
 import { VehiclesPage } from './pages/VehiclesPage';
 import { PartiesPage } from './pages/PartiesPage';
 
-import { RoutesPage } from './pages/RoutesPage';
-import { FreightRatesPage } from './pages/FreightRatesPage';
-import { ExpenseRatesPage } from './pages/ExpenseRatesPage';
 import { TripsPage } from './pages/TripsPage';
 import { PaymentsPage } from './pages/PaymentsPage';
 import { ExpensesPage } from './pages/ExpensesPage';
@@ -74,8 +71,8 @@ export function App() {
             <Route path="vehicles" element={<VehiclesPage />} />
             <Route path="parties" element={<PartiesPage />} />
             <Route path="routes" element={<Navigate to="/parties" replace />} />
-            <Route path="freight-rates" element={<FreightRatesPage />} />
-            <Route path="expense-rates" element={<ExpenseRatesPage />} />
+            <Route path="freight-rates" element={<Navigate to="/parties" replace />} />
+            <Route path="expense-rates" element={<Navigate to="/expenses" replace />} />
             <Route path="cleaning-expenses" element={<CleaningExpensesPage />} />
             <Route path="unloading-rates" element={<UnloadingRatesPage />} />
             <Route path="driver-bata" element={<DriverBataPage />} />

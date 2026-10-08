@@ -20,8 +20,10 @@ function freePort(port: number): void {
 
       for (const line of lines) {
         const parts = line.trim().split(/\s+/);
+        // Only target LISTENING sockets on port
         const localAddr = parts[1] || '';
-        if (localAddr.endsWith(`:${port}`)) {
+        const state = parts[3] || '';
+        if (localAddr.endsWith(`:${port}`) && (state === 'LISTENING' || parts.includes('LISTENING'))) {
           const pid = parseInt(parts[parts.length - 1], 10);
           if (pid && pid !== currentPid && !isNaN(pid)) {
             try {
@@ -43,35 +45,35 @@ function freePort(port: number): void {
 
 const startServer = async () => {
   try {
+    // Free stale process before listening
+    freePort(PORT);
+
     // Test database connection
     const client = await pool.connect();
     console.log('✅ PostgreSQL connected successfully');
+    await client.query(`
+      ALTER TABLE vehicles 
+        ADD COLUMN IF NOT EXISTS rc_reg_date DATE,
+        ADD COLUMN IF NOT EXISTS rc_expiry_date DATE,
+        ADD COLUMN IF NOT EXISTS rc_photo_back_url TEXT,
+        ADD COLUMN IF NOT EXISTS tds_number VARCHAR(50),
+        ADD COLUMN IF NOT EXISTS tds_expiry_date DATE,
+        ADD COLUMN IF NOT EXISTS tds_certificate_url TEXT,
+        ADD COLUMN IF NOT EXISTS tds_certificate_url_2 TEXT;
+      UPDATE vehicles SET tds_number = dts_number WHERE tds_number IS NULL AND dts_number IS NOT NULL;
+      UPDATE vehicles SET tds_expiry_date = dts_expiry_date WHERE tds_expiry_date IS NULL AND dts_expiry_date IS NOT NULL;
+      UPDATE vehicles SET tds_certificate_url = dts_certificate_url WHERE tds_certificate_url IS NULL AND dts_certificate_url IS NOT NULL;
+      UPDATE vehicles SET rc_reg_date = rc_expiry_date WHERE rc_reg_date IS NULL AND rc_expiry_date IS NOT NULL;
+    `);
     client.release();
 
     const server = http.createServer(app);
-    let isListening = false;
 
     server.on('error', (err: any) => {
-      if (err.code === 'EADDRINUSE') {
-        console.warn(`⚠️ Port ${PORT} is busy. Automatically clearing stale process and retrying...`);
-        freePort(PORT);
-        setTimeout(() => {
-          if (!isListening) {
-            server.listen(PORT, () => {
-              isListening = true;
-              console.log(`🚀 KSP Transport API running on port ${PORT}`);
-              console.log(`   Environment: ${process.env.NODE_ENV || 'development'}`);
-              console.log(`   Health: http://localhost:${PORT}/health`);
-            });
-          }
-        }, 600);
-      } else {
-        console.error('❌ Server error:', err);
-      }
+      console.error('❌ Server error:', err);
     });
 
     server.listen(PORT, () => {
-      isListening = true;
       console.log(`🚀 KSP Transport API running on port ${PORT}`);
       console.log(`   Environment: ${process.env.NODE_ENV || 'development'}`);
       console.log(`   Health: http://localhost:${PORT}/health`);

@@ -9,6 +9,18 @@ import { PartyPaymentScreen } from '../screens/PartyPaymentScreen';
 import { DriverExpensesScreen } from '../screens/DriverExpensesScreen';
 import { SettlementReceiptScreen } from '../screens/SettlementReceiptScreen';
 import { GiveTruckAdvanceScreen } from '../screens/GiveTruckAdvanceScreen';
+
+// Admin Screens
+import { AdminDashboardScreen } from '../screens/admin/AdminDashboardScreen';
+import { AdminReportsScreen } from '../screens/admin/AdminReportsScreen';
+import { AdminAuditLogsScreen } from '../screens/admin/AdminAuditLogsScreen';
+import { AdminUsersScreen } from '../screens/admin/AdminUsersScreen';
+import { AdminVehiclesScreen } from '../screens/admin/AdminVehiclesScreen';
+import { AdminDriversScreen } from '../screens/admin/AdminDriversScreen';
+import { AdminPartiesScreen } from '../screens/admin/AdminPartiesScreen';
+import { AdminMastersScreen } from '../screens/admin/AdminMastersScreen';
+import { AdminTripsScreen } from '../screens/admin/AdminTripsScreen';
+
 import { RootStackParamList } from '../types';
 import { COLORS } from '../constants/theme';
 
@@ -69,6 +81,54 @@ export const RootNavigator: React.FC = () => {
         component={SettlementReceiptScreen}
         options={{ title: 'Settlement Slip' }}
       />
+
+      {/* Admin Panel Screens */}
+      <Stack.Screen
+        name="AdminDashboard"
+        component={AdminDashboardScreen}
+        options={{ title: 'Admin Control Center' }}
+      />
+      <Stack.Screen
+        name="AdminReports"
+        component={AdminReportsScreen}
+        options={{ title: 'Reports & Analytics' }}
+      />
+      <Stack.Screen
+        name="AdminAuditLogs"
+        component={AdminAuditLogsScreen}
+        options={{ title: 'Audit Activity Logs' }}
+      />
+      <Stack.Screen
+        name="AdminUsers"
+        component={AdminUsersScreen}
+        options={{ title: 'User Accounts' }}
+      />
+      <Stack.Screen
+        name="AdminVehicles"
+        component={AdminVehiclesScreen}
+        options={{ title: 'Fleet Lorries Master' }}
+      />
+      <Stack.Screen
+        name="AdminDrivers"
+        component={AdminDriversScreen}
+        options={{ title: 'Drivers Master' }}
+      />
+      <Stack.Screen
+        name="AdminParties"
+        component={AdminPartiesScreen}
+        options={{ title: 'Parties Master' }}
+      />
+      <Stack.Screen
+        name="AdminMasters"
+        component={AdminMastersScreen}
+        options={{ title: 'Rates & Masters Hub' }}
+      />
+      <Stack.Screen
+        name="AdminTrips"
+        component={AdminTripsScreen}
+        options={{ title: 'Trips Operations' }}
+      />
     </Stack.Navigator>
   );
 };
+
