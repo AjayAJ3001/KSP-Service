@@ -294,11 +294,11 @@ export const NewTripScreen: React.FC<Props> = ({ navigation, route }) => {
 
   const handleRouteDropdownPress = () => {
     if (!selectedPartyId) {
-      setError('Please select a Party / Client Account first to see their assigned routes.');
+      setError('Please select a Party / Client Account first to see their assigned units.');
       return;
     }
 
-    // Filter routes specifically configured for this selected party
+    // Filter units specifically configured for this selected party
     const partyRates = freightRates.filter((fr) => fr.party_id === selectedPartyId);
 
     let routeItems: { id: number; label: string; subLabel?: string }[] = [];
@@ -307,28 +307,28 @@ export const NewTripScreen: React.FC<Props> = ({ navigation, route }) => {
       routeItems = partyRates.map((fr) => {
         const route = routes.find((r) => r.id === fr.route_id);
         const fromLoc = route?.from_location || fr.from_location || 'Origin';
-        const toLoc = route?.to_location || fr.to_location || 'Destination';
+        const toLoc = route?.to_location || fr.to_location || 'Unit';
         const unit = units.find((u) => u.id === fr.unit_id);
         const unitName = unit ? unit.name : (fr.unit_name || 'Unit');
         return {
           id: fr.route_id,
-          label: `${fromLoc} → ${toLoc}`,
-          subLabel: `Rate: ₹${parseFloat(String(fr.rate_per_unit)).toLocaleString('en-IN')} / ${unitName}${
+          label: toLoc,
+          subLabel: `From: ${fromLoc} • Rate: ₹${parseFloat(String(fr.rate_per_unit)).toLocaleString('en-IN')} / ${unitName}${
             route?.distance_km ? ` • ${route.distance_km} KM` : ''
           }`,
         };
       });
     } else {
-      // Fallback: If no party-specific rates are created, show all active routes
+      // Fallback: If no party-specific rates are created, show all active routes/units
       routeItems = routes.map((r) => ({
         id: r.id,
-        label: `${r.from_location} → ${r.to_location}`,
-        subLabel: r.distance_km ? `${r.distance_km} KM Distance` : undefined,
+        label: r.to_location,
+        subLabel: `From: ${r.from_location}${r.distance_km ? ` • ${r.distance_km} KM` : ''}`,
       }));
     }
 
     openDropdown(
-      `Routes for ${selectedParty?.name || 'Selected Party'}`,
+      `Units for ${selectedParty?.name || 'Selected Party'}`,
       routeItems,
       selectedRouteId,
       (id) => {
@@ -719,9 +719,9 @@ export const NewTripScreen: React.FC<Props> = ({ navigation, route }) => {
             </TouchableOpacity>
           </View>
 
-          {/* Route Dropdown (Filtered to Selected Party) */}
+          {/* Unit / Destination Dropdown (Filtered to Selected Party) */}
           <View style={styles.formRow}>
-            <Text style={styles.fieldLabel}>Route (From → To) *</Text>
+            <Text style={styles.fieldLabel}>Unit (Destination) *</Text>
             <TouchableOpacity
               style={[
                 styles.dropdownBtn,
@@ -733,9 +733,9 @@ export const NewTripScreen: React.FC<Props> = ({ navigation, route }) => {
                 <MapPin size={18} color={selectedPartyId ? COLORS.accent : COLORS.textLight} />
                 <Text style={selectedRoute ? styles.dropdownSelectedText : styles.dropdownPlaceholder}>
                   {selectedRoute
-                    ? `${selectedRoute.from_location} → ${selectedRoute.to_location}`
+                    ? (selectedRoute.to_location || `${selectedRoute.from_location} → ${selectedRoute.to_location}`)
                     : selectedPartyId
-                    ? 'Select Route for ' + (selectedParty?.name || 'Party')
+                    ? 'Select Unit for ' + (selectedParty?.name || 'Party')
                     : 'Select Party first...'}
                 </Text>
               </View>

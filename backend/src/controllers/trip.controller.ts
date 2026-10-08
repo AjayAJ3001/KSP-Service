@@ -15,6 +15,7 @@ export const getTrips = asyncHandler(async (req: AuthRequest, res: Response): Pr
   const from_date = req.query.from_date as string;
   const to_date = req.query.to_date as string;
   const unit_id = req.query.unit_id as string;
+  const route_id = req.query.route_id as string;
   const created_by = req.query.created_by as string;
 
   let conditions = ['1=1'];
@@ -33,6 +34,7 @@ export const getTrips = asyncHandler(async (req: AuthRequest, res: Response): Pr
   if (driver_id) { conditions.push(`t.driver_id = $${paramIdx}`); params.push(driver_id); paramIdx++; }
   if (vehicle_id) { conditions.push(`t.vehicle_id = $${paramIdx}`); params.push(vehicle_id); paramIdx++; }
   if (unit_id) { conditions.push(`t.unit_id = $${paramIdx}`); params.push(unit_id); paramIdx++; }
+  if (route_id) { conditions.push(`t.route_id = $${paramIdx}`); params.push(route_id); paramIdx++; }
   if (from_date) { conditions.push(`t.trip_date >= $${paramIdx}`); params.push(from_date); paramIdx++; }
   if (to_date) { conditions.push(`t.trip_date <= $${paramIdx}`); params.push(to_date); paramIdx++; }
 

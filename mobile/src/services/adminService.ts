@@ -339,6 +339,10 @@ export const adminCleaningExpenseRateService = {
     const res = await api.post('/cleaning-expense-rates', data);
     return res.data;
   },
+  updateCleaningExpenseRate: async (id: number, data: Partial<CleaningExpenseRate>): Promise<ApiResponse<CleaningExpenseRate>> => {
+    const res = await api.put(`/cleaning-expense-rates/${id}`, data);
+    return res.data;
+  },
   deleteCleaningExpenseRate: async (id: number): Promise<ApiResponse> => {
     const res = await api.delete(`/cleaning-expense-rates/${id}`);
     return res.data;
@@ -353,6 +357,10 @@ export const adminUnloadingRateService = {
   },
   createUnloadingRate: async (data: Partial<UnloadingRate>): Promise<ApiResponse<UnloadingRate>> => {
     const res = await api.post('/unloading-rates', data);
+    return res.data;
+  },
+  updateUnloadingRate: async (id: number, data: Partial<UnloadingRate>): Promise<ApiResponse<UnloadingRate>> => {
+    const res = await api.put(`/unloading-rates/${id}`, data);
     return res.data;
   },
   deleteUnloadingRate: async (id: number): Promise<ApiResponse> => {
@@ -371,6 +379,10 @@ export const adminDriverBataRateService = {
     const res = await api.post('/driver-bata-rates', data);
     return res.data;
   },
+  updateDriverBataRate: async (id: number, data: Partial<DriverBataRate>): Promise<ApiResponse<DriverBataRate>> => {
+    const res = await api.put(`/driver-bata-rates/${id}`, data);
+    return res.data;
+  },
   deleteDriverBataRate: async (id: number): Promise<ApiResponse> => {
     const res = await api.delete(`/driver-bata-rates/${id}`);
     return res.data;
@@ -385,6 +397,10 @@ export const adminOtherExpenseLimitService = {
   },
   createOtherExpenseLimit: async (data: Partial<OtherExpenseLimit>): Promise<ApiResponse<OtherExpenseLimit>> => {
     const res = await api.post('/other-expense-limits', data);
+    return res.data;
+  },
+  updateOtherExpenseLimit: async (id: number, data: Partial<OtherExpenseLimit>): Promise<ApiResponse<OtherExpenseLimit>> => {
+    const res = await api.put(`/other-expense-limits/${id}`, data);
     return res.data;
   },
   deleteOtherExpenseLimit: async (id: number): Promise<ApiResponse> => {
@@ -417,6 +433,21 @@ export const adminOwnerAdvanceService = {
     notes?: string;
   }): Promise<ApiResponse<OwnerAdvance>> => {
     const res = await api.post('/owner-advances', data);
+    return res.data;
+  },
+  updateOwnerAdvance: async (
+    id: number,
+    data: Partial<{
+      owner_id: number;
+      manager_id: number;
+      amount: number;
+      advance_date: string;
+      payment_mode: string;
+      screenshot_url: string;
+      notes: string;
+    }>
+  ): Promise<ApiResponse<OwnerAdvance>> => {
+    const res = await api.put(`/owner-advances/${id}`, data);
     return res.data;
   },
   deleteOwnerAdvance: async (id: number): Promise<ApiResponse> => {

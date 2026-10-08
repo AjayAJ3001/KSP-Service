@@ -21,6 +21,7 @@ import {
   MapPin,
   User,
   Edit2,
+  Trash2,
   RefreshCw,
 } from 'lucide-react-native';
 import { adminPartyService } from '../../services/adminService';
@@ -141,6 +142,25 @@ export const AdminPartiesScreen: React.FC<{ navigation: any }> = ({ navigation }
     ]);
   };
 
+  const handleDeleteParty = (p: Party) => {
+    Alert.alert('Delete Party', `Are you sure you want to delete party "${p.name}"? This action cannot be undone.`, [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Delete',
+        style: 'destructive',
+        onPress: async () => {
+          try {
+            await adminPartyService.deleteParty(p.id);
+            Alert.alert('Deleted', `Party ${p.name} deleted.`);
+            loadParties();
+          } catch (e: any) {
+            Alert.alert('Delete Failed', e.message);
+          }
+        },
+      },
+    ]);
+  };
+
   return (
     <View style={styles.container}>
       {/* Search Header */}
@@ -212,6 +232,9 @@ export const AdminPartiesScreen: React.FC<{ navigation: any }> = ({ navigation }
                     </View>
                     <TouchableOpacity style={styles.editBtn} onPress={() => openEditModal(p)}>
                       <Edit2 size={14} color="#2563eb" />
+                    </TouchableOpacity>
+                    <TouchableOpacity style={[styles.editBtn, { backgroundColor: '#fef2f2' }]} onPress={() => handleDeleteParty(p)}>
+                      <Trash2 size={14} color="#ef4444" />
                     </TouchableOpacity>
                   </View>
                 </View>

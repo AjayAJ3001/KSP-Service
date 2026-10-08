@@ -1,7 +1,7 @@
 import api from './api';
 import {
   User, Driver, Vehicle, Party, Owner, OwnerAdvance, Unit, Route, FreightRate, ExpenseRate, CleaningExpenseRate, UnloadingRate, DriverBataRate, OtherExpenseLimit,
-  Trip, TripPayment, DriverExpense, Settlement, AuditLog, DashboardData,
+  Trip, TripPayment, DriverExpense, Settlement, DriverSettlementPayment, AuditLog, DashboardData,
   ApiResponse, PaginatedData
 } from '../types';
 
@@ -303,8 +303,22 @@ export const expenseService = {
 
 // Settlement Service
 export const settlementService = {
-  getSettlements: async (params?: { page?: number; limit?: number; status?: string }): Promise<ApiResponse<PaginatedData<Settlement>>> => {
+  getSettlements: async (params?: {
+    page?: number;
+    limit?: number;
+    status?: string;
+    from_date?: string;
+    to_date?: string;
+    driver_id?: string | number;
+    vehicle_id?: string | number;
+    party_id?: string | number;
+    search?: string;
+  }): Promise<ApiResponse<PaginatedData<Settlement>>> => {
     const res = await api.get('/settlements', { params });
+    return res.data;
+  },
+  getSettlementById: async (id: number): Promise<ApiResponse<Settlement>> => {
+    const res = await api.get(`/settlements/${id}`);
     return res.data;
   },
   getSettlementByTripId: async (tripId: number): Promise<ApiResponse<Settlement>> => {
@@ -317,6 +331,18 @@ export const settlementService = {
   },
   verifySettlement: async (id: number): Promise<ApiResponse<Settlement>> => {
     const res = await api.patch(`/settlements/${id}/verify`);
+    return res.data;
+  },
+  settlePayment: async (id: number, data: { payment_mode: 'CASH' | 'UPI' | 'BANK_TRANSFER'; payment_date?: string; paid_amount?: number; reference_no?: string; notes?: string }): Promise<ApiResponse<Settlement>> => {
+    const res = await api.post(`/settlements/${id}/settle`, data);
+    return res.data;
+  },
+  getSettlementPayments: async (id: number): Promise<ApiResponse<DriverSettlementPayment[]>> => {
+    const res = await api.get(`/settlements/${id}/payments`);
+    return res.data;
+  },
+  deleteSettlementPayment: async (paymentId: number): Promise<ApiResponse> => {
+    const res = await api.delete(`/settlements/payments/${paymentId}`);
     return res.data;
   },
   deleteSettlement: async (id: number): Promise<ApiResponse> => {

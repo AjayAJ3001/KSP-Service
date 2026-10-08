@@ -128,7 +128,7 @@ export const extractTextFromFileOrData = async (fileOrData: File | string): Prom
                 ctx.fillStyle = '#ffffff';
                 ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-                await page.render({ canvasContext: ctx, viewport }).promise;
+                await page.render({ canvasContext: ctx, viewport } as any).promise;
 
                 // Convert rendered page to crisp PNG data URL
                 const pngDataUrl = canvas.toDataURL('image/png');

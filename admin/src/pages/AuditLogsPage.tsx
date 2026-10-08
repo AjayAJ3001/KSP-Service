@@ -1,4 +1,4 @@
-﻿import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { History, Eye, Smartphone, Laptop, Globe, Calendar, RefreshCw, Printer, Download, Search } from 'lucide-react';
 import { auditLogService } from '../services/adminService';
 import { AuditLog } from '../types';
@@ -412,62 +412,60 @@ export const AuditLogsPage: React.FC = () => {
           style={{
             display: 'flex',
             alignItems: 'center',
-            justifyContent: 'space-between',
             flexWrap: 'wrap',
             gap: '14px',
             paddingBottom: '14px',
             borderBottom: '1px solid var(--border-color, #e5e7eb)',
           }}
         >
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 }}>
             <span style={{ fontSize: '13.5px', fontWeight: 700, color: 'var(--text-secondary, #374151)' }}>
               Filter by Date:
             </span>
           </div>
 
-          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-              <span style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-muted)' }}>From:</span>
-              <DateField
-                style={{ width: '140px', height: '38px' }}
-                value={fromDate}
-                onChange={(e) => {
-                  setFromDate(e.target.value);
-                  setPage(1);
-                }}
-              />
-            </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-              <span style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-muted)' }}>To:</span>
-              <DateField
-                style={{ width: '140px', height: '38px' }}
-                value={toDate}
-                onChange={(e) => {
-                  setToDate(e.target.value);
-                  setPage(1);
-                }}
-              />
-            </div>
-            <button
-              type="button"
-              onClick={handleThisWeekClick}
-              className={`btn btn-sm ${isThisWeekActive ? 'btn-primary' : 'btn-outline'}`}
-              style={{
-                height: '38px',
-                padding: '0 14px',
-                fontSize: '13px',
-                fontWeight: 600,
-                display: 'flex',
-                alignItems: 'center',
-                gap: '6px',
-                borderRadius: '6px',
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexShrink: 0 }}>
+            <span style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-muted)' }}>From:</span>
+            <DateField
+              style={{ width: '160px', height: '38px' }}
+              value={fromDate}
+              onChange={(e) => {
+                setFromDate(e.target.value);
+                setPage(1);
               }}
-              title="Filter by current week"
-            >
-              <Calendar size={14} />
-              This Week
-            </button>
+            />
           </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexShrink: 0 }}>
+            <span style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-muted)' }}>To:</span>
+            <DateField
+              style={{ width: '160px', height: '38px' }}
+              value={toDate}
+              onChange={(e) => {
+                setToDate(e.target.value);
+                setPage(1);
+              }}
+            />
+          </div>
+          <button
+            type="button"
+            onClick={handleThisWeekClick}
+            className={`btn btn-sm ${isThisWeekActive ? 'btn-primary' : 'btn-outline'}`}
+            style={{
+              height: '38px',
+              padding: '0 14px',
+              fontSize: '13px',
+              fontWeight: 600,
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              borderRadius: '6px',
+              flexShrink: 0,
+            }}
+            title="Filter by current week"
+          >
+            <Calendar size={14} />
+            This Week
+          </button>
         </div>
 
         {/* Row 2: Module Filter + Quick Search + Reset */}

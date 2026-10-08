@@ -152,6 +152,28 @@ export const getOwnerAdvanceById = asyncHandler(async (req: AuthRequest, res: Re
   res.json({ success: true, message: 'Owner advance retrieved.', data: result.rows[0] });
 });
 
+const resolveAdvanceDate = (dateVal?: string | Date | null): string => {
+  if (!dateVal) return new Date().toISOString();
+  if (dateVal instanceof Date) return dateVal.toISOString();
+  const clean = String(dateVal).trim();
+  if (!clean) return new Date().toISOString();
+
+  // If date only: YYYY-MM-DD (e.g. from mobile or date input)
+  if (/^\d{4}-\d{2}-\d{2}$/.test(clean)) {
+    const now = new Date();
+    const todayLocal = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+    const todayUTC = now.toISOString().split('T')[0];
+    if (clean === todayLocal || clean === todayUTC) {
+      return now.toISOString();
+    }
+    const [y, m, d] = clean.split('-').map(Number);
+    const combined = new Date(y, m - 1, d, now.getHours(), now.getMinutes(), now.getSeconds(), now.getMilliseconds());
+    return combined.toISOString();
+  }
+
+  return clean;
+};
+
 export const createOwnerAdvance = asyncHandler(async (req: AuthRequest, res: Response): Promise<void> => {
   const { owner_id, manager_id, amount, advance_date, payment_mode, notes, screenshot_url } = req.body;
 
@@ -164,15 +186,17 @@ export const createOwnerAdvance = asyncHandler(async (req: AuthRequest, res: Res
     throw new AppError('Advance amount must be greater than 0.', 400);
   }
 
+  const resolvedDate = resolveAdvanceDate(advance_date);
+
   const result = await query(
     `INSERT INTO owner_advances (owner_id, manager_id, amount, advance_date, payment_mode, notes, screenshot_url, created_by)
-     VALUES ($1, $2, $3, COALESCE($4::timestamptz, NOW()), $5, $6, $7, $8)
+     VALUES ($1, $2, $3, $4::timestamptz, $5, $6, $7, $8)
      RETURNING *`,
     [
       owner_id,
       manager_id,
       numAmount,
-      advance_date || null,
+      resolvedDate,
       payment_mode || 'CASH',
       notes?.trim() || null,
       screenshot_url || null,
@@ -200,6 +224,8 @@ export const updateOwnerAdvance = asyncHandler(async (req: AuthRequest, res: Res
     throw new AppError('Advance amount must be greater than 0.', 400);
   }
 
+  const resolvedDate = advance_date ? resolveAdvanceDate(advance_date) : null;
+
   const result = await query(
     `UPDATE owner_advances
      SET owner_id = COALESCE($1, owner_id),
@@ -216,7 +242,7 @@ export const updateOwnerAdvance = asyncHandler(async (req: AuthRequest, res: Res
       owner_id || null,
       manager_id || null,
       amount !== undefined ? parseFloat(amount) : null,
-      advance_date || null,
+      resolvedDate,
       payment_mode || null,
       notes !== undefined ? notes?.trim() : null,
       screenshot_url !== undefined ? screenshot_url : null,

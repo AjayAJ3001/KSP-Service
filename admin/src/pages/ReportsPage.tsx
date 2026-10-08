@@ -1,4 +1,4 @@
-﻿import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   Printer, Download, Calendar, RefreshCw,
 } from 'lucide-react';
@@ -7,8 +7,6 @@ import { Party, Driver, Vehicle, Unit } from '../types';
 import { StatusBadge } from '../components/Common/StatusBadge';
 import { formatDateDMY } from '../utils/dateUtils';
 import { DateField } from '../components/Common/DateField';
-
-type Tab = 'trips' | 'payments' | 'settlements';
 
 function downloadCSV(filename: string, headers: string[], rows: string[][]) {
   const escape = (v: any) => `"${String(v ?? '').replace(/"/g, '""')}"`;
@@ -47,7 +45,6 @@ function getThisWeekRange() {
 }
 
 export const ReportsPage: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<Tab>('trips');
   const [fromDate, setFromDate] = useState('');
   const [toDate, setToDate] = useState('');
   const [partyId, setPartyId] = useState('');
@@ -62,8 +59,6 @@ export const ReportsPage: React.FC = () => {
   const [units, setUnits] = useState<Unit[]>([]);
 
   const [tripData, setTripData] = useState<{ trips: any[]; summary: any }>({ trips: [], summary: {} });
-  const [paymentData, setPaymentData] = useState<any[]>([]);
-  const [settlementData, setSettlementData] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(false);
 
   const thisWeek = getThisWeekRange();
@@ -86,22 +81,14 @@ export const ReportsPage: React.FC = () => {
         status: status || undefined,
       };
 
-      if (activeTab === 'trips') {
-        const res = await reportService.getTripReport(params);
-        setTripData(res.data);
-      } else if (activeTab === 'payments') {
-        const res = await reportService.getPaymentReport(params);
-        setPaymentData(res.data);
-      } else {
-        const res = await reportService.getSettlementReport(params);
-        setSettlementData(res.data);
-      }
+      const res = await reportService.getTripReport(params);
+      setTripData(res.data);
     } catch (err) {
-      console.error('Failed to load report', err);
+      console.error('Failed to load trip report', err);
     } finally {
       setIsLoading(false);
     }
-  }, [activeTab, fromDate, toDate, partyId, driverId, vehicleId, unitId, status]);
+  }, [fromDate, toDate, partyId, driverId, vehicleId, unitId, status]);
 
   useEffect(() => {
     loadReport();
@@ -166,48 +153,9 @@ export const ReportsPage: React.FC = () => {
     t.status
   ];
 
-  const paymentHeaders = [
-    'Payment ID', 'Payment Date', 'Party Name', 'Lorry Number', 'Route',
-    'Amount Received (INR)', 'Balance Due (INR)', 'Collected By', 'Notes'
-  ];
-  const paymentRow = (p: any) => [
-    String(p.id),
-    formatDateDMY(p.payment_date),
-    p.party_name,
-    p.lorry_number,
-    `${p.from_location} -> ${p.to_location}`,
-    fmtCur(p.received_amount),
-    fmtCur(p.balance_due),
-    p.created_by_name || 'Admin',
-    p.notes || ''
-  ];
-
-  const settlementHeaders = [
-    'Settlement ID', 'Trip Date', 'Lorry Number', 'Driver Name', 'Party Name',
-    'Route', 'Total Freight (INR)', 'Advance Paid (INR)', 'Balance to Driver (INR)', 'Status'
-  ];
-  const settlementRow = (s: any) => [
-    String(s.id),
-    s.trip_date ? formatDateDMY(s.trip_date) : '',
-    s.lorry_number,
-    s.driver_name,
-    s.party_name,
-    `${s.from_location} -> ${s.to_location}`,
-    fmtCur(s.total_freight),
-    fmtCur(s.advance_paid),
-    fmtCur(s.balance_to_driver),
-    s.settlement_status
-  ];
-
   const downloadFullReport = () => {
     const dateTag = fromDate && toDate ? `${fromDate}_to_${toDate}` : 'All';
-    if (activeTab === 'trips') {
-      downloadCSV(`Trips_Dispatch_Report_${dateTag}.csv`, tripHeaders, tripData.trips.map(tripRow));
-    } else if (activeTab === 'payments') {
-      downloadCSV(`Party_Payments_Report_${dateTag}.csv`, paymentHeaders, paymentData.map(paymentRow));
-    } else {
-      downloadCSV(`Settlements_Report_${dateTag}.csv`, settlementHeaders, settlementData.map(settlementRow));
-    }
+    downloadCSV(`Trips_Dispatch_Report_${dateTag}.csv`, tripHeaders, tripData.trips.map(tripRow));
   };
 
   const downloadSingleTripCSV = (t: any) => {
@@ -215,24 +163,14 @@ export const ReportsPage: React.FC = () => {
     downloadCSV(filename, tripHeaders, [tripRow(t)]);
   };
 
-  const downloadSinglePaymentCSV = (p: any) => {
-    const filename = `Payment_${p.id}_${p.lorry_number}_${formatDateDMY(p.payment_date)}.csv`;
-    downloadCSV(filename, paymentHeaders, [paymentRow(p)]);
-  };
-
-  const downloadSingleSettlementCSV = (s: any) => {
-    const filename = `Settlement_${s.id}_${s.lorry_number}_${s.trip_date ? formatDateDMY(s.trip_date) : 'slip'}.csv`;
-    downloadCSV(filename, settlementHeaders, [settlementRow(s)]);
-  };
-
   return (
     <div>
       {/* ── Executive Header ────────────────────────────────────────────── */}
       <div className="card-header" style={{ marginBottom: '20px' }}>
         <div>
-          <h2 style={{ fontSize: '22px', fontWeight: 800, margin: 0 }}>Business Reports &amp; Analytics</h2>
+          <h2 style={{ fontSize: '22px', fontWeight: 800, margin: 0 }}>Trip Dispatch Report</h2>
           <p style={{ color: 'var(--text-muted)', fontSize: '13.5px', marginTop: '4px' }}>
-            Comprehensive operational audits, freight receivables, payment logs &amp; trip reports
+            Comprehensive freight dispatch audit and trip logistics report
           </p>
         </div>
         <div style={{ display: 'flex', gap: '10px' }}>
@@ -247,73 +185,59 @@ export const ReportsPage: React.FC = () => {
 
       {/* ── Professional Unified Filter Toolbar ─────────────────────────── */}
       <div className="card" style={{ padding: '18px 22px', marginBottom: '22px', borderRadius: '10px' }}>
-        {/* Top Control Line: Report Selector + Date Range + This Week */}
+        {/* Top Control Line: Date Range + This Week */}
         <div
           style={{
             display: 'flex',
             alignItems: 'center',
-            justifyContent: 'space-between',
             flexWrap: 'wrap',
             gap: '14px',
             paddingBottom: '14px',
             borderBottom: '1px solid var(--border-color, #e5e7eb)',
           }}
         >
-          {/* Report Category Selector */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-            <span style={{ fontSize: '13.5px', fontWeight: 700, color: 'var(--text-secondary, #374151)', whiteSpace: 'nowrap' }}>
-              Report Type:
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 }}>
+            <span style={{ fontSize: '13.5px', fontWeight: 700, color: 'var(--text-secondary, #374151)' }}>
+              Filter by Date:
             </span>
-            <select
-              className="form-control form-select"
-              style={{ width: '220px', height: '38px', fontWeight: 600 }}
-              value={activeTab}
-              onChange={e => setActiveTab(e.target.value as Tab)}
-            >
-              <option value="trips">Trip Dispatch Report</option>
-              <option value="payments">Party Payment Report</option>
-              <option value="settlements">Settlement Report</option>
-            </select>
           </div>
 
-          {/* Date Range & This Week Quick Filter */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-              <span style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-muted)' }}>From:</span>
-              <DateField
-                style={{ width: '140px', height: '38px' }}
-                value={fromDate}
-                onChange={e => setFromDate(e.target.value)}
-              />
-            </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-              <span style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-muted)' }}>To:</span>
-              <DateField
-                style={{ width: '140px', height: '38px' }}
-                value={toDate}
-                onChange={e => setToDate(e.target.value)}
-              />
-            </div>
-            <button
-              type="button"
-              onClick={handleThisWeekClick}
-              className={`btn btn-sm ${isThisWeekActive ? 'btn-primary' : 'btn-outline'}`}
-              style={{
-                height: '38px',
-                padding: '0 14px',
-                fontSize: '13px',
-                fontWeight: 600,
-                display: 'flex',
-                alignItems: 'center',
-                gap: '6px',
-                borderRadius: '6px',
-              }}
-              title="Filter by current week"
-            >
-              <Calendar size={14} />
-              This Week
-            </button>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexShrink: 0 }}>
+            <span style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-muted)' }}>From:</span>
+            <DateField
+              style={{ width: '160px', height: '38px' }}
+              value={fromDate}
+              onChange={e => setFromDate(e.target.value)}
+            />
           </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexShrink: 0 }}>
+            <span style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-muted)' }}>To:</span>
+            <DateField
+              style={{ width: '160px', height: '38px' }}
+              value={toDate}
+              onChange={e => setToDate(e.target.value)}
+            />
+          </div>
+          <button
+            type="button"
+            onClick={handleThisWeekClick}
+            className={`btn btn-sm ${isThisWeekActive ? 'btn-primary' : 'btn-outline'}`}
+            style={{
+              height: '38px',
+              padding: '0 14px',
+              fontSize: '13px',
+              fontWeight: 600,
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              borderRadius: '6px',
+              flexShrink: 0,
+            }}
+            title="Filter by current week"
+          >
+            <Calendar size={14} />
+            This Week
+          </button>
         </div>
 
         {/* Bottom Control Line: Entity Filters (Party, Truck, Unit, Driver, Status, Reset) */}
@@ -339,79 +263,60 @@ export const ReportsPage: React.FC = () => {
             </select>
           </div>
 
-          {activeTab === 'trips' && (
-            <>
-              {/* Truck Wise */}
-              <div style={{ flex: '1 1 150px', minWidth: '140px' }}>
-                <select
-                  className="form-control form-select"
-                  style={{ width: '100%', height: '38px' }}
-                  value={vehicleId}
-                  onChange={e => setVehicleId(e.target.value)}
-                >
-                  <option value="">All Trucks</option>
-                  {vehicles.map(v => <option key={v.id} value={v.id}>{v.lorry_number}</option>)}
-                </select>
-              </div>
+          {/* Truck Wise */}
+          <div style={{ flex: '1 1 150px', minWidth: '140px' }}>
+            <select
+              className="form-control form-select"
+              style={{ width: '100%', height: '38px' }}
+              value={vehicleId}
+              onChange={e => setVehicleId(e.target.value)}
+            >
+              <option value="">All Trucks</option>
+              {vehicles.map(v => <option key={v.id} value={v.id}>{v.lorry_number}</option>)}
+            </select>
+          </div>
 
-              {/* Unit Wise */}
-              <div style={{ flex: '1 1 140px', minWidth: '130px' }}>
-                <select
-                  className="form-control form-select"
-                  style={{ width: '100%', height: '38px' }}
-                  value={unitId}
-                  onChange={e => setUnitId(e.target.value)}
-                >
-                  <option value="">All Units</option>
-                  {units.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
-                </select>
-              </div>
+          {/* Unit Wise */}
+          <div style={{ flex: '1 1 140px', minWidth: '130px' }}>
+            <select
+              className="form-control form-select"
+              style={{ width: '100%', height: '38px' }}
+              value={unitId}
+              onChange={e => setUnitId(e.target.value)}
+            >
+              <option value="">All Units</option>
+              {units.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
+            </select>
+          </div>
 
-              {/* Driver Wise */}
-              <div style={{ flex: '1 1 150px', minWidth: '140px' }}>
-                <select
-                  className="form-control form-select"
-                  style={{ width: '100%', height: '38px' }}
-                  value={driverId}
-                  onChange={e => setDriverId(e.target.value)}
-                >
-                  <option value="">All Drivers</option>
-                  {drivers.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
-                </select>
-              </div>
+          {/* Driver Wise */}
+          <div style={{ flex: '1 1 150px', minWidth: '140px' }}>
+            <select
+              className="form-control form-select"
+              style={{ width: '100%', height: '38px' }}
+              value={driverId}
+              onChange={e => setDriverId(e.target.value)}
+            >
+              <option value="">All Drivers</option>
+              {drivers.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
+            </select>
+          </div>
 
-              {/* Status */}
-              <div style={{ flex: '1 1 150px', minWidth: '140px' }}>
-                <select
-                  className="form-control form-select"
-                  style={{ width: '100%', height: '38px' }}
-                  value={status}
-                  onChange={e => setStatus(e.target.value)}
-                >
-                  <option value="">All Statuses</option>
-                  <option value="PAYMENT_PENDING">Payment Pending</option>
-                  <option value="PARTIALLY_PAID">Partially Paid</option>
-                  <option value="SETTLED">Settled</option>
-                  <option value="CANCELLED">Cancelled</option>
-                </select>
-              </div>
-            </>
-          )}
-
-          {activeTab === 'settlements' && (
-            <div style={{ flex: '1 1 160px', minWidth: '150px' }}>
-              <select
-                className="form-control form-select"
-                style={{ width: '100%', height: '38px' }}
-                value={status}
-                onChange={e => setStatus(e.target.value)}
-              >
-                <option value="">All Settlement Statuses</option>
-                <option value="SETTLED">Settled</option>
-                <option value="PENDING">Pending</option>
-              </select>
-            </div>
-          )}
+          {/* Status */}
+          <div style={{ flex: '1 1 150px', minWidth: '140px' }}>
+            <select
+              className="form-control form-select"
+              style={{ width: '100%', height: '38px' }}
+              value={status}
+              onChange={e => setStatus(e.target.value)}
+            >
+              <option value="">All Statuses</option>
+              <option value="PAYMENT_PENDING">Payment Pending</option>
+              <option value="PARTIALLY_PAID">Partially Paid</option>
+              <option value="SETTLED">Settled</option>
+              <option value="CANCELLED">Cancelled</option>
+            </select>
+          </div>
 
           {/* Reset Filters */}
           <button
@@ -426,243 +331,70 @@ export const ReportsPage: React.FC = () => {
         </div>
       </div>
 
-      {/* ── Tab Content: Trip Dispatch ──────────────────────────────────── */}
-      {activeTab === 'trips' && (
-        <>
-          {/* KPI Summary Cards */}
-          <div className="grid-cols-4" style={{ marginBottom: '22px' }}>
-            <div className="stat-card">
-              <div className="stat-info">
-                <div className="stat-value" style={{ fontSize: '22px', fontWeight: 800 }}>
-                  {tripData.summary?.total_trips || 0}
-                </div>
-                <div className="stat-label">Total Filtered Trips</div>
-              </div>
-            </div>
-            <div className="stat-card">
-              <div className="stat-info">
-                <div className="stat-value" style={{ fontSize: '22px', fontWeight: 800, color: 'var(--accent-hover)' }}>
-                  {formatCurrency(tripData.summary?.total_freight || 0)}
-                </div>
-                <div className="stat-label">Total Freight</div>
-              </div>
-            </div>
-            <div className="stat-card">
-              <div className="stat-info">
-                <div className="stat-value" style={{ fontSize: '22px', fontWeight: 800, color: 'var(--success-700)' }}>
-                  {formatCurrency(tripData.summary?.total_received || 0)}
-                </div>
-                <div className="stat-label">Total Received</div>
-              </div>
-            </div>
-            <div className="stat-card">
-              <div className="stat-info">
-                <div className="stat-value" style={{ fontSize: '22px', fontWeight: 800, color: 'var(--danger-700)' }}>
-                  {formatCurrency(tripData.summary?.total_balance || 0)}
-                </div>
-                <div className="stat-label">Outstanding Balance</div>
-              </div>
-            </div>
-          </div>
-
-          {/* Trips Table */}
-          <div className="card">
-            <div className="table-container">
-              <table className="table">
-                <thead>
-                  <tr>
-                    <th>Date</th>
-                    <th>Lorry</th>
-                    <th>Party</th>
-                    <th>Route / Destination</th>
-                    <th>Unit &amp; Weight</th>
-                    <th style={{ textAlign: 'right' }}>Total Freight</th>
-                    <th style={{ textAlign: 'right' }}>Received</th>
-                    <th style={{ textAlign: 'right' }}>Balance Due</th>
-                    <th style={{ textAlign: 'center' }}>Status</th>
-                    <th style={{ textAlign: 'center' }}>Download</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {isLoading ? (
-                    <tr>
-                      <td colSpan={10} style={{ textAlign: 'center', padding: '36px', color: 'var(--text-muted)' }}>
-                        Loading trip report records...
-                      </td>
-                    </tr>
-                  ) : tripData.trips.length === 0 ? (
-                    <tr>
-                      <td colSpan={10} style={{ textAlign: 'center', padding: '36px', color: 'var(--text-muted)' }}>
-                        No trip records match the selected report criteria.
-                      </td>
-                    </tr>
-                  ) : (
-                    tripData.trips.map(t => (
-                      <tr key={t.id}>
-                        <td style={{ whiteSpace: 'nowrap' }}>{formatDateDMY(t.trip_date)}</td>
-                        <td><strong>{t.lorry_number}</strong></td>
-                        <td>{t.party_name}</td>
-                        <td style={{ fontSize: '13px' }}>{t.from_location} &rarr; {t.to_location}</td>
-                        <td style={{ whiteSpace: 'nowrap' }}>{t.goods_weight} {t.unit_name || 'Tons'}</td>
-                        <td style={{ textAlign: 'right', fontWeight: 700 }}>{formatCurrency(t.total_freight)}</td>
-                        <td style={{ textAlign: 'right', color: 'var(--success-700)', fontWeight: 600 }}>{formatCurrency(t.total_received)}</td>
-                        <td style={{ textAlign: 'right', fontWeight: 700, color: Number(t.balance_due) > 0 ? 'var(--danger-700)' : 'var(--success-700)' }}>
-                          {formatCurrency(t.balance_due)}
-                        </td>
-                        <td style={{ textAlign: 'center' }}><StatusBadge status={t.status} /></td>
-                        <td style={{ textAlign: 'center', whiteSpace: 'nowrap' }}>
-                          <button
-                            type="button"
-                            onClick={() => downloadSingleTripCSV(t)}
-                            className="btn btn-outline btn-sm"
-                            style={{ padding: '4px 8px', fontSize: '12px', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
-                            title="Download this trip (CSV)"
-                          >
-                            <Download size={13} />
-                            <span>CSV</span>
-                          </button>
-                        </td>
-                      </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </>
-      )}
-
-      {/* ── Tab Content: Party Payments ─────────────────────────────────── */}
-      {activeTab === 'payments' && (
-        <div className="card">
-          <div className="table-container">
-            <table className="table">
-              <thead>
+      {/* ── Trips Table ─────────────────────────────────────────────────── */}
+      <div className="card">
+        <div className="table-container">
+          <table className="table">
+            <thead>
+              <tr>
+                <th>Date</th>
+                <th>Lorry</th>
+                <th>Party</th>
+                <th>Route / Destination</th>
+                <th>Unit &amp; Weight</th>
+                <th style={{ textAlign: 'right' }}>Total Freight</th>
+                <th style={{ textAlign: 'right' }}>Received</th>
+                <th style={{ textAlign: 'right' }}>Balance Due</th>
+                <th style={{ textAlign: 'center' }}>Status</th>
+                <th style={{ textAlign: 'center' }}>Download</th>
+              </tr>
+            </thead>
+            <tbody>
+              {isLoading ? (
                 <tr>
-                  <th>Payment Date</th>
-                  <th>Party</th>
-                  <th>Route</th>
-                  <th>Lorry</th>
-                  <th style={{ textAlign: 'right' }}>Amount Received</th>
-                  <th style={{ textAlign: 'right' }}>Remaining Balance</th>
-                  <th>Collected By</th>
-                  <th>Notes</th>
-                  <th style={{ textAlign: 'center' }}>Download</th>
+                  <td colSpan={10} style={{ textAlign: 'center', padding: '36px', color: 'var(--text-muted)' }}>
+                    Loading trip report records...
+                  </td>
                 </tr>
-              </thead>
-              <tbody>
-                {isLoading ? (
-                  <tr>
-                    <td colSpan={9} style={{ textAlign: 'center', padding: '36px', color: 'var(--text-muted)' }}>
-                      Loading payment records...
-                    </td>
-                  </tr>
-                ) : paymentData.length === 0 ? (
-                  <tr>
-                    <td colSpan={9} style={{ textAlign: 'center', padding: '36px', color: 'var(--text-muted)' }}>
-                      No payment entries found for the selected period.
-                    </td>
-                  </tr>
-                ) : (
-                  paymentData.map(p => (
-                    <tr key={p.id}>
-                      <td style={{ whiteSpace: 'nowrap' }}>{formatDateDMY(p.payment_date)}</td>
-                      <td><strong>{p.party_name}</strong></td>
-                      <td style={{ fontSize: '13px' }}>{p.from_location} &rarr; {p.to_location}</td>
-                      <td>{p.lorry_number}</td>
-                      <td style={{ textAlign: 'right', color: 'var(--success-700)', fontWeight: 700 }}>
-                        {formatCurrency(p.received_amount)}
-                      </td>
-                      <td style={{ textAlign: 'right' }}>{formatCurrency(p.balance_due)}</td>
-                      <td>{p.created_by_name || 'Admin'}</td>
-                      <td>{p.notes || '&mdash;'}</td>
-                      <td style={{ textAlign: 'center', whiteSpace: 'nowrap' }}>
-                        <button
-                          type="button"
-                          onClick={() => downloadSinglePaymentCSV(p)}
-                          className="btn btn-outline btn-sm"
-                          style={{ padding: '4px 8px', fontSize: '12px', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
-                          title="Download this payment (CSV)"
-                        >
-                          <Download size={13} />
-                          <span>CSV</span>
-                        </button>
-                      </td>
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
-
-      {/* ── Tab Content: Settlements ────────────────────────────────────── */}
-      {activeTab === 'settlements' && (
-        <div className="card">
-          <div className="table-container">
-            <table className="table">
-              <thead>
+              ) : tripData.trips.length === 0 ? (
                 <tr>
-                  <th>Trip Date</th>
-                  <th>Lorry</th>
-                  <th>Driver</th>
-                  <th>Party</th>
-                  <th>Route</th>
-                  <th style={{ textAlign: 'right' }}>Total Freight</th>
-                  <th style={{ textAlign: 'right' }}>Advance Paid</th>
-                  <th style={{ textAlign: 'right' }}>Balance to Driver</th>
-                  <th style={{ textAlign: 'center' }}>Status</th>
-                  <th style={{ textAlign: 'center' }}>Download</th>
+                  <td colSpan={10} style={{ textAlign: 'center', padding: '36px', color: 'var(--text-muted)' }}>
+                    No trip records match the selected report criteria.
+                  </td>
                 </tr>
-              </thead>
-              <tbody>
-                {isLoading ? (
-                  <tr>
-                    <td colSpan={10} style={{ textAlign: 'center', padding: '36px', color: 'var(--text-muted)' }}>
-                      Loading settlement records...
+              ) : (
+                tripData.trips.map(t => (
+                  <tr key={t.id}>
+                    <td style={{ whiteSpace: 'nowrap' }}>{formatDateDMY(t.trip_date)}</td>
+                    <td><strong>{t.lorry_number}</strong></td>
+                    <td>{t.party_name}</td>
+                    <td style={{ fontSize: '13px' }}>{t.from_location} &rarr; {t.to_location}</td>
+                    <td style={{ whiteSpace: 'nowrap' }}>{t.goods_weight} {t.unit_name || 'Tons'}</td>
+                    <td style={{ textAlign: 'right', fontWeight: 700 }}>{formatCurrency(t.total_freight)}</td>
+                    <td style={{ textAlign: 'right', color: 'var(--success-700)', fontWeight: 600 }}>{formatCurrency(t.total_received)}</td>
+                    <td style={{ textAlign: 'right', fontWeight: 700, color: Number(t.balance_due) > 0 ? 'var(--danger-700)' : 'var(--success-700)' }}>
+                      {formatCurrency(t.balance_due)}
+                    </td>
+                    <td style={{ textAlign: 'center' }}><StatusBadge status={t.status} /></td>
+                    <td style={{ textAlign: 'center', whiteSpace: 'nowrap' }}>
+                      <button
+                        type="button"
+                        onClick={() => downloadSingleTripCSV(t)}
+                        className="btn btn-outline btn-sm"
+                        style={{ padding: '4px 8px', fontSize: '12px', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
+                        title="Download this trip (CSV)"
+                      >
+                        <Download size={13} />
+                        <span>CSV</span>
+                      </button>
                     </td>
                   </tr>
-                ) : settlementData.length === 0 ? (
-                  <tr>
-                    <td colSpan={10} style={{ textAlign: 'center', padding: '36px', color: 'var(--text-muted)' }}>
-                      No settlement slips recorded for the selected period.
-                    </td>
-                  </tr>
-                ) : (
-                  settlementData.map(s => (
-                    <tr key={s.id}>
-                      <td style={{ whiteSpace: 'nowrap' }}>{s.trip_date ? formatDateDMY(s.trip_date) : '&mdash;'}</td>
-                      <td><strong>{s.lorry_number}</strong></td>
-                      <td>{s.driver_name}</td>
-                      <td>{s.party_name}</td>
-                      <td style={{ fontSize: '13px' }}>{s.from_location} &rarr; {s.to_location}</td>
-                      <td style={{ textAlign: 'right' }}>{formatCurrency(s.total_freight)}</td>
-                      <td style={{ textAlign: 'right' }}>{formatCurrency(s.advance_paid)}</td>
-                      <td style={{ textAlign: 'right', fontWeight: 700, color: Number(s.balance_to_driver) >= 0 ? 'var(--success-700)' : 'var(--danger-700)' }}>
-                        {formatCurrency(s.balance_to_driver)}
-                      </td>
-                      <td style={{ textAlign: 'center' }}><StatusBadge status={s.settlement_status} /></td>
-                      <td style={{ textAlign: 'center', whiteSpace: 'nowrap' }}>
-                        <button
-                          type="button"
-                          onClick={() => downloadSingleSettlementCSV(s)}
-                          className="btn btn-outline btn-sm"
-                          style={{ padding: '4px 8px', fontSize: '12px', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
-                          title="Download this settlement (CSV)"
-                        >
-                          <Download size={13} />
-                          <span>CSV</span>
-                        </button>
-                      </td>
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
+                ))
+              )}
+            </tbody>
+          </table>
         </div>
-      )}
+      </div>
     </div>
   );
 };

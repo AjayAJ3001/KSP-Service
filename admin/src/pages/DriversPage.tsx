@@ -1028,6 +1028,7 @@ const parseDateToISO = (raw: string): string | null => {
 // ─── Main Drivers Page Component ──────────────────────────────────────────────
 export const DriversPage: React.FC = () => {
   const [drivers, setDrivers] = useState<Driver[]>([]);
+  const [allDriversList, setAllDriversList] = useState<Driver[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState('');
@@ -1068,6 +1069,19 @@ export const DriversPage: React.FC = () => {
   const licenseFrontInputRef = useRef<HTMLInputElement>(null);
   const licenseBackInputRef = useRef<HTMLInputElement>(null);
   const idProofInputRef = useRef<HTMLInputElement>(null);
+
+  const loadAllDriversLookup = async () => {
+    try {
+      const res = await driverService.getDrivers({ limit: 1000 });
+      if (res?.data?.items) {
+        setAllDriversList(res.data.items);
+      }
+    } catch { /* silent */ }
+  };
+
+  useEffect(() => {
+    loadAllDriversLookup();
+  }, []);
 
   useEffect(() => {
     loadDrivers();
@@ -1225,6 +1239,7 @@ export const DriversPage: React.FC = () => {
       setSelectedDriver(null);
       resetForm();
       loadDrivers();
+      loadAllDriversLookup();
     } catch (err: any) {
       setFormError(err.message || 'Failed to save driver.');
     } finally {
@@ -1237,6 +1252,7 @@ export const DriversPage: React.FC = () => {
     try {
       await driverService.deleteDriver(driver.id);
       loadDrivers();
+      loadAllDriversLookup();
     } catch (err: any) {
       alert(err.message || 'Failed to delete driver.');
     }
@@ -1804,20 +1820,42 @@ export const DriversPage: React.FC = () => {
 
       {/* Main Table Card */}
       <div className="card">
-        <div className="search-filter-bar" style={{ marginBottom: '16px' }}>
-          <div className="search-input-wrapper">
-            <Search />
-            <input
-              type="text"
-              className="form-control"
-              placeholder="Search driver by name, phone..."
+        <div className="search-filter-bar" style={{ marginBottom: '16px', display: 'flex', gap: '12px', flexWrap: 'wrap', alignItems: 'center' }}>
+          <div style={{ flex: '1 1 260px', minWidth: '220px', maxWidth: '380px' }}>
+            <select
+              className="form-control form-select"
+              style={{ width: '100%', height: '38px', fontWeight: 600 }}
               value={search}
               onChange={(e) => {
                 setSearch(e.target.value);
                 setPage(1);
               }}
-            />
+            >
+              <option value="">All Drivers {allDriversList.length > 0 ? `(${allDriversList.length})` : ''}</option>
+              {Array.from(new Map(allDriversList.map((d) => [d.name, d])).values())
+                .sort((a, b) => a.name.localeCompare(b.name))
+                .map((d) => (
+                  <option key={d.id} value={d.name}>
+                    {d.name}{d.mobile_number ? ` (${d.mobile_number})` : ''}
+                  </option>
+                ))}
+            </select>
           </div>
+
+          {search && (
+            <button
+              type="button"
+              onClick={() => {
+                setSearch('');
+                setPage(1);
+              }}
+              className="btn btn-outline"
+              style={{ height: '38px', padding: '0 14px', fontSize: '13px' }}
+              title="Reset driver filter"
+            >
+              Reset
+            </button>
+          )}
         </div>
 
         <DataTable

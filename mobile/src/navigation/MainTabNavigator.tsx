@@ -19,6 +19,7 @@ export const MainTabNavigator: React.FC = () => {
 
   return (
     <Tab.Navigator
+      initialRouteName={isAdmin ? 'Admin' : 'Home'}
       screenOptions={{
         headerStyle: {
           backgroundColor: COLORS.primary,
@@ -43,17 +44,9 @@ export const MainTabNavigator: React.FC = () => {
         },
       }}
     >
-      <Tab.Screen
-        name="Home"
-        component={HomeScreen}
-        options={{
-          title: 'Home',
-          headerTitle: 'KSP Transport',
-          tabBarIcon: ({ color, size }) => <Home color={color} size={size} />,
-        }}
-      />
-
-      {isAdmin && (
+      {/* For Admin: Admin Dashboard is the primary landing tab, Home is completely removed.
+          For Non-Admin: Home Screen is the primary landing tab. */}
+      {isAdmin ? (
         <Tab.Screen
           name="Admin"
           component={AdminDashboardScreen}
@@ -61,6 +54,16 @@ export const MainTabNavigator: React.FC = () => {
             title: 'Admin',
             headerTitle: 'Admin Control Center',
             tabBarIcon: ({ color, size }) => <ShieldCheck color={color} size={size} />,
+          }}
+        />
+      ) : (
+        <Tab.Screen
+          name="Home"
+          component={HomeScreen}
+          options={{
+            title: 'Home',
+            headerTitle: 'KSP Transport',
+            tabBarIcon: ({ color, size }) => <Home color={color} size={size} />,
           }}
         />
       )}

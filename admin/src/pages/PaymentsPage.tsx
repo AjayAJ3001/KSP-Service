@@ -1,12 +1,13 @@
-﻿import React, { useState, useEffect, useCallback } from 'react';
-import { CreditCard, History, Trash2, Download, Printer, Calendar, RefreshCw } from 'lucide-react';
-import { tripService, paymentService, partyService, vehicleService, unitService } from '../services/adminService';
-import { Trip, TripPayment, Party, Vehicle, Unit } from '../types';
+import React, { useState, useEffect, useCallback } from 'react';
+import { CreditCard, History, Trash2, Download, Printer, Calendar, RefreshCw, Clock } from 'lucide-react';
+import { tripService, paymentService, partyService, vehicleService, routeService } from '../services/adminService';
+import { Trip, TripPayment, Party, Vehicle, Route } from '../types';
 import { DataTable, Column } from '../components/Common/DataTable';
 import { Modal } from '../components/Common/Modal';
 import { StatusBadge } from '../components/Common/StatusBadge';
 import { formatDateDMY } from '../utils/dateUtils';
 import { DateField } from '../components/Common/DateField';
+import { OverduePaymentAlertModal } from '../components/Common/OverduePaymentAlertModal';
 
 function downloadCSV(filename: string, headers: string[], rows: (string | number)[][]) {
   const escape = (v: any) => `"${String(v ?? '').replace(/"/g, '""')}"`;
@@ -39,7 +40,7 @@ export const PaymentsPage: React.FC = () => {
   const [trips, setTrips] = useState<Trip[]>([]);
   const [parties, setParties] = useState<Party[]>([]);
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
-  const [units, setUnits] = useState<Unit[]>([]);
+  const [routes, setRoutes] = useState<Route[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
 
@@ -49,10 +50,13 @@ export const PaymentsPage: React.FC = () => {
   const [statusFilter, setStatusFilter] = useState('');
   const [partyFilter, setPartyFilter] = useState('');
   const [vehicleFilter, setVehicleFilter] = useState('');
-  const [unitFilter, setUnitFilter] = useState('');
+  const [routeFilter, setRouteFilter] = useState('');
 
   const [isLoading, setIsLoading] = useState(false);
   const [isDownloading, setIsDownloading] = useState(false);
+
+  // Overdue payment alert
+  const [isOverdueAlertOpen, setIsOverdueAlertOpen] = useState(false);
 
   // Payment Recording Modal
   const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
@@ -72,14 +76,14 @@ export const PaymentsPage: React.FC = () => {
 
   const loadLookups = async () => {
     try {
-      const [pRes, vRes, uRes] = await Promise.all([
+      const [pRes, vRes, rRes] = await Promise.all([
         partyService.getParties({ limit: 200, status: 'ACTIVE' }),
         vehicleService.getVehicles({ limit: 200, status: 'ACTIVE' }),
-        unitService.getUnits('ACTIVE').catch(() => unitService.getUnits()),
+        routeService.getRoutes({ limit: 500, status: 'ACTIVE' }),
       ]);
       setParties(pRes.data.items || (Array.isArray(pRes.data) ? pRes.data : []));
       setVehicles(vRes.data.items || (Array.isArray(vRes.data) ? vRes.data : []));
-      setUnits(Array.isArray(uRes.data) ? uRes.data : (uRes.data as any)?.items || []);
+      setRoutes(rRes.data.items || []);
     } catch (err) {
       console.error('Failed to load lookups', err);
     }
@@ -98,7 +102,7 @@ export const PaymentsPage: React.FC = () => {
         status: statusFilter || undefined,
         party_id: partyFilter || undefined,
         vehicle_id: vehicleFilter || undefined,
-        unit_id: unitFilter || undefined,
+        route_id: routeFilter || undefined,
         from_date: fromDate || undefined,
         to_date: toDate || undefined,
       });
@@ -109,7 +113,7 @@ export const PaymentsPage: React.FC = () => {
     } finally {
       setIsLoading(false);
     }
-  }, [page, statusFilter, partyFilter, vehicleFilter, unitFilter, fromDate, toDate]);
+  }, [page, statusFilter, partyFilter, vehicleFilter, routeFilter, fromDate, toDate]);
 
   useEffect(() => {
     loadTrips();
@@ -131,7 +135,7 @@ export const PaymentsPage: React.FC = () => {
     setToDate('');
     setPartyFilter('');
     setVehicleFilter('');
-    setUnitFilter('');
+    setRouteFilter('');
     setStatusFilter('');
     setPage(1);
   };
@@ -227,7 +231,7 @@ export const PaymentsPage: React.FC = () => {
         status: statusFilter || undefined,
         party_id: partyFilter || undefined,
         vehicle_id: vehicleFilter || undefined,
-        unit_id: unitFilter || undefined,
+        route_id: routeFilter || undefined,
         from_date: fromDate || undefined,
         to_date: toDate || undefined,
       });
@@ -364,6 +368,11 @@ export const PaymentsPage: React.FC = () => {
 
   return (
     <div>
+      {/* ── Overdue Payment Alert Modal ───────────────────────── */}
+      <OverduePaymentAlertModal
+        isOpenManually={isOverdueAlertOpen || undefined}
+        onCloseManual={() => setIsOverdueAlertOpen(false)}
+      />
       {/* ── Executive Header ────────────────────────────────────────────── */}
       <div className="card-header" style={{ marginBottom: '20px' }}>
         <div>
@@ -373,6 +382,14 @@ export const PaymentsPage: React.FC = () => {
           </p>
         </div>
         <div style={{ display: 'flex', gap: '10px' }}>
+          <button
+            onClick={() => setIsOverdueAlertOpen(true)}
+            className="btn btn-outline"
+            style={{ display: 'flex', alignItems: 'center', gap: '6px', borderColor: '#d97706', color: '#b45309' }}
+            title="View overdue payments (pending 30+ days)"
+          >
+            <Clock size={16} /> Overdue Alerts
+          </button>
           <button
             onClick={() => window.print()}
             className="btn btn-outline"
@@ -398,62 +415,62 @@ export const PaymentsPage: React.FC = () => {
           style={{
             display: 'flex',
             alignItems: 'center',
-            justifyContent: 'space-between',
             flexWrap: 'wrap',
             gap: '14px',
             paddingBottom: '14px',
             borderBottom: '1px solid var(--border-color, #e5e7eb)',
           }}
         >
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 }}>
             <span style={{ fontSize: '13.5px', fontWeight: 700, color: 'var(--text-secondary, #374151)' }}>
               Filter by Date:
             </span>
           </div>
 
-          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-              <span style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-muted)' }}>From:</span>
-              <DateField
-                style={{ width: '140px', height: '38px' }}
-                value={fromDate}
-                onChange={(e) => {
-                  setFromDate(e.target.value);
-                  setPage(1);
-                }}
-              />
-            </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-              <span style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-muted)' }}>To:</span>
-              <DateField
-                style={{ width: '140px', height: '38px' }}
-                value={toDate}
-                onChange={(e) => {
-                  setToDate(e.target.value);
-                  setPage(1);
-                }}
-              />
-            </div>
-            <button
-              type="button"
-              onClick={handleThisWeekClick}
-              className={`btn btn-sm ${isThisWeekActive ? 'btn-primary' : 'btn-outline'}`}
-              style={{
-                height: '38px',
-                padding: '0 14px',
-                fontSize: '13px',
-                fontWeight: 600,
-                display: 'flex',
-                alignItems: 'center',
-                gap: '6px',
-                borderRadius: '6px',
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexShrink: 0 }}>
+            <span style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-muted)' }}>From:</span>
+            <DateField
+              style={{ width: '160px', height: '38px' }}
+              value={fromDate}
+              onChange={(e) => {
+                setFromDate(e.target.value);
+                setPage(1);
               }}
-              title="Filter by current week"
-            >
-              <Calendar size={14} />
-              This Week
-            </button>
+            />
           </div>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexShrink: 0 }}>
+            <span style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-muted)' }}>To:</span>
+            <DateField
+              style={{ width: '160px', height: '38px' }}
+              value={toDate}
+              onChange={(e) => {
+                setToDate(e.target.value);
+                setPage(1);
+              }}
+            />
+          </div>
+
+          <button
+            type="button"
+            onClick={handleThisWeekClick}
+            className={`btn btn-sm ${isThisWeekActive ? 'btn-primary' : 'btn-outline'}`}
+            style={{
+              height: '38px',
+              padding: '0 14px',
+              fontSize: '13px',
+              fontWeight: 600,
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              borderRadius: '6px',
+              flexShrink: 0,
+            }}
+            title="Filter by current week"
+          >
+            <Calendar size={14} />
+            This Week
+          </button>
         </div>
 
         {/* Bottom Control Line: Entity Filters (Party, Truck, Unit, Payment Status, Reset) */}
@@ -497,7 +514,7 @@ export const PaymentsPage: React.FC = () => {
                 setPage(1);
               }}
             >
-              <option value="">All Trucks</option>
+              <option value="">All Vehicle Numbers</option>
               {vehicles.map((v) => (
                 <option key={v.id} value={v.id}>
                   {v.lorry_number}
@@ -506,21 +523,21 @@ export const PaymentsPage: React.FC = () => {
             </select>
           </div>
 
-          {/* Unit Wise */}
-          <div style={{ flex: '1 1 150px', minWidth: '130px' }}>
+          {/* Party Delivery Unit (Route) Filter */}
+          <div style={{ flex: '1 1 160px', minWidth: '140px' }}>
             <select
               className="form-control form-select"
               style={{ width: '100%', height: '38px' }}
-              value={unitFilter}
+              value={routeFilter}
               onChange={(e) => {
-                setUnitFilter(e.target.value);
+                setRouteFilter(e.target.value);
                 setPage(1);
               }}
             >
               <option value="">All Units</option>
-              {units.map((u) => (
-                <option key={u.id} value={u.id}>
-                  {u.name}
+              {routes.map((r) => (
+                <option key={r.id} value={r.id}>
+                  {r.to_location}{r.party_name ? ` (${r.party_name})` : ''}
                 </option>
               ))}
             </select>

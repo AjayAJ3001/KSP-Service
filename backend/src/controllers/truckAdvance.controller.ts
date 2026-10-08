@@ -126,6 +126,28 @@ export const getTruckAdvances = asyncHandler(async (req: AuthRequest, res: Respo
   });
 });
 
+const resolveAdvanceDate = (dateVal?: string | Date | null): string => {
+  if (!dateVal) return new Date().toISOString();
+  if (dateVal instanceof Date) return dateVal.toISOString();
+  const clean = String(dateVal).trim();
+  if (!clean) return new Date().toISOString();
+
+  // If date only: YYYY-MM-DD
+  if (/^\d{4}-\d{2}-\d{2}$/.test(clean)) {
+    const now = new Date();
+    const todayLocal = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+    const todayUTC = now.toISOString().split('T')[0];
+    if (clean === todayLocal || clean === todayUTC) {
+      return now.toISOString();
+    }
+    const [y, m, d] = clean.split('-').map(Number);
+    const combined = new Date(y, m - 1, d, now.getHours(), now.getMinutes(), now.getSeconds(), now.getMilliseconds());
+    return combined.toISOString();
+  }
+
+  return clean;
+};
+
 /**
  * POST /truck-advances
  * Manager gives an advance to a specific vehicle/truck.
@@ -149,11 +171,13 @@ export const createTruckAdvance = asyncHandler(async (req: AuthRequest, res: Res
     throw new AppError('Vehicle not found or inactive.', 404);
   }
 
+  const resolvedDate = resolveAdvanceDate(advance_date);
+
   const result = await query(
     `INSERT INTO truck_advances (vehicle_id, manager_id, amount, advance_date, notes, created_by)
-     VALUES ($1, $2, $3, COALESCE($4::timestamp, NOW()), $5, $6)
+     VALUES ($1, $2, $3, $4::timestamp, $5, $6)
      RETURNING *`,
-    [vehicle_id, managerId, numAmount, advance_date || null, notes?.trim() || null, managerId]
+    [vehicle_id, managerId, numAmount, resolvedDate, notes?.trim() || null, managerId]
   );
 
   // Fetch enriched result with vehicle info

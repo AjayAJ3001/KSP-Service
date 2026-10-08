@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Briefcase, Plus, Edit2, Search, Trash2 } from 'lucide-react';
+import { Briefcase, Plus, Edit2, Trash2 } from 'lucide-react';
 import { ownerService } from '../services/adminService';
 import { Owner } from '../types';
 import { DataTable, Column } from '../components/Common/DataTable';
@@ -8,6 +8,7 @@ import { formatDateDMY } from '../utils/dateUtils';
 
 export const OwnersPage: React.FC = () => {
   const [owners, setOwners] = useState<Owner[]>([]);
+  const [allOwnersList, setAllOwnersList] = useState<Owner[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState('');
@@ -20,6 +21,21 @@ export const OwnersPage: React.FC = () => {
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const LIMIT = 10;
+
+  const loadAllOwnersLookup = async () => {
+    try {
+      const res = await ownerService.getOwners({ limit: 1000 });
+      if (res?.success && res.data?.items) {
+        setAllOwnersList(res.data.items);
+      }
+    } catch (err) {
+      console.error('Failed to load owners lookup:', err);
+    }
+  };
+
+  useEffect(() => {
+    loadAllOwnersLookup();
+  }, []);
 
   useEffect(() => {
     loadOwners();
@@ -80,6 +96,7 @@ export const OwnersPage: React.FC = () => {
       resetForm();
       setPage(1);
       loadOwners();
+      loadAllOwnersLookup();
     } catch (err: any) {
       setFormError(err?.response?.data?.message || 'Failed to save owner. Please try again.');
     } finally {
@@ -92,6 +109,7 @@ export const OwnersPage: React.FC = () => {
     try {
       await ownerService.deleteOwner(owner.id);
       loadOwners();
+      loadAllOwnersLookup();
     } catch (err: any) {
       alert(err?.response?.data?.message || 'Failed to delete owner.');
     }
@@ -133,26 +151,46 @@ export const OwnersPage: React.FC = () => {
         </button>
       </div>
 
-      {/* Search Bar */}
-      <div className="card" style={{ marginBottom: '20px' }}>
-        <div style={{ position: 'relative', maxWidth: '340px' }}>
-          <Search
-            size={16}
-            style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }}
-          />
-          <input
-            type="text"
-            placeholder="Search owners by name..."
-            value={search}
-            onChange={(e) => { setSearch(e.target.value); setPage(1); }}
-            className="input"
-            style={{ paddingLeft: '38px' }}
-          />
-        </div>
-      </div>
-
-      {/* Table */}
+      {/* Table Card */}
       <div className="card">
+        <div className="search-filter-bar" style={{ marginBottom: '18px', display: 'flex', gap: '12px', flexWrap: 'wrap', alignItems: 'center' }}>
+          <div style={{ flex: '1 1 260px', minWidth: '220px', maxWidth: '380px' }}>
+            <select
+              className="form-control form-select"
+              style={{ width: '100%', height: '38px', fontWeight: 600 }}
+              value={search}
+              onChange={(e) => {
+                setSearch(e.target.value);
+                setPage(1);
+              }}
+            >
+              <option value="">All Owners {allOwnersList.length > 0 ? `(${allOwnersList.length})` : ''}</option>
+              {Array.from(new Map(allOwnersList.map((o) => [o.name, o])).values())
+                .sort((a, b) => a.name.localeCompare(b.name))
+                .map((o) => (
+                  <option key={o.id} value={o.name}>
+                    {o.name}{o.mobile_number ? ` (${o.mobile_number})` : ''}
+                  </option>
+                ))}
+            </select>
+          </div>
+
+          {search && (
+            <button
+              type="button"
+              onClick={() => {
+                setSearch('');
+                setPage(1);
+              }}
+              className="btn btn-outline"
+              style={{ height: '38px', padding: '0 14px', fontSize: '13px' }}
+              title="Reset owner filter"
+            >
+              Reset
+            </button>
+          )}
+        </div>
+
         <DataTable
           columns={columns}
           data={owners}
@@ -183,7 +221,7 @@ export const OwnersPage: React.FC = () => {
             <label className="form-label">Owner Name <span style={{ color: '#ef4444' }}>*</span></label>
             <input
               type="text"
-              className="input"
+              className="form-control"
               placeholder="e.g. K.S. PALANISAMY"
               value={formData.name}
               onChange={(e) => setFormData({ ...formData, name: e.target.value })}
@@ -195,7 +233,7 @@ export const OwnersPage: React.FC = () => {
             <label className="form-label">Mobile Number</label>
             <input
               type="text"
-              className="input"
+              className="form-control"
               placeholder="e.g. 9876543210"
               value={formData.mobile_number}
               onChange={(e) => setFormData({ ...formData, mobile_number: e.target.value })}

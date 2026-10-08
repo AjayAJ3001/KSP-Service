@@ -269,6 +269,20 @@ export interface DriverExpense {
   created_at: string;
 }
 
+export interface DriverSettlementPayment {
+  id: number;
+  settlement_id: number;
+  trip_id: number;
+  amount: number;
+  payment_mode: 'CASH' | 'UPI' | 'BANK_TRANSFER';
+  payment_date: string;
+  reference_no?: string;
+  notes?: string;
+  created_by?: number;
+  created_by_name?: string;
+  created_at: string;
+}
+
 export interface Settlement {
   id: number;
   trip_id: number;
@@ -276,19 +290,29 @@ export interface Settlement {
   total_expenses: number;
   advance_paid: number;
   balance_to_driver: number;
-  settlement_status: 'PENDING' | 'VERIFIED';
+  settlement_status: 'PENDING' | 'VERIFIED' | 'SETTLED';
   verified_by?: number;
   verified_at?: string;
+  payment_mode?: 'CASH' | 'UPI' | 'BANK_TRANSFER';
+  payment_date?: string;
+  paid_amount?: number;
+  reference_no?: string;
+  notes?: string;
+  settled_by?: number;
+  settled_by_name?: string;
+  settled_at?: string;
   created_by?: number;
   trip_date?: string;
   lorry_number?: string;
   driver_name?: string;
+  driver_mobile?: string;
   party_name?: string;
   from_location?: string;
   to_location?: string;
   goods_weight?: number;
   freight_rate?: number;
   expense_items?: { expense_type: string; description: string; amount: number }[];
+  payment_history?: DriverSettlementPayment[];
   created_at: string;
   updated_at: string;
 }

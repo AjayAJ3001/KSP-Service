@@ -20,6 +20,7 @@ import { AdminDriversScreen } from '../screens/admin/AdminDriversScreen';
 import { AdminPartiesScreen } from '../screens/admin/AdminPartiesScreen';
 import { AdminMastersScreen } from '../screens/admin/AdminMastersScreen';
 import { AdminTripsScreen } from '../screens/admin/AdminTripsScreen';
+import { AdminOwnerAdvancesScreen } from '../screens/admin/AdminOwnerAdvancesScreen';
 
 import { RootStackParamList } from '../types';
 import { COLORS } from '../constants/theme';
@@ -127,6 +128,11 @@ export const RootNavigator: React.FC = () => {
         name="AdminTrips"
         component={AdminTripsScreen}
         options={{ title: 'Trips Operations' }}
+      />
+      <Stack.Screen
+        name="AdminOwnerAdvances"
+        component={AdminOwnerAdvancesScreen}
+        options={{ title: 'Advance to Manager' }}
       />
     </Stack.Navigator>
   );

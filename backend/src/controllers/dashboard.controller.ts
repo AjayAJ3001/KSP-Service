@@ -22,13 +22,18 @@ export const getDashboard = asyncHandler(async (req: AuthRequest, res: Response)
     query(`SELECT COUNT(*) as total FROM settlements WHERE settlement_status = 'PENDING'`),
     query(
       `SELECT t.id, t.trip_date, t.total_freight, t.status, t.advance_paid,
+              t.goods_weight, t.freight_rate,
               v.lorry_number, d.name as driver_name, p.name as party_name,
-              r.from_location, r.to_location
+              r.from_location, r.to_location,
+              u.name as unit_name, u.abbreviation as unit_abbreviation,
+              COALESCE((SELECT SUM(received_amount) FROM trip_payments WHERE trip_id = t.id), 0) as total_received,
+              (t.total_freight - COALESCE((SELECT SUM(received_amount) FROM trip_payments WHERE trip_id = t.id), 0)) as balance_due
        FROM trips t
        JOIN vehicles v ON t.vehicle_id = v.id
        JOIN drivers d ON t.driver_id = d.id
        JOIN parties p ON t.party_id = p.id
        JOIN routes r ON t.route_id = r.id
+       LEFT JOIN units u ON t.unit_id = u.id
        ORDER BY t.created_at DESC LIMIT 10`
     ),
     query(
@@ -86,24 +91,35 @@ export const getDashboard = asyncHandler(async (req: AuthRequest, res: Response)
 export const getMobileDashboard = asyncHandler(async (req: AuthRequest, res: Response): Promise<void> => {
   const today = new Date().toISOString().split('T')[0];
   const userId = req.user?.id;
+  const isTransportUser = req.user?.role === 'TRANSPORT_USER';
 
   const [todayTripsResult, balanceDueResult, recentTripsResult, advanceCreditSummaryResult, truckAdvanceUsedResult, advanceCreditResult] = await Promise.all([
     query(
-      `SELECT COUNT(*) as total FROM trips WHERE created_by = $1 AND trip_date = $2`,
-      [userId, today]
+      isTransportUser
+        ? `SELECT COUNT(*) as total FROM trips WHERE created_by = $1 AND trip_date = $2`
+        : `SELECT COUNT(*) as total FROM trips WHERE trip_date = $1`,
+      isTransportUser ? [userId, today] : [today]
     ),
     query(
-      `SELECT COALESCE(SUM(t.total_freight - COALESCE(tp.received, 0)), 0) as balance_due
-       FROM trips t
-       LEFT JOIN (SELECT trip_id, SUM(received_amount) as received FROM trip_payments GROUP BY trip_id) tp
-       ON t.id = tp.trip_id
-       WHERE t.created_by = $1 AND t.status NOT IN ('SETTLED', 'CANCELLED')`,
-      [userId]
+      isTransportUser
+        ? `SELECT COALESCE(SUM(t.total_freight - COALESCE(tp.received, 0)), 0) as balance_due
+           FROM trips t
+           LEFT JOIN (SELECT trip_id, SUM(received_amount) as received FROM trip_payments GROUP BY trip_id) tp
+           ON t.id = tp.trip_id
+           WHERE t.created_by = $1 AND t.status NOT IN ('SETTLED', 'CANCELLED')`
+        : `SELECT COALESCE(SUM(t.total_freight - COALESCE(tp.received, 0)), 0) as balance_due
+           FROM trips t
+           LEFT JOIN (SELECT trip_id, SUM(received_amount) as received FROM trip_payments GROUP BY trip_id) tp
+           ON t.id = tp.trip_id
+           WHERE t.status NOT IN ('SETTLED', 'CANCELLED')`,
+      isTransportUser ? [userId] : []
     ),
     query(
       `SELECT t.id, t.trip_date, t.total_freight, t.status, t.advance_paid,
+              t.goods_weight, t.freight_rate,
               v.lorry_number, d.name as driver_name, p.name as party_name,
               r.from_location, r.to_location,
+              u.name as unit_name, u.abbreviation as unit_abbreviation,
               COALESCE((SELECT SUM(received_amount) FROM trip_payments WHERE trip_id = t.id), 0) as total_received,
               (t.total_freight - COALESCE((SELECT SUM(received_amount) FROM trip_payments WHERE trip_id = t.id), 0)) as balance_due
        FROM trips t
@@ -111,9 +127,10 @@ export const getMobileDashboard = asyncHandler(async (req: AuthRequest, res: Res
        JOIN drivers d ON t.driver_id = d.id
        JOIN parties p ON t.party_id = p.id
        JOIN routes r ON t.route_id = r.id
-       WHERE t.created_by = $1
+       LEFT JOIN units u ON t.unit_id = u.id
+       ${isTransportUser ? 'WHERE t.created_by = $1' : ''}
        ORDER BY t.created_at DESC LIMIT 10`,
-      [userId]
+      isTransportUser ? [userId] : []
     ),
     // Total owner advance credit received by this manager
     query(

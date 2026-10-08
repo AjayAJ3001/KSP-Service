@@ -12,16 +12,21 @@ import {
   TrendingUp,
   ArrowUpRight,
   PlusCircle,
+  Eye,
+  Scale,
+  HandCoins,
 } from 'lucide-react';
 import { dashboardService } from '../services/adminService';
 import { DashboardData, Trip } from '../types';
 import { StatCard } from '../components/Common/StatCard';
 import { StatusBadge } from '../components/Common/StatusBadge';
+import { Modal } from '../components/Common/Modal';
 import { formatDateDMY } from '../utils/dateUtils';
 
 export const DashboardPage: React.FC = () => {
   const [data, setData] = useState<DashboardData | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [selectedTrip, setSelectedTrip] = useState<Trip | null>(null);
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -246,8 +251,8 @@ export const DashboardPage: React.FC = () => {
             <button onClick={() => navigate('/payments')} className="btn btn-outline" style={{ justifyContent: 'flex-start' }}>
               <CreditCard size={16} /> Collect Party Payment
             </button>
-            <button onClick={() => navigate('/expenses')} className="btn btn-outline" style={{ justifyContent: 'flex-start' }}>
-              <Building2 size={16} /> Record Driver Expenses
+            <button onClick={() => navigate('/owner-advances')} className="btn btn-outline" style={{ justifyContent: 'flex-start' }}>
+              <HandCoins size={16} /> Owner Advances
             </button>
             <button onClick={() => navigate('/settlements')} className="btn btn-outline" style={{ justifyContent: 'flex-start' }}>
               <FileCheck size={16} /> Generate Settlement Slip
@@ -276,22 +281,29 @@ export const DashboardPage: React.FC = () => {
                 <th>Lorry Number</th>
                 <th>Party</th>
                 <th>Unit / Destination</th>
+                <th>Goods Weight</th>
                 <th>Driver</th>
                 <th>Total Freight</th>
                 <th>Advance Paid</th>
                 <th>Status</th>
+                <th>Action</th>
               </tr>
             </thead>
             <tbody>
               {(!data?.recent_trips || data.recent_trips.length === 0) ? (
                 <tr>
-                  <td colSpan={8} style={{ textAlign: 'center', padding: '32px', color: 'var(--text-muted)' }}>
+                  <td colSpan={10} style={{ textAlign: 'center', padding: '32px', color: 'var(--text-muted)' }}>
                     No trips recorded yet.
                   </td>
                 </tr>
               ) : (
                 data.recent_trips.map((trip: Trip) => (
-                  <tr key={trip.id}>
+                  <tr
+                    key={trip.id}
+                    onClick={() => setSelectedTrip(trip)}
+                    style={{ cursor: 'pointer' }}
+                    title="Click to view trip details"
+                  >
                     <td>{formatDateDMY(trip.trip_date)}</td>
                     <td><strong>{trip.lorry_number}</strong></td>
                     <td>{trip.party_name}</td>
@@ -300,10 +312,29 @@ export const DashboardPage: React.FC = () => {
                         {trip.to_location || trip.from_location}
                       </span>
                     </td>
+                    <td>
+                      <span style={{ fontWeight: 700, color: '#0f766e', background: '#f0fdf4', border: '1px solid #bbf7d0', padding: '3px 8px', borderRadius: '6px', fontSize: '13px', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                        <Scale size={13} color="#0f766e" />
+                        {trip.goods_weight ? `${trip.goods_weight} ${trip.unit_abbreviation || trip.unit_name || 'Ton'}` : '—'}
+                      </span>
+                    </td>
                     <td>{trip.driver_name}</td>
                     <td style={{ fontWeight: 700 }}>{formatCurrency(trip.total_freight)}</td>
                     <td>{formatCurrency(trip.advance_paid)}</td>
                     <td><StatusBadge status={trip.status} /></td>
+                    <td>
+                      <button
+                        type="button"
+                        className="btn btn-outline btn-sm"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setSelectedTrip(trip);
+                        }}
+                        style={{ padding: '4px 8px', fontSize: '12px', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
+                      >
+                        <Eye size={13} /> View
+                      </button>
+                    </td>
                   </tr>
                 ))
               )}
@@ -311,6 +342,101 @@ export const DashboardPage: React.FC = () => {
           </table>
         </div>
       </div>
+
+      {/* Trip Details Modal */}
+      <Modal
+        isOpen={!!selectedTrip}
+        onClose={() => setSelectedTrip(null)}
+        title={`Trip Details #${selectedTrip?.id}`}
+        maxWidth="650px"
+      >
+        {selectedTrip && (
+          <div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', paddingBottom: '16px', borderBottom: '1px solid var(--border-light)' }}>
+              <div>
+                <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Status: </span>
+                <StatusBadge status={selectedTrip.status} />
+              </div>
+              <div style={{ fontSize: '13px', color: 'var(--text-muted)' }}>
+                Date: <strong>{formatDateDMY(selectedTrip.trip_date)}</strong>
+              </div>
+            </div>
+
+            <div className="slip-grid" style={{ marginBottom: '20px' }}>
+              <div className="slip-row">
+                <span>Lorry Number:</span>
+                <strong>{selectedTrip.lorry_number}</strong>
+              </div>
+              <div className="slip-row">
+                <span>Driver:</span>
+                <strong>{selectedTrip.driver_name || '—'}</strong>
+              </div>
+              <div className="slip-row">
+                <span>Party Name:</span>
+                <strong>{selectedTrip.party_name}</strong>
+              </div>
+              <div className="slip-row">
+                <span>Route:</span>
+                <strong>{selectedTrip.from_location} → {selectedTrip.to_location}</strong>
+              </div>
+              <div className="slip-row" style={{ background: '#f0fdf4', padding: '6px 8px', borderRadius: '6px' }}>
+                <span style={{ color: '#166534', fontWeight: 600 }}>Goods Weight:</span>
+                <strong style={{ color: '#15803d', fontSize: '15px' }}>
+                  {selectedTrip.goods_weight ? `${selectedTrip.goods_weight} ${selectedTrip.unit_abbreviation || selectedTrip.unit_name || 'Ton'}` : '—'}
+                </strong>
+              </div>
+              <div className="slip-row">
+                <span>Freight Rate:</span>
+                <strong>
+                  {selectedTrip.freight_rate
+                    ? `₹${parseFloat(String(selectedTrip.freight_rate)).toLocaleString('en-IN')}/${selectedTrip.unit_abbreviation || selectedTrip.unit_name || 'Ton'}`
+                    : '—'}
+                </strong>
+              </div>
+            </div>
+
+            <div style={{ background: '#f8fafc', padding: '16px', borderRadius: '12px', marginBottom: '20px', border: '1px solid var(--border-light)' }}>
+              <div className="slip-row" style={{ border: 'none' }}>
+                <span>Total Freight Billed:</span>
+                <strong style={{ fontSize: '16px', color: 'var(--primary-900)' }}>{formatCurrency(selectedTrip.total_freight)}</strong>
+              </div>
+              <div className="slip-row" style={{ border: 'none' }}>
+                <span>Advance Paid to Driver:</span>
+                <strong>{formatCurrency(selectedTrip.advance_paid || 0)}</strong>
+              </div>
+              <div className="slip-row" style={{ border: 'none' }}>
+                <span>Total Payment Received:</span>
+                <strong style={{ color: 'var(--success-color, #16a34a)' }}>{formatCurrency(selectedTrip.total_received || 0)}</strong>
+              </div>
+              <div className="slip-row" style={{ border: 'none', borderTop: '1px dashed var(--border-light)', paddingTop: '10px', marginTop: '6px' }}>
+                <span style={{ fontWeight: 600 }}>Balance Due:</span>
+                <strong style={{ fontSize: '16px', color: 'var(--danger-color, #dc2626)' }}>
+                  {formatCurrency(
+                    selectedTrip.balance_due ??
+                      Math.max(0, (selectedTrip.total_freight || 0) - (selectedTrip.total_received || 0))
+                  )}
+                </strong>
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={() => {
+                  setSelectedTrip(null);
+                  navigate('/trips');
+                }}
+              >
+                Go to Trips Manager →
+              </button>
+              <button type="button" className="btn btn-outline" onClick={() => setSelectedTrip(null)}>
+                Close
+              </button>
+            </div>
+          </div>
+        )}
+      </Modal>
     </div>
   );
 };

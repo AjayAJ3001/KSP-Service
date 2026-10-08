@@ -123,8 +123,46 @@ export const DateField: React.FC<DateFieldProps> = ({
     }
   };
 
+  // Separate container layout styles from input styling
+  const {
+    width,
+    minWidth,
+    maxWidth,
+    flex,
+    flexGrow,
+    flexShrink,
+    flexBasis,
+    margin,
+    marginTop,
+    marginBottom,
+    marginLeft,
+    marginRight,
+    height,
+    ...inputStyles
+  } = style || {};
+
   return (
-    <div style={{ position: 'relative', width: '100%', display: 'inline-flex', alignItems: 'center' }}>
+    <div
+      style={{
+        position: 'relative',
+        display: 'inline-flex',
+        alignItems: 'center',
+        width: width || '100%',
+        minWidth,
+        maxWidth,
+        flex,
+        flexGrow,
+        flexShrink,
+        flexBasis,
+        margin,
+        marginTop,
+        marginBottom,
+        marginLeft,
+        marginRight,
+        verticalAlign: 'middle',
+        boxSizing: 'border-box',
+      }}
+    >
       <input
         type="text"
         id={id}
@@ -139,11 +177,16 @@ export const DateField: React.FC<DateFieldProps> = ({
         autoFocus={autoFocus}
         maxLength={10}
         style={{
-          paddingRight: '38px',
+          width: '100%',
+          height: height || undefined,
+          paddingRight: '34px',
+          paddingLeft: '11px',
+          fontSize: '13px',
           letterSpacing: displayValue ? '0.5px' : 'normal',
           fontFamily: displayValue ? 'monospace, sans-serif' : 'inherit',
           fontWeight: displayValue ? 600 : 400,
-          ...style,
+          boxSizing: 'border-box',
+          ...inputStyles,
         }}
       />
 
@@ -151,15 +194,16 @@ export const DateField: React.FC<DateFieldProps> = ({
       <div
         style={{
           position: 'absolute',
-          right: '6px',
+          right: '8px',
           top: '50%',
           transform: 'translateY(-50%)',
-          width: '28px',
-          height: '28px',
+          width: '24px',
+          height: '24px',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
           cursor: (disabled || readOnly) ? 'not-allowed' : 'pointer',
+          zIndex: 2,
         }}
         title={readOnly ? 'Read only' : 'Click to select date from calendar'}
       >
@@ -179,7 +223,7 @@ export const DateField: React.FC<DateFieldProps> = ({
             color: '#64748b',
           }}
         >
-          <Calendar size={17} />
+          <Calendar size={16} />
         </button>
 
         {/* Hidden native input for calendar popover */}

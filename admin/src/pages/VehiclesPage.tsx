@@ -973,6 +973,7 @@ const VehicleDetailPanel: React.FC<VehicleDetailPanelProps> = ({ vehicle: v, onE
 
 export const VehiclesPage: React.FC = () => {
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
+  const [allVehiclesList, setAllVehiclesList] = useState<Vehicle[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
@@ -1048,6 +1049,19 @@ export const VehiclesPage: React.FC = () => {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [activeUploadField, setActiveUploadField] = useState<string>('');
+
+  const loadAllVehiclesLookup = async () => {
+    try {
+      const res = await vehicleService.getVehicles({ limit: 1000 });
+      if (res.data?.items) {
+        setAllVehiclesList(res.data.items);
+      }
+    } catch { /* silent */ }
+  };
+
+  useEffect(() => {
+    loadAllVehiclesLookup();
+  }, []);
 
   useEffect(() => {
     loadVehicles();
@@ -1407,6 +1421,7 @@ export const VehiclesPage: React.FC = () => {
       setIsModalOpen(false);
       setSelectedVehicle(null);
       loadVehicles();
+      loadAllVehiclesLookup();
       checkExpiringFleet();
     } catch (err: any) {
       setFormError(err.response?.data?.message || 'Failed to save truck. Please try again.');
@@ -1423,6 +1438,7 @@ export const VehiclesPage: React.FC = () => {
         setViewVehicle(null);
       }
       loadVehicles();
+      loadAllVehiclesLookup();
       checkExpiringFleet();
     } catch (err: any) {
       alert(err.response?.data?.message || 'Failed to delete vehicle.');
@@ -1676,23 +1692,30 @@ export const VehiclesPage: React.FC = () => {
       {/* ── Table Card ──────────────────────────────────────────────────── */}
       <div className="card">
         <div className="search-filter-bar" style={{ marginBottom: '18px', display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
-          <div className="search-input-wrapper" style={{ flex: 1, minWidth: '240px' }}>
-            <Search size={18} />
-            <input
-              type="text"
-              className="form-control"
-              placeholder="Search by truck number..."
+          <div style={{ flex: '1 1 260px', minWidth: '220px', maxWidth: '380px' }}>
+            <select
+              className="form-control form-select"
+              style={{ width: '100%', height: '38px', fontWeight: 600 }}
               value={search}
               onChange={(e) => {
                 setSearch(e.target.value);
                 setPage(1);
               }}
-            />
+            >
+              <option value="">All Vehicle Numbers {allVehiclesList.length > 0 ? `(${allVehiclesList.length})` : ''}</option>
+              {Array.from(new Map(allVehiclesList.map((v) => [v.lorry_number, v])).values())
+                .sort((a, b) => a.lorry_number.localeCompare(b.lorry_number))
+                .map((v) => (
+                  <option key={v.id} value={v.lorry_number}>
+                    {v.lorry_number}
+                  </option>
+                ))}
+            </select>
           </div>
 
           <select
-            className="form-control"
-            style={{ width: '160px' }}
+            className="form-control form-select"
+            style={{ width: '160px', height: '38px' }}
             value={statusFilter}
             onChange={(e) => {
               setStatusFilter(e.target.value);
@@ -1703,6 +1726,22 @@ export const VehiclesPage: React.FC = () => {
             <option value="ACTIVE">Active Only</option>
             <option value="INACTIVE">Inactive Only</option>
           </select>
+
+          {(search || statusFilter) && (
+            <button
+              type="button"
+              onClick={() => {
+                setSearch('');
+                setStatusFilter('');
+                setPage(1);
+              }}
+              className="btn btn-outline"
+              style={{ height: '38px', padding: '0 14px', fontSize: '13px' }}
+              title="Reset vehicle filters"
+            >
+              Reset
+            </button>
+          )}
         </div>
 
         <DataTable

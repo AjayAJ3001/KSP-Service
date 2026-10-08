@@ -163,12 +163,34 @@ export interface Settlement {
   total_expenses: number;
   advance_paid: number;
   balance_to_driver: number;
-  settlement_status: 'PENDING' | 'VERIFIED';
+  settlement_status: 'PENDING' | 'VERIFIED' | 'SETTLED';
   verified_by?: number;
   verified_at?: Date;
+  payment_mode?: 'CASH' | 'UPI' | 'BANK_TRANSFER';
+  payment_date?: Date | string;
+  paid_amount?: number;
+  reference_no?: string;
+  notes?: string;
+  settled_by?: number;
+  settled_by_name?: string;
+  settled_at?: Date;
   created_by: number;
   created_at: Date;
   updated_at: Date;
+}
+
+export interface DriverSettlementPayment {
+  id: number;
+  settlement_id: number;
+  trip_id: number;
+  amount: number;
+  payment_mode: 'CASH' | 'UPI' | 'BANK_TRANSFER';
+  payment_date: Date | string;
+  reference_no?: string;
+  notes?: string;
+  created_by?: number;
+  created_by_name?: string;
+  created_at: Date;
 }
 
 export interface AuditLog {

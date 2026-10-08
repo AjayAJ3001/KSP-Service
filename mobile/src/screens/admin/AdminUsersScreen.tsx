@@ -19,6 +19,7 @@ import {
   CheckCircle,
   XCircle,
   Trash2,
+  Edit2,
   X,
   Phone,
   Mail,
@@ -41,6 +42,7 @@ export const AdminUsersScreen: React.FC<{ navigation: any }> = ({ navigation }) 
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [isResetModalOpen, setIsResetModalOpen] = useState(false);
   const [selectedUser, setSelectedUser] = useState<User | null>(null);
+  const [editingUser, setEditingUser] = useState<User | null>(null);
 
   // Form State
   const [username, setUsername] = useState('');
@@ -75,35 +77,87 @@ export const AdminUsersScreen: React.FC<{ navigation: any }> = ({ navigation }) 
     loadUsers();
   }, [loadUsers]);
 
-  const handleCreateUser = async () => {
-    if (!username.trim() || !name.trim() || !password.trim()) {
-      Alert.alert('Required Fields', 'Username, Name, and Password are required.');
+  const openAddModal = () => {
+    setEditingUser(null);
+    resetForm();
+    setIsAddModalOpen(true);
+  };
+
+  const openEditModal = (u: User) => {
+    setEditingUser(u);
+    setUsername(u.username);
+    setName(u.name);
+    setPassword('');
+    setEmail(u.email || '');
+    setMobileNumber(u.mobile_number || '');
+    setRole(u.role as any);
+    setIsAddModalOpen(true);
+  };
+
+  const handleSaveUser = async () => {
+    if (!name.trim()) {
+      Alert.alert('Required Fields', 'Full Name is required.');
       return;
     }
-    if (password.length < 6) {
-      Alert.alert('Invalid Password', 'Password must be at least 6 characters.');
-      return;
+    if (!editingUser) {
+      if (!username.trim() || !password.trim()) {
+        Alert.alert('Required Fields', 'Username and Password are required.');
+        return;
+      }
+      if (password.length < 6) {
+        Alert.alert('Invalid Password', 'Password must be at least 6 characters.');
+        return;
+      }
     }
 
     try {
       setIsSubmitting(true);
-      await adminUserService.createUser({
-        username: username.trim(),
-        name: name.trim(),
-        password: password.trim(),
-        email: email.trim() || undefined,
-        mobile_number: mobileNumber.trim() || undefined,
-        role,
-      });
-      Alert.alert('Success', `User ${username} created successfully.`);
+      if (editingUser) {
+        await adminUserService.updateUser(editingUser.id, {
+          name: name.trim(),
+          email: email.trim() || undefined,
+          mobile_number: mobileNumber.trim() || undefined,
+          role,
+        });
+        Alert.alert('Success', `User ${editingUser.username} updated successfully.`);
+      } else {
+        await adminUserService.createUser({
+          username: username.trim(),
+          name: name.trim(),
+          password: password.trim(),
+          email: email.trim() || undefined,
+          mobile_number: mobileNumber.trim() || undefined,
+          role,
+        });
+        Alert.alert('Success', `User ${username} created successfully.`);
+      }
       setIsAddModalOpen(false);
       resetForm();
       loadUsers();
     } catch (err: any) {
-      Alert.alert('Creation Failed', err.message || 'Could not create user.');
+      Alert.alert('Save Failed', err.message || 'Could not save user.');
     } finally {
       setIsSubmitting(false);
     }
+  };
+
+  const handleDeleteUser = (u: User) => {
+    Alert.alert('Delete User', `Are you sure you want to delete user ${u.name} (@${u.username})? This action cannot be undone.`, [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Delete',
+        style: 'destructive',
+        onPress: async () => {
+          try {
+            await adminUserService.deleteUser(u.id);
+            Alert.alert('Deleted', `User ${u.username} deleted.`);
+            loadUsers();
+          } catch (err: any) {
+            Alert.alert('Delete Failed', err.message);
+          }
+        },
+      },
+    ]);
   };
 
   const handleToggleStatus = (user: User) => {
@@ -177,10 +231,7 @@ export const AdminUsersScreen: React.FC<{ navigation: any }> = ({ navigation }) 
           </View>
           <TouchableOpacity
             style={styles.addBtn}
-            onPress={() => {
-              resetForm();
-              setIsAddModalOpen(true);
-            }}
+            onPress={openAddModal}
           >
             <UserPlus size={16} color={COLORS.white} />
             <Text style={styles.addBtnText}>Add User</Text>
@@ -266,25 +317,41 @@ export const AdminUsersScreen: React.FC<{ navigation: any }> = ({ navigation }) 
                 {/* Action Buttons */}
                 <View style={styles.cardActions}>
                   <TouchableOpacity
-                    style={[styles.actionBtn, { backgroundColor: isActive ? '#fef2f2' : '#ecfdf5' }]}
+                    style={[styles.actionBtn, { backgroundColor: '#eff6ff' }]}
+                    onPress={() => openEditModal(u)}
+                  >
+                    <Edit2 size={13} color="#2563eb" />
+                    <Text style={[styles.actionBtnText, { color: '#2563eb' }]}>Edit</Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    style={[styles.actionBtn, { backgroundColor: isActive ? '#fff7ed' : '#ecfdf5' }]}
                     onPress={() => handleToggleStatus(u)}
                   >
-                    {isActive ? <XCircle size={14} color="#dc2626" /> : <CheckCircle size={14} color="#16a34a" />}
-                    <Text style={[styles.actionBtnText, { color: isActive ? '#dc2626' : '#16a34a' }]}>
+                    {isActive ? <XCircle size={13} color="#ea580c" /> : <CheckCircle size={13} color="#16a34a" />}
+                    <Text style={[styles.actionBtnText, { color: isActive ? '#ea580c' : '#16a34a' }]}>
                       {isActive ? 'Deactivate' : 'Activate'}
                     </Text>
                   </TouchableOpacity>
 
                   <TouchableOpacity
-                    style={[styles.actionBtn, { backgroundColor: '#eff6ff' }]}
+                    style={[styles.actionBtn, { backgroundColor: '#f1f5f9' }]}
                     onPress={() => {
                       setSelectedUser(u);
                       setResetNewPassword('');
                       setIsResetModalOpen(true);
                     }}
                   >
-                    <Key size={14} color="#2563eb" />
-                    <Text style={[styles.actionBtnText, { color: '#2563eb' }]}>Reset Password</Text>
+                    <Key size={13} color="#475569" />
+                    <Text style={[styles.actionBtnText, { color: '#475569' }]}>Reset</Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    style={[styles.actionBtn, { backgroundColor: '#fef2f2' }]}
+                    onPress={() => handleDeleteUser(u)}
+                  >
+                    <Trash2 size={13} color="#dc2626" />
+                    <Text style={[styles.actionBtnText, { color: '#dc2626' }]}>Delete</Text>
                   </TouchableOpacity>
                 </View>
               </View>
@@ -293,7 +360,7 @@ export const AdminUsersScreen: React.FC<{ navigation: any }> = ({ navigation }) 
         </ScrollView>
       )}
 
-      {/* Add User Modal */}
+      {/* Add / Edit User Modal */}
       <Modal
         visible={isAddModalOpen}
         animationType="slide"
@@ -303,7 +370,9 @@ export const AdminUsersScreen: React.FC<{ navigation: any }> = ({ navigation }) 
         <View style={styles.modalOverlay}>
           <ScrollView contentContainerStyle={styles.modalContent}>
             <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Create New Account</Text>
+              <Text style={styles.modalTitle}>
+                {editingUser ? `Edit User (@${editingUser.username})` : 'Create New Account'}
+              </Text>
               <TouchableOpacity onPress={() => setIsAddModalOpen(false)}>
                 <X size={20} color={COLORS.text} />
               </TouchableOpacity>
@@ -326,11 +395,12 @@ export const AdminUsersScreen: React.FC<{ navigation: any }> = ({ navigation }) 
 
             <Text style={styles.inputLabel}>Username *</Text>
             <TextInput
-              style={styles.formInput}
+              style={[styles.formInput, editingUser && { backgroundColor: '#f1f5f9', color: COLORS.textMuted }]}
               value={username}
               onChangeText={setUsername}
               placeholder="e.g. manager_ksp"
               autoCapitalize="none"
+              editable={!editingUser}
             />
 
             <Text style={styles.inputLabel}>Full Name *</Text>
@@ -341,14 +411,18 @@ export const AdminUsersScreen: React.FC<{ navigation: any }> = ({ navigation }) 
               placeholder="e.g. Ramesh Kumar"
             />
 
-            <Text style={styles.inputLabel}>Initial Password (min 6 chars) *</Text>
-            <TextInput
-              style={styles.formInput}
-              value={password}
-              onChangeText={setPassword}
-              placeholder="••••••••"
-              secureTextEntry
-            />
+            {!editingUser && (
+              <>
+                <Text style={styles.inputLabel}>Initial Password (min 6 chars) *</Text>
+                <TextInput
+                  style={styles.formInput}
+                  value={password}
+                  onChangeText={setPassword}
+                  placeholder="••••••••"
+                  secureTextEntry
+                />
+              </>
+            )}
 
             <Text style={styles.inputLabel}>Mobile Phone</Text>
             <TextInput
@@ -379,13 +453,15 @@ export const AdminUsersScreen: React.FC<{ navigation: any }> = ({ navigation }) 
 
               <TouchableOpacity
                 style={styles.modalSubmitBtn}
-                onPress={handleCreateUser}
+                onPress={handleSaveUser}
                 disabled={isSubmitting}
               >
                 {isSubmitting ? (
                   <ActivityIndicator size="small" color={COLORS.white} />
                 ) : (
-                  <Text style={styles.modalSubmitText}>Create Account</Text>
+                  <Text style={styles.modalSubmitText}>
+                    {editingUser ? 'Save Changes' : 'Create Account'}
+                  </Text>
                 )}
               </TouchableOpacity>
             </View>

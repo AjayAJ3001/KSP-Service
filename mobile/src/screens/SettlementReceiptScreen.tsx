@@ -265,9 +265,9 @@ export const SettlementReceiptScreen: React.FC<{ route: any; navigation: any }> 
             <Text style={styles.gridValueBold}>{trip.party_name || '—'}</Text>
           </View>
           <View style={styles.gridRow}>
-            <Text style={styles.gridLabel}>Route:</Text>
+            <Text style={styles.gridLabel}>Unit:</Text>
             <Text style={styles.gridValue}>
-              {trip.from_location} → {trip.to_location}
+              {trip.to_location || trip.from_location}
             </Text>
           </View>
           <View style={styles.gridRow}>

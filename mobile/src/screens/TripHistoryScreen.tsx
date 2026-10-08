@@ -129,7 +129,7 @@ export const TripHistoryScreen: React.FC<{ navigation: any }> = ({ navigation })
                     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
                       <MapPin size={16} color={COLORS.accent} />
                       <Text style={styles.routeText}>
-                        {trip.from_location} → {trip.to_location}
+                        {trip.to_location || `${trip.from_location} → ${trip.to_location}`}
                       </Text>
                     </View>
                     <View style={[styles.statusPill, { backgroundColor: st.bg }]}>

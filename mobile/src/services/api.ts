@@ -2,7 +2,7 @@ import axios from 'axios';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 // Current PC Wi-Fi IP and default endpoints
-export const CURRENT_WIFI_IP = '10.180.228.146';
+export const CURRENT_WIFI_IP = '192.168.1.13';
 export const DEFAULT_BASE_URL = 'http://localhost:5000/api';
 
 export const CANDIDATE_BASE_URLS = [

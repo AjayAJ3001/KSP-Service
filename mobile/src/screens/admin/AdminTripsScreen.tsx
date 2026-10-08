@@ -174,7 +174,7 @@ export const AdminTripsScreen: React.FC<{ navigation: any }> = ({ navigation }) 
               {/* Party & Route */}
               <Text style={styles.partyText}>{t.party_name}</Text>
               <Text style={styles.routeText}>
-                {t.from_location} → {t.to_location} • {t.goods_weight} {t.unit_name || 'Ton'} @ ₹{t.freight_rate}
+                {t.to_location || `${t.from_location} → ${t.to_location}`} • {t.goods_weight} {t.unit_name || 'Ton'} @ ₹{t.freight_rate}
               </Text>
 
               {/* Financial Metrics */}

@@ -23,6 +23,10 @@ export interface Driver {
   license_expiry_date?: string;
   days_remaining?: number;
   photo_url?: string;
+  license_photo_url?: string;
+  license_photo_back_url?: string;
+  id_proof_type?: string;
+  id_proof_url?: string;
   status: 'ACTIVE' | 'INACTIVE';
   created_at?: string;
 }
@@ -36,7 +40,9 @@ export interface Vehicle {
   goodshed_loading_expense?: number;
   status: 'ACTIVE' | 'INACTIVE';
   rc_number?: string;
+  rc_reg_date?: string;
   rc_photo_url?: string;
+  rc_photo_back_url?: string;
   rc_expiry_date?: string;
   fc_number?: string;
   fc_expiry_date?: string;
@@ -56,6 +62,7 @@ export interface Vehicle {
   dts_certificate_url?: string;
   tds_number?: string;
   tds_expiry_date?: string;
+  tds_certificate_url?: string;
   account_number?: string;
   bank_name?: string;
   ifsc_code?: string;
@@ -229,7 +236,7 @@ export interface Settlement {
   total_expenses: number;
   advance_paid: number;
   balance_to_driver: number;
-  settlement_status: 'PENDING' | 'VERIFIED';
+  settlement_status: 'PENDING' | 'VERIFIED' | 'SETTLED';
   trip_date?: string;
   lorry_number?: string;
   driver_name?: string;
@@ -237,6 +244,11 @@ export interface Settlement {
   from_location?: string;
   to_location?: string;
   expense_items?: { expense_type: string; description: string; amount: number }[];
+  payment_mode?: 'CASH' | 'UPI' | 'BANK_TRANSFER' | string;
+  payment_date?: string;
+  paid_amount?: number;
+  reference_no?: string;
+  settled_by_name?: string;
   created_at: string;
 }
 
@@ -359,12 +371,13 @@ export type RootStackParamList = {
   AdminVehicles: undefined;
   AdminDrivers: undefined;
   AdminParties: undefined;
-  AdminMasters: undefined;
+  AdminMasters: { initialTab?: 'UNITS' | 'ROUTES' | 'CLEANING' | 'UNLOADING' | 'BATA' | 'LIMITS' | 'OWNERS' | 'ADVANCES' } | undefined;
   AdminTrips: undefined;
+  AdminOwnerAdvances: undefined;
 };
 
 export type MainTabParamList = {
-  Home: undefined;
+  Home?: undefined;
   Trips: undefined;
   Ledger: undefined;
   Profile: undefined;

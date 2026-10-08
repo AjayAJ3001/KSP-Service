@@ -210,8 +210,21 @@ export const OwnerAdvancesPage: React.FC = () => {
     return `₹${num.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
   };
 
-  const formatDateTime = (dateStr?: string) => formatIST(dateStr);
-
+  const formatDateTime = (dateStr?: string, createdAtStr?: string) => {
+    if (!dateStr && !createdAtStr) return '—';
+    // If dateStr is midnight (12:00 am) because date-only was stored, but createdAtStr has the real recorded timestamp
+    const clean = String(dateStr || '').trim();
+    const isMidnight =
+      !clean ||
+      clean.endsWith('T18:30:00.000Z') ||
+      clean.endsWith('T00:00:00.000Z') ||
+      clean.includes(' 00:00:00') ||
+      clean.includes('T00:00:00');
+    if (isMidnight && createdAtStr) {
+      return formatIST(createdAtStr);
+    }
+    return formatIST(dateStr || createdAtStr);
+  };
 
   const columns: Column<OwnerAdvance>[] = [
     {
@@ -219,7 +232,7 @@ export const OwnerAdvancesPage: React.FC = () => {
       accessor: 'advance_date',
       render: (r) => (
         <span style={{ fontWeight: 600, color: 'var(--text-main)', fontSize: '13.5px' }}>
-          {formatDateTime(r.advance_date)}
+          {formatDateTime(r.advance_date, r.created_at)}
         </span>
       ),
     },
@@ -534,7 +547,7 @@ export const OwnerAdvancesPage: React.FC = () => {
           <div>
             <strong>Date & Time: </strong>
             {selectedAdvance
-              ? formatDateTime(selectedAdvance.advance_date)
+              ? formatDateTime(selectedAdvance.advance_date, selectedAdvance.created_at)
               : 'Automatically recorded at current time on save'}
           </div>
         </div>

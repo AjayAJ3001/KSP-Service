@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -195,6 +195,7 @@ export const DriverExpensesScreen: React.FC<{ route: any; navigation: any }> = (
   const [isAddingKey, setIsAddingKey] = useState<string | null>(null);
   const [isGenerating, setIsGenerating] = useState(false);
   const [error, setError] = useState('');
+  const autoSavedRef = useRef(false);
 
   useEffect(() => {
     loadExpenses();
@@ -271,12 +272,13 @@ export const DriverExpensesScreen: React.FC<{ route: any; navigation: any }> = (
       setTruckLoadingAmount(loadingExp);
 
       // 3b. Fetch unloading rates from admin panel and override KRISHI_UNITS ratePerTon
+      let updatedUnits: KrishiUnit[] = [];
       if (isKrishiParty) {
         try {
           const unloadingRes = await mobileLookupService.getUnloadingRates(trip.party_id);
           if (unloadingRes.data && unloadingRes.data.length > 0) {
             // Merge fetched rates into KRISHI_UNITS by matching route_id or unit_name keywords
-            const updatedUnits = KRISHI_UNITS.map((ku) => {
+            updatedUnits = KRISHI_UNITS.map((ku) => {
               // Try to match by route_id first
               let fetched = unloadingRes.data.find(
                 (ur) => ur.route_id !== null && ur.route_id === ku.routeId
@@ -373,6 +375,89 @@ export const DriverExpensesScreen: React.FC<{ route: any; navigation: any }> = (
               : prev.CLEANING_CHARGE.description,
         },
       }));
+
+      // 5. Automatically save the 4 fixed/calculated categories on initial load if not already saved
+      if (!autoSavedRef.current) {
+        let hasSavedAny = false;
+
+        // Auto-save Loading
+        if (loadingExp > 0 && !fetchedExpenses.some((e: any) => e.expense_type === 'LOADING')) {
+          try {
+            await mobileExpenseService.addExpense(trip.id, {
+              expense_type: 'LOADING',
+              description: `Loading charge for ${trip.lorry_number || 'truck'}`,
+              amount: loadingExp,
+            });
+            hasSavedAny = true;
+          } catch (e) {
+            console.log('Auto-save loading error:', e);
+          }
+        }
+
+        // Auto-save Unloading (Krishi only)
+        let matchedUnit = activeKrishiUnit;
+        if (isKrishiParty) {
+          const dest = (trip.to_location || trip.from_location || '').toUpperCase();
+          const unitsList = updatedUnits.length > 0 ? updatedUnits : KRISHI_UNITS;
+          matchedUnit = unitsList.find((u) => u.keywords.some((kw) => dest.includes(kw.toUpperCase()))) || unitsList[0];
+        }
+        const effectiveUnloadingRate = matchedUnit?.ratePerTon || 0;
+        const unloadingAmt = isKrishiParty && matchedUnit ? Math.round(goodsWeight * effectiveUnloadingRate * 100) / 100 : 0;
+
+        if (isKrishiParty && unloadingAmt > 0 && !fetchedExpenses.some((e: any) => e.expense_type === 'UNLOADING')) {
+          try {
+            await mobileExpenseService.addExpense(trip.id, {
+              expense_type: 'UNLOADING',
+              description: `Unloading ${matchedUnit?.name || 'Unit'} (${goodsWeight}T × ₹${effectiveUnloadingRate}/T)`,
+              amount: unloadingAmt,
+            });
+            hasSavedAny = true;
+          } catch (e) {
+            console.log('Auto-save unloading error:', e);
+          }
+        }
+
+        // Auto-save Driver Bata
+        if (calculatedBata > 0 && !fetchedExpenses.some((e: any) => e.expense_type === 'DRIVER_BATA' || e.expense_type === 'DRIVER_BETA')) {
+          try {
+            await mobileExpenseService.addExpense(trip.id, {
+              expense_type: 'DRIVER_BATA',
+              description: `Driver Bata (${bataPct}% of Total Freight ₹${totalFreight})`,
+              amount: calculatedBata,
+            });
+            hasSavedAny = true;
+          } catch (e) {
+            console.log('Auto-save driver bata error:', e);
+          }
+        }
+
+        // Auto-save Cleaning Charge
+        if (cleaningExp > 0 && !fetchedExpenses.some((e: any) => e.expense_type === 'CLEANING_CHARGE' || e.expense_type === 'CLEANING')) {
+          try {
+            await mobileExpenseService.addExpense(trip.id, {
+              expense_type: 'CLEANING_CHARGE',
+              description: matchedUnit
+                ? `Cleaning charge: Unit ${matchedUnit.unitNumber} - ${matchedUnit.name}`
+                : `Cleaning charge for ${trip.to_location || trip.lorry_number || 'truck'}`,
+              amount: cleaningExp,
+            });
+            hasSavedAny = true;
+          } catch (e) {
+            console.log('Auto-save cleaning error:', e);
+          }
+        }
+
+        autoSavedRef.current = true;
+
+        if (hasSavedAny) {
+          const freshRes = await mobileExpenseService.getTripExpenses(trip.id);
+          const freshExpenses = freshRes.data.expenses || [];
+          setExpenses(freshExpenses);
+          setTotalExpenses(freshRes.data.total_expenses || 0);
+          setAdvancePaid(freshRes.data.advance_paid || 0);
+          setBalanceToDriver(freshRes.data.balance_to_driver || 0);
+        }
+      }
     } catch (err) {
       console.error('Failed to load expenses', err);
     } finally {
@@ -380,87 +465,108 @@ export const DriverExpensesScreen: React.FC<{ route: any; navigation: any }> = (
     }
   };
 
-  const toggleCategory = (catKey: string) => {
-    setError('');
-    setOpenCategory((prev) => {
-      if (prev === catKey) return null; // close if already open
+  // Auto-save categories that have fixed/calculated amounts — no user button needed
+  const AUTO_SAVE_CATEGORIES = ['LOADING', 'UNLOADING', 'DRIVER_BATA', 'CLEANING_CHARGE'];
 
-      // When opening LOADING, auto-fill amount from truck if not already set and no entry yet
+  const toggleCategory = async (catKey: string) => {
+    setError('');
+
+    // Close if already open
+    if (openCategory === catKey) {
+      setOpenCategory(null);
+      return;
+    }
+
+    // --- Auto-save logic when OPENING a fixed/calculated category (if no entry exists yet) ---
+    if (AUTO_SAVE_CATEGORIES.includes(catKey)) {
+      // LOADING
       if (catKey === 'LOADING' && truckLoadingAmount > 0) {
         const existingLoading = expenses.filter((e) => e.expense_type === 'LOADING');
         if (existingLoading.length === 0) {
-          setCategoryInputs((inputs) => ({
-            ...inputs,
-            LOADING: {
-              amount: String(truckLoadingAmount),
-              description:
-                inputs.LOADING.description ||
-                `Loading charge for ${trip.lorry_number || 'truck'}`,
-            },
-          }));
-          setAutoFilledCategories((s) => new Set(s).add('LOADING'));
+          try {
+            setIsAddingKey('LOADING');
+            await mobileExpenseService.addExpense(trip.id, {
+              expense_type: 'LOADING',
+              description: `Loading charge for ${trip.lorry_number || 'truck'}`,
+              amount: truckLoadingAmount,
+            });
+            await loadExpenses();
+          } catch (err: any) {
+            setError(err.message || 'Failed to auto-save Loading.');
+          } finally {
+            setIsAddingKey(null);
+          }
         }
       }
 
-      // When opening UNLOADING, auto-fill for Krishi party based on weight * unit rate
+      // UNLOADING (Krishi only)
       if (catKey === 'UNLOADING' && isKrishiParty && activeKrishiUnit && krishiUnloadingAmount > 0) {
         const existingUnloading = expenses.filter((e) => e.expense_type === 'UNLOADING');
         if (existingUnloading.length === 0) {
-          setCategoryInputs((inputs) => ({
-            ...inputs,
-            UNLOADING: {
-              amount: inputs.UNLOADING.amount || String(krishiUnloadingAmount),
-              description:
-                inputs.UNLOADING.description ||
-                `Unloading Unit ${activeKrishiUnit.unitNumber}: ${activeKrishiUnit.name} (${goodsWeight} T @ ₹${activeKrishiUnit.ratePerTon}/T)`,
-            },
-          }));
-          setAutoFilledCategories((s) => new Set(s).add('UNLOADING'));
+          try {
+            setIsAddingKey('UNLOADING');
+            await mobileExpenseService.addExpense(trip.id, {
+              expense_type: 'UNLOADING',
+              description: `Unloading ${activeKrishiUnit.name} (${goodsWeight}T × ₹${activeKrishiUnit.ratePerTon}/T)`,
+              amount: krishiUnloadingAmount,
+            });
+            await loadExpenses();
+          } catch (err: any) {
+            setError(err.message || 'Failed to auto-save Unloading.');
+          } finally {
+            setIsAddingKey(null);
+          }
         }
       }
 
-      // When opening CLEANING_CHARGE, auto-fill amount and unit-specific description
-      if (catKey === 'CLEANING_CHARGE' && truckCleaningAmount > 0) {
-        const existingCleaning = expenses.filter(
-          (e) => e.expense_type === 'CLEANING_CHARGE' || e.expense_type === 'CLEANING'
-        );
-        if (existingCleaning.length === 0) {
-          setCategoryInputs((inputs) => ({
-            ...inputs,
-            CLEANING_CHARGE: {
-              amount: inputs.CLEANING_CHARGE.amount || String(truckCleaningAmount),
-              description:
-                inputs.CLEANING_CHARGE.description ||
-                (activeKrishiUnit
-                  ? `Cleaning charge: Unit ${activeKrishiUnit.unitNumber} - ${activeKrishiUnit.name}`
-                  : `Cleaning charge for ${trip.to_location || trip.lorry_number || 'truck'}`),
-            },
-          }));
-          setAutoFilledCategories((s) => new Set(s).add('CLEANING_CHARGE'));
-        }
-      }
-
-      // When opening DRIVER_BATA, auto-fill calculated amount from freight
+      // DRIVER_BATA
       if (catKey === 'DRIVER_BATA' && driverBataAmount > 0) {
         const existingBata = expenses.filter(
           (e) => e.expense_type === 'DRIVER_BATA' || e.expense_type === 'DRIVER_BETA'
         );
         if (existingBata.length === 0) {
-          setCategoryInputs((inputs) => ({
-            ...inputs,
-            DRIVER_BATA: {
-              amount: String(driverBataAmount),
-              description:
-                inputs.DRIVER_BATA?.description ||
-                `Driver Bata (${driverBataPercentage}% of Total Freight ₹${totalFreight})`,
-            },
-          }));
-          setAutoFilledCategories((s) => new Set(s).add('DRIVER_BATA'));
+          try {
+            setIsAddingKey('DRIVER_BATA');
+            await mobileExpenseService.addExpense(trip.id, {
+              expense_type: 'DRIVER_BATA',
+              description: `Driver Bata (${driverBataPercentage}% of Total Freight ₹${totalFreight})`,
+              amount: driverBataAmount,
+            });
+            await loadExpenses();
+          } catch (err: any) {
+            setError(err.message || 'Failed to auto-save Driver Bata.');
+          } finally {
+            setIsAddingKey(null);
+          }
         }
       }
 
-      return catKey;
-    });
+      // CLEANING_CHARGE
+      if (catKey === 'CLEANING_CHARGE' && truckCleaningAmount > 0) {
+        const existingCleaning = expenses.filter(
+          (e) => e.expense_type === 'CLEANING_CHARGE' || e.expense_type === 'CLEANING'
+        );
+        if (existingCleaning.length === 0) {
+          try {
+            setIsAddingKey('CLEANING_CHARGE');
+            await mobileExpenseService.addExpense(trip.id, {
+              expense_type: 'CLEANING_CHARGE',
+              description: activeKrishiUnit
+                ? `Cleaning charge: Unit ${activeKrishiUnit.unitNumber} - ${activeKrishiUnit.name}`
+                : `Cleaning charge for ${trip.to_location || trip.lorry_number || 'truck'}`,
+              amount: truckCleaningAmount,
+            });
+            await loadExpenses();
+          } catch (err: any) {
+            setError(err.message || 'Failed to auto-save Cleaning Charge.');
+          } finally {
+            setIsAddingKey(null);
+          }
+        }
+      }
+    }
+
+    setOpenCategory(catKey);
   };
 
   // Key order for auto-advance after save
@@ -719,56 +825,9 @@ export const DriverExpensesScreen: React.FC<{ route: any; navigation: any }> = (
         </Text>
       </View>
 
-      {/* 5-Category Expense Breakdown: Loading + Unloading + Driver Bata + Cleaning + Other */}
-      <View style={styles.breakdownCard}>
-        <View style={styles.breakdownHeaderRow}>
-          <Text style={styles.breakdownCardTitle}>EXPENSES CALCULATION BREAKDOWN</Text>
-          <Text style={styles.breakdownCardSub}>Loading + Unloading + Driver Bata + Cleaning + Other</Text>
-        </View>
-
-        <View style={styles.breakdownItemsRow}>
-          <View style={styles.breakdownItem}>
-            <Text style={styles.breakdownItemLabel}>1. Loading</Text>
-            <Text style={styles.breakdownItemVal}>{formatCurrency(getCategoryTotal(EXPENSE_CATEGORIES[0]))}</Text>
-          </View>
-          <Text style={styles.breakdownPlus}>+</Text>
-
-          <View style={styles.breakdownItem}>
-            <Text style={styles.breakdownItemLabel}>2. Unloading</Text>
-            <Text style={[styles.breakdownItemVal, !isKrishiParty && { color: COLORS.textMuted }]}>
-              {isKrishiParty ? formatCurrency(getCategoryTotal(EXPENSE_CATEGORIES[1])) : '₹0'}
-            </Text>
-            {!isKrishiParty && <Text style={styles.breakdownZeroTag}>Non-Krishi</Text>}
-          </View>
-          <Text style={styles.breakdownPlus}>+</Text>
-
-          <View style={styles.breakdownItem}>
-            <Text style={styles.breakdownItemLabel}>3. Driver Bata</Text>
-            <Text style={styles.breakdownItemVal}>{formatCurrency(getCategoryTotal(EXPENSE_CATEGORIES[2]))}</Text>
-          </View>
-          <Text style={styles.breakdownPlus}>+</Text>
-
-          <View style={styles.breakdownItem}>
-            <Text style={styles.breakdownItemLabel}>4. Cleaning</Text>
-            <Text style={styles.breakdownItemVal}>{formatCurrency(getCategoryTotal(EXPENSE_CATEGORIES[3]))}</Text>
-          </View>
-          <Text style={styles.breakdownPlus}>+</Text>
-
-          <View style={styles.breakdownItem}>
-            <Text style={styles.breakdownItemLabel}>5. Other</Text>
-            <Text style={styles.breakdownItemVal}>{formatCurrency(getCategoryTotal(EXPENSE_CATEGORIES[4]))}</Text>
-          </View>
-        </View>
-
-        <View style={styles.breakdownTotalBar}>
-          <Text style={styles.breakdownTotalBarLabel}>TOTAL EXPENSES:</Text>
-          <Text style={styles.breakdownTotalBarValue}>{formatCurrency(totalExpenses)}</Text>
-        </View>
-      </View>
-
       <Text style={styles.sectionHeaderTitle}>EXPENSE CATEGORIES</Text>
       <Text style={styles.sectionHeaderSub}>
-        Tap any category to open, enter details, and close
+        Tap any category to open — auto-save categories save instantly
       </Text>
 
       {/* Accordion Categories */}
@@ -1076,7 +1135,7 @@ export const DriverExpensesScreen: React.FC<{ route: any; navigation: any }> = (
                     </View>
                   </View>
                 ) : cat.key === 'UNLOADING' && isKrishiParty ? (
-                  // Krishi unloading: read-only confirmed amount, no editable input
+                  // Krishi unloading: auto-saved, show confirmation
                   <View style={styles.entryFormContainer}>
                     <View style={styles.unloadingLockedBox}>
                       <View style={styles.unloadingLockedLeft}>
@@ -1087,10 +1146,12 @@ export const DriverExpensesScreen: React.FC<{ route: any; navigation: any }> = (
                         </Text>
                       </View>
                       <View style={styles.unloadingLockedBadge}>
-                        <Text style={styles.unloadingLockedBadgeText}>🔒 Auto</Text>
+                        <Text style={styles.unloadingLockedBadgeText}>✓ Auto-Saved</Text>
                       </View>
                     </View>
-
+                    {isAddingKey === 'UNLOADING' && (
+                      <ActivityIndicator color={COLORS.accent} size="small" style={{ marginVertical: 8 }} />
+                    )}
                     <View style={styles.cardActionRow}>
                       <TouchableOpacity
                         style={styles.closeCardBtn}
@@ -1099,189 +1160,153 @@ export const DriverExpensesScreen: React.FC<{ route: any; navigation: any }> = (
                       >
                         <X size={16} color={COLORS.textMuted} />
                         <Text style={styles.closeCardBtnText}>CLOSE</Text>
-                      </TouchableOpacity>
-
-                      <TouchableOpacity
-                        style={[styles.addEntryBtn, isAdding && { opacity: 0.7 }]}
-                        onPress={() => {
-                          // Save unloading with the auto-calculated amount and description
-                          setCategoryInputs((prev) => ({
-                            ...prev,
-                            UNLOADING: {
-                              amount: String(krishiUnloadingAmount),
-                              description: `Unloading ${activeKrishiUnit?.name || ''} (${goodsWeight}T × ₹${activeKrishiUnit?.ratePerTon}/T)`,
-                            },
-                          }));
-                          handleAddExpense('UNLOADING');
-                        }}
-                        disabled={isAdding}
-                        activeOpacity={0.8}
-                      >
-                        {isAdding ? (
-                          <ActivityIndicator color={COLORS.white} size="small" />
-                        ) : (
-                          <>
-                            <Plus size={16} color={COLORS.white} />
-                            <Text style={styles.addEntryBtnText}>SAVE ENTRY</Text>
-                          </>
-                        )}
                       </TouchableOpacity>
                     </View>
                   </View>
                 ) : (
+                  // OTHER or categories without auto-save
                   <View style={styles.entryFormContainer}>
-                    <Text style={styles.entryFormTitle}>+ Add {cat.shortName} Entry</Text>
-
-                    <View style={styles.formGroup}>
-                      <View style={styles.inputLabelRow}>
-                        <Text style={styles.inputLabel}>Amount (₹) *</Text>
-                        {cat.key === 'LOADING' && truckLoadingAmount > 0 && (
-                          <View style={styles.lockedBadgeSmall}>
-                            <Text style={styles.lockedBadgeSmallText}>🔒 Fixed from truck</Text>
+                    {/* Auto-saved categories: LOADING, DRIVER_BATA, CLEANING_CHARGE show saved state */}
+                    {(cat.key === 'LOADING' || cat.key === 'DRIVER_BATA' || cat.key === 'CLEANING_CHARGE') && (
+                      <>
+                        {isAddingKey === cat.key ? (
+                          <View style={styles.autoSavingRow}>
+                            <ActivityIndicator color={COLORS.accent} size="small" />
+                            <Text style={styles.autoSavingText}>Saving automatically…</Text>
                           </View>
-                        )}
-                        {cat.key === 'DRIVER_BATA' && driverBataAmount > 0 && (
-                          <View style={styles.lockedBadgeSmall}>
-                            <Text style={styles.lockedBadgeSmallText}>🔒 Auto ({driverBataPercentage}% of Freight)</Text>
-                          </View>
-                        )}
-                        {cat.key === 'CLEANING_CHARGE' && truckCleaningAmount > 0 && (
-                          <View style={styles.lockedBadgeSmall}>
-                            <Text style={styles.lockedBadgeSmallText}>🔒 Fixed from truck</Text>
-                          </View>
-                        )}
-                        {cat.key === 'OTHER' && (
-                          <View style={[styles.lockedBadgeSmall, { backgroundColor: '#fef3c7', borderColor: '#fde68a' }]}>
-                            <Text style={[styles.lockedBadgeSmallText, { color: '#b45309' }]}>
-                              📌 Max Limit: ₹{maxOtherExpenseLimit}
-                            </Text>
-                          </View>
-                        )}
-                      </View>
-                      <TextInput
-                        style={[
-                          styles.input,
-                          cat.key === 'LOADING' && truckLoadingAmount > 0 && styles.inputDisabled,
-                          cat.key === 'DRIVER_BATA' && driverBataAmount > 0 && styles.inputDisabled,
-                          cat.key === 'CLEANING_CHARGE' && truckCleaningAmount > 0 && styles.inputDisabled,
-                          cat.key === 'OTHER' &&
-                            parseFloat(currentDraft.amount) > maxOtherExpenseLimit && {
-                              borderColor: COLORS.danger,
-                              borderWidth: 1.5,
-                              backgroundColor: '#fff1f2',
-                            },
-                        ]}
-                        placeholder="e.g. 200"
-                        placeholderTextColor={COLORS.textLight}
-                        keyboardType="decimal-pad"
-                        value={
-                          cat.key === 'LOADING' && truckLoadingAmount > 0
-                            ? String(truckLoadingAmount)
-                            : cat.key === 'DRIVER_BATA' && driverBataAmount > 0
-                            ? String(driverBataAmount)
-                            : cat.key === 'CLEANING_CHARGE' && truckCleaningAmount > 0
-                            ? String(truckCleaningAmount)
-                            : currentDraft.amount
-                        }
-                        editable={
-                          (cat.key !== 'LOADING' || truckLoadingAmount <= 0) &&
-                          (cat.key !== 'DRIVER_BATA' || driverBataAmount <= 0) &&
-                          (cat.key !== 'CLEANING_CHARGE' || truckCleaningAmount <= 0)
-                        }
-                        onChangeText={(val) => handleInputChange(cat.key, 'amount', val)}
-                        onBlur={() => {
-                          if (cat.key === 'OTHER') {
-                            const val = parseFloat(currentDraft.amount);
-                            if (!isNaN(val) && val > maxOtherExpenseLimit) {
-                              Alert.alert(
-                                'Amount Exceeds Allowed Limit',
-                                `Only allowed up to the master table value of ₹${maxOtherExpenseLimit}. You entered ₹${val}.\n\nPlease enter an amount less than or equal to ₹${maxOtherExpenseLimit}.`,
-                                [
-                                  {
-                                    text: 'Set to Max Limit',
-                                    onPress: () => handleInputChange('OTHER', 'amount', String(maxOtherExpenseLimit)),
-                                  },
-                                  {
-                                    text: 'Clear',
-                                    style: 'destructive',
-                                    onPress: () => handleInputChange('OTHER', 'amount', ''),
-                                  },
-                                ]
-                              );
-                            }
-                          }
-                        }}
-                      />
-                      {cat.key === 'LOADING' && truckLoadingAmount > 0 && (
-                        <Text style={styles.lockedHelperText}>
-                          Amount is automatically assigned from the truck's goodshed rate and cannot be edited.
-                        </Text>
-                      )}
-                      {cat.key === 'DRIVER_BATA' && driverBataAmount > 0 && (
-                        <Text style={styles.lockedHelperText}>
-                          Driver Bata is auto-calculated as {driverBataPercentage}% of Total Freight (₹{totalFreight}) and cannot be edited. Change the rate in Admin → Driver Bata Master.
-                        </Text>
-                      )}
-                      {cat.key === 'CLEANING_CHARGE' && truckCleaningAmount > 0 && (
-                        <Text style={styles.lockedHelperText}>
-                          Cleaning charge is automatically assigned from the truck master and cannot be edited.
-                        </Text>
-                      )}
-                      {cat.key === 'OTHER' && (
-                        <Text
-                          style={[
-                            styles.lockedHelperText,
-                            parseFloat(currentDraft.amount) > maxOtherExpenseLimit && {
-                              color: COLORS.danger,
-                              fontWeight: '700',
-                            },
-                          ]}
-                        >
-                          {parseFloat(currentDraft.amount) > maxOtherExpenseLimit
-                            ? `⚠️ Amount ₹${currentDraft.amount} exceeds allowed limit of ₹${maxOtherExpenseLimit} (Admin Master).`
-                            : `Type amount manually. Maximum allowed limit is ₹${maxOtherExpenseLimit} (configured in Admin Master).`}
-                        </Text>
-                      )}
-                    </View>
-
-                    <View style={styles.formGroup}>
-                      <Text style={styles.inputLabel}>Notes / Description (Optional)</Text>
-                      <TextInput
-                        style={styles.input}
-                        placeholder={cat.placeholder}
-                        placeholderTextColor={COLORS.textLight}
-                        value={currentDraft.description}
-                        onChangeText={(val) => handleInputChange(cat.key, 'description', val)}
-                      />
-                    </View>
-
-                    {/* Action Buttons: Close and Save Entry */}
-                    <View style={styles.cardActionRow}>
-                      <TouchableOpacity
-                        style={styles.closeCardBtn}
-                        onPress={() => setOpenCategory(null)}
-                        activeOpacity={0.7}
-                      >
-                        <X size={16} color={COLORS.textMuted} />
-                        <Text style={styles.closeCardBtnText}>CLOSE</Text>
-                      </TouchableOpacity>
-
-                      <TouchableOpacity
-                        style={[styles.addEntryBtn, isAdding && { opacity: 0.7 }]}
-                        onPress={() => handleAddExpense(cat.key)}
-                        disabled={isAdding}
-                        activeOpacity={0.8}
-                      >
-                        {isAdding ? (
-                          <ActivityIndicator color={COLORS.white} size="small" />
                         ) : (
-                          <>
-                            <Plus size={16} color={COLORS.white} />
-                            <Text style={styles.addEntryBtnText}>SAVE ENTRY</Text>
-                          </>
+                          <View style={styles.autoSavedConfirmBox}>
+                            <View style={styles.autoSavedCheckIcon}>
+                              <Text style={styles.autoSavedCheckText}>✓</Text>
+                            </View>
+                            <View style={{ flex: 1 }}>
+                              <Text style={styles.autoSavedTitle}>Saved Automatically</Text>
+                              <Text style={styles.autoSavedSub}>
+                                {cat.key === 'LOADING'
+                                  ? `Loading charge: ${formatCurrency(truckLoadingAmount)} (from truck rate)`
+                                  : cat.key === 'DRIVER_BATA'
+                                  ? `Driver Bata: ${formatCurrency(driverBataAmount)} (${driverBataPercentage}% of freight)`
+                                  : `Cleaning charge: ${formatCurrency(truckCleaningAmount)} (from truck master)`}
+                              </Text>
+                            </View>
+                          </View>
                         )}
-                      </TouchableOpacity>
-                    </View>
+                        <View style={styles.cardActionRow}>
+                          <TouchableOpacity
+                            style={styles.closeCardBtn}
+                            onPress={() => setOpenCategory(null)}
+                            activeOpacity={0.7}
+                          >
+                            <X size={16} color={COLORS.textMuted} />
+                            <Text style={styles.closeCardBtnText}>CLOSE</Text>
+                          </TouchableOpacity>
+                        </View>
+                      </>
+                    )}
+
+                    {/* OTHER category: manual entry with SAVE ENTRY button */}
+                    {cat.key === 'OTHER' && (
+                      <>
+                        <Text style={styles.entryFormTitle}>+ Add {cat.shortName} Entry</Text>
+                        <View style={styles.formGroup}>
+                          <View style={styles.inputLabelRow}>
+                            <Text style={styles.inputLabel}>Amount (₹) *</Text>
+                            <View style={[styles.lockedBadgeSmall, { backgroundColor: '#fef3c7', borderColor: '#fde68a' }]}>
+                              <Text style={[styles.lockedBadgeSmallText, { color: '#b45309' }]}>
+                                📌 Max Limit: ₹{maxOtherExpenseLimit}
+                              </Text>
+                            </View>
+                          </View>
+                          <TextInput
+                            style={[
+                              styles.input,
+                              parseFloat(currentDraft.amount) > maxOtherExpenseLimit && {
+                                borderColor: COLORS.danger,
+                                borderWidth: 1.5,
+                                backgroundColor: '#fff1f2',
+                              },
+                            ]}
+                            placeholder="e.g. 200"
+                            placeholderTextColor={COLORS.textLight}
+                            keyboardType="decimal-pad"
+                            value={currentDraft.amount}
+                            onChangeText={(val) => handleInputChange('OTHER', 'amount', val)}
+                            onBlur={() => {
+                              const val = parseFloat(currentDraft.amount);
+                              if (!isNaN(val) && val > maxOtherExpenseLimit) {
+                                Alert.alert(
+                                  'Amount Exceeds Allowed Limit',
+                                  `Only allowed up to the master table value of ₹${maxOtherExpenseLimit}. You entered ₹${val}.\n\nPlease enter an amount less than or equal to ₹${maxOtherExpenseLimit}.`,
+                                  [
+                                    {
+                                      text: 'Set to Max Limit',
+                                      onPress: () => handleInputChange('OTHER', 'amount', String(maxOtherExpenseLimit)),
+                                    },
+                                    {
+                                      text: 'Clear',
+                                      style: 'destructive',
+                                      onPress: () => handleInputChange('OTHER', 'amount', ''),
+                                    },
+                                  ]
+                                );
+                              }
+                            }}
+                          />
+                          <Text
+                            style={[
+                              styles.lockedHelperText,
+                              parseFloat(currentDraft.amount) > maxOtherExpenseLimit && {
+                                color: COLORS.danger,
+                                fontWeight: '700',
+                              },
+                            ]}
+                          >
+                            {parseFloat(currentDraft.amount) > maxOtherExpenseLimit
+                              ? `⚠️ Amount ₹${currentDraft.amount} exceeds allowed limit of ₹${maxOtherExpenseLimit} (Admin Master).`
+                              : `Type amount manually. Maximum allowed limit is ₹${maxOtherExpenseLimit} (configured in Admin Master).`}
+                          </Text>
+                        </View>
+
+                        <View style={styles.formGroup}>
+                          <Text style={styles.inputLabel}>Notes / Description (Optional)</Text>
+                          <TextInput
+                            style={styles.input}
+                            placeholder={cat.placeholder}
+                            placeholderTextColor={COLORS.textLight}
+                            value={currentDraft.description}
+                            onChangeText={(val) => handleInputChange('OTHER', 'description', val)}
+                          />
+                        </View>
+
+                        {/* Action Buttons: Close and Save Entry — only for OTHER */}
+                        <View style={styles.cardActionRow}>
+                          <TouchableOpacity
+                            style={styles.closeCardBtn}
+                            onPress={() => setOpenCategory(null)}
+                            activeOpacity={0.7}
+                          >
+                            <X size={16} color={COLORS.textMuted} />
+                            <Text style={styles.closeCardBtnText}>CLOSE</Text>
+                          </TouchableOpacity>
+
+                          <TouchableOpacity
+                            style={[styles.addEntryBtn, isAdding && { opacity: 0.7 }]}
+                            onPress={() => handleAddExpense('OTHER')}
+                            disabled={isAdding}
+                            activeOpacity={0.8}
+                          >
+                            {isAdding ? (
+                              <ActivityIndicator color={COLORS.white} size="small" />
+                            ) : (
+                              <>
+                                <Plus size={16} color={COLORS.white} />
+                                <Text style={styles.addEntryBtnText}>SAVE ENTRY</Text>
+                              </>
+                            )}
+                          </TouchableOpacity>
+                        </View>
+                      </>
+                    )}
                   </View>
                 )}
               </View>
@@ -2125,5 +2150,59 @@ const styles = StyleSheet.create({
     backgroundColor: '#dcfce7',
     borderRadius: 8,
     padding: SPACING.sm,
+  },
+  // Auto-save confirmation styles
+  autoSavingRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingVertical: SPACING.sm,
+    paddingHorizontal: SPACING.md,
+    backgroundColor: '#eff6ff',
+    borderRadius: RADIUS.md,
+    marginBottom: SPACING.sm,
+    borderWidth: 1,
+    borderColor: '#bfdbfe',
+  },
+  autoSavingText: {
+    fontSize: 13,
+    color: COLORS.primary,
+    fontWeight: '600',
+    fontStyle: 'italic',
+  },
+  autoSavedConfirmBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    backgroundColor: '#f0fdf4',
+    borderRadius: RADIUS.md,
+    padding: SPACING.md,
+    marginBottom: SPACING.sm,
+    borderWidth: 1.5,
+    borderColor: '#86efac',
+  },
+  autoSavedCheckIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: '#16a34a',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  autoSavedCheckText: {
+    fontSize: 18,
+    color: '#fff',
+    fontWeight: '800',
+  },
+  autoSavedTitle: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: '#15803d',
+    letterSpacing: 0.3,
+  },
+  autoSavedSub: {
+    fontSize: 11,
+    color: '#166534',
+    marginTop: 2,
   },
 });

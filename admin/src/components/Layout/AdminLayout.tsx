@@ -11,7 +11,6 @@ import {
   Receipt,
   Navigation,
   CreditCard,
-  Wallet,
   FileCheck,
   BarChart3,
   History,
@@ -78,9 +77,6 @@ export const AdminLayout: React.FC = () => {
           </NavLink>
           <NavLink to="/payments" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
             <CreditCard /> Party Payments
-          </NavLink>
-          <NavLink to="/expenses" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
-            <Wallet /> Driver Expenses
           </NavLink>
           <NavLink to="/owner-advances" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
             <HandCoins /> Owner Advances

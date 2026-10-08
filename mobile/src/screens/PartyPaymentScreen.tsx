@@ -65,9 +65,9 @@ export const PartyPaymentScreen: React.FC<{ route: any; navigation: any }> = ({
         </View>
 
         <View style={styles.infoRow}>
-          <Text style={styles.infoLabel}>Route:</Text>
+          <Text style={styles.infoLabel}>Unit:</Text>
           <Text style={styles.infoValue}>
-            {trip.from_location} → {trip.to_location}
+            {trip.to_location || trip.from_location}
           </Text>
         </View>
 

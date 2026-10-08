@@ -12,7 +12,6 @@ import { PartiesPage } from './pages/PartiesPage';
 
 import { TripsPage } from './pages/TripsPage';
 import { PaymentsPage } from './pages/PaymentsPage';
-import { ExpensesPage } from './pages/ExpensesPage';
 import { SettlementsPage } from './pages/SettlementsPage';
 import { ReportsPage } from './pages/ReportsPage';
 import { AuditLogsPage } from './pages/AuditLogsPage';
@@ -62,7 +61,7 @@ export function App() {
             <Route path="dashboard" element={<DashboardPage />} />
             <Route path="trips" element={<TripsPage />} />
             <Route path="payments" element={<PaymentsPage />} />
-            <Route path="expenses" element={<ExpensesPage />} />
+            <Route path="expenses" element={<Navigate to="/trips" replace />} />
             <Route path="settlements" element={<SettlementsPage />} />
             <Route path="users" element={<UsersPage />} />
             <Route path="drivers" element={<DriversPage />} />
@@ -72,7 +71,7 @@ export function App() {
             <Route path="parties" element={<PartiesPage />} />
             <Route path="routes" element={<Navigate to="/parties" replace />} />
             <Route path="freight-rates" element={<Navigate to="/parties" replace />} />
-            <Route path="expense-rates" element={<Navigate to="/expenses" replace />} />
+            <Route path="expense-rates" element={<Navigate to="/cleaning-expenses" replace />} />
             <Route path="cleaning-expenses" element={<CleaningExpensesPage />} />
             <Route path="unloading-rates" element={<UnloadingRatesPage />} />
             <Route path="driver-bata" element={<DriverBataPage />} />
