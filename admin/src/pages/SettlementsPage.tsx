@@ -3,7 +3,7 @@ import * as XLSX from 'xlsx';
 import {
   CheckCircle, Printer, Eye, PlusCircle, Trash2,
   Banknote, Smartphone, Clock, IndianRupee, History, Download, Share2,
-  Calendar, RefreshCw, FileSpreadsheet, Database, Search,
+  Calendar, RefreshCw, FileSpreadsheet, Database, Search, Loader2,
 } from 'lucide-react';
 import { settlementService, tripService, driverService, vehicleService, partyService } from '../services/adminService';
 import { Settlement, Trip, DriverSettlementPayment, Driver, Vehicle, Party } from '../types';
@@ -73,6 +73,7 @@ export const SettlementsPage: React.FC = () => {
   // Search & Excel Export with Local Storage tracking
   const [searchTerm, setSearchTerm] = useState('');
   const [isExportingExcel, setIsExportingExcel] = useState(false);
+  const [isPrintingMaster, setIsPrintingMaster] = useState(false);
   const [excelNotice, setExcelNotice] = useState<string | null>(null);
   const [isLocalStorageModalOpen, setIsLocalStorageModalOpen] = useState(false);
   const [localExports, setLocalExports] = useState<any[]>([]);
@@ -173,8 +174,16 @@ export const SettlementsPage: React.FC = () => {
         return;
       }
 
+      const totalCount = items.length;
+      const totalWeight = items.reduce((sum, s) => sum + Number(s.goods_weight || 0), 0);
+      const totalFreight = items.reduce((sum, s) => sum + Number(s.total_freight || 0), 0);
+      const totalAdvance = items.reduce((sum, s) => sum + Number(s.advance_paid || 0), 0);
+      const totalExpenses = items.reduce((sum, s) => sum + Number(s.total_expenses || 0), 0);
+      const totalBalance = items.reduce((sum, s) => sum + Number(s.balance_to_driver || 0), 0);
+      const totalPaid = items.reduce((sum, s) => sum + Number(s.paid_amount || 0), 0);
+
       // Format data rows for executive Excel sheet
-      const excelRows = items.map((s) => ({
+      const excelRows: any[] = items.map((s) => ({
         'Settlement ID': `SET-${s.id}`,
         'Trip ID': `TRIP-${s.trip_id}`,
         'Trip Date': s.trip_date ? s.trip_date.slice(0, 10) : '-',
@@ -200,14 +209,68 @@ export const SettlementsPage: React.FC = () => {
         'Created At': s.created_at ? new Date(s.created_at).toLocaleString('en-IN') : '-',
       }));
 
+      // Add a blank separator row
+      excelRows.push({
+        'Settlement ID': '',
+        'Trip ID': '',
+        'Trip Date': '',
+        'Lorry Number': '',
+        'Driver Name': '',
+        'Driver Mobile': '',
+        'Party Name': '',
+        'From Location': '',
+        'To Location': '',
+        'Goods Weight (MT)': '',
+        'Freight Rate (Rs)': '',
+        'Total Freight (Rs)': '',
+        'Advance Paid (Rs)': '',
+        'Total Expenses (Rs)': '',
+        'Balance Payable (Rs)': '',
+        'Settlement Status': '',
+        'Payment Mode': '',
+        'Payment Date': '',
+        'Paid Amount (Rs)': '',
+        'Reference No / UTR': '',
+        'Settled By': '',
+        'Notes': '',
+        'Created At': '',
+      } as any);
+
+      // Add Grand Total row with Total Settlements Count prominently included
+      excelRows.push({
+        'Settlement ID': 'TOTAL SUMMARY',
+        'Trip ID': `Total Count: ${totalCount}`,
+        'Trip Date': `Count: ${totalCount} Settlements`,
+        'Lorry Number': `Count: ${totalCount}`,
+        'Driver Name': '',
+        'Driver Mobile': '',
+        'Party Name': '',
+        'From Location': '',
+        'To Location': '',
+        'Goods Weight (MT)': Number(totalWeight.toFixed(3)),
+        'Freight Rate (Rs)': '',
+        'Total Freight (Rs)': Number(totalFreight.toFixed(2)),
+        'Advance Paid (Rs)': Number(totalAdvance.toFixed(2)),
+        'Total Expenses (Rs)': Number(totalExpenses.toFixed(2)),
+        'Balance Payable (Rs)': Number(totalBalance.toFixed(2)),
+        'Settlement Status': `Total: ${totalCount} Settlements`,
+        'Payment Mode': '',
+        'Payment Date': '',
+        'Paid Amount (Rs)': Number(totalPaid.toFixed(2)),
+        'Reference No / UTR': '',
+        'Settled By': '',
+        'Notes': '',
+        'Created At': '',
+      } as any);
+
       // Generate Worksheet
       const worksheet = XLSX.utils.json_to_sheet(excelRows);
 
       // Auto Column Widths
       worksheet['!cols'] = [
-        { wch: 15 }, // Settlement ID
-        { wch: 12 }, // Trip ID
-        { wch: 14 }, // Trip Date
+        { wch: 16 }, // Settlement ID
+        { wch: 18 }, // Trip ID
+        { wch: 22 }, // Trip Date / Count
         { wch: 16 }, // Lorry Number
         { wch: 22 }, // Driver Name
         { wch: 15 }, // Driver Mobile
@@ -220,7 +283,7 @@ export const SettlementsPage: React.FC = () => {
         { wch: 18 }, // Advance Paid
         { wch: 18 }, // Total Expenses
         { wch: 20 }, // Balance Payable
-        { wch: 18 }, // Status
+        { wch: 22 }, // Status
         { wch: 15 }, // Payment Mode
         { wch: 15 }, // Payment Date
         { wch: 16 }, // Paid Amount
@@ -234,6 +297,32 @@ export const SettlementsPage: React.FC = () => {
       const workbook = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(workbook, worksheet, 'Settlements');
 
+      // Create Executive Summary Sheet
+      const selectedTruck = vehicleFilter ? vehicles.find(v => String(v.id) === String(vehicleFilter))?.lorry_number : 'All';
+      const selectedDriver = driverFilter ? drivers.find(d => String(d.id) === String(driverFilter))?.name : 'All';
+      const selectedParty = partyFilter ? parties.find(p => String(p.id) === String(partyFilter))?.name : 'All';
+
+      const summaryRows = [
+        { 'Summary Field': 'TOTAL SETTLEMENTS COUNT', 'Value': `${totalCount} Settlements` },
+        { 'Summary Field': 'Total Goods Weight', 'Value': `${totalWeight.toFixed(3)} MT` },
+        { 'Summary Field': 'Total Freight Amount', 'Value': `₹${totalFreight.toLocaleString('en-IN', { minimumFractionDigits: 2 })}` },
+        { 'Summary Field': 'Total Advance Paid to Driver', 'Value': `₹${totalAdvance.toLocaleString('en-IN', { minimumFractionDigits: 2 })}` },
+        { 'Summary Field': 'Total Trip Expenses', 'Value': `₹${totalExpenses.toLocaleString('en-IN', { minimumFractionDigits: 2 })}` },
+        { 'Summary Field': 'Total Balance Payable to Driver', 'Value': `₹${totalBalance.toLocaleString('en-IN', { minimumFractionDigits: 2 })}` },
+        { 'Summary Field': 'Total Paid Amount', 'Value': `₹${totalPaid.toLocaleString('en-IN', { minimumFractionDigits: 2 })}` },
+        { 'Summary Field': 'Status Filter', 'Value': statusFilter || 'All' },
+        { 'Summary Field': 'Lorry Filter', 'Value': selectedTruck || 'All' },
+        { 'Summary Field': 'Driver Filter', 'Value': selectedDriver || 'All' },
+        { 'Summary Field': 'Party Filter', 'Value': selectedParty || 'All' },
+        { 'Summary Field': 'From Date', 'Value': fromDate ? formatDateDMY(fromDate) : 'All' },
+        { 'Summary Field': 'To Date', 'Value': toDate ? formatDateDMY(toDate) : 'All' },
+        { 'Summary Field': 'Search Keyword', 'Value': searchTerm || 'None' },
+        { 'Summary Field': 'Export Timestamp', 'Value': new Date().toLocaleString('en-IN') },
+      ];
+      const summaryWorksheet = XLSX.utils.json_to_sheet(summaryRows);
+      summaryWorksheet['!cols'] = [{ wch: 35 }, { wch: 35 }];
+      XLSX.utils.book_append_sheet(workbook, summaryWorksheet, 'Summary');
+
       const dateTag = new Date().toISOString().slice(0, 10);
       const filename = `KSP_Settlements_Export_${dateTag}.xlsx`;
 
@@ -241,10 +330,6 @@ export const SettlementsPage: React.FC = () => {
       XLSX.writeFile(workbook, filename);
 
       // 2. Save export record and summary metadata to browser LocalStorage
-      const selectedTruck = vehicleFilter ? vehicles.find(v => String(v.id) === String(vehicleFilter))?.lorry_number : 'All';
-      const selectedDriver = driverFilter ? drivers.find(d => String(d.id) === String(driverFilter))?.name : 'All';
-      const selectedParty = partyFilter ? parties.find(p => String(p.id) === String(partyFilter))?.name : 'All';
-
       const exportLog = {
         id: Date.now().toString(),
         filename,
@@ -261,10 +346,10 @@ export const SettlementsPage: React.FC = () => {
           search: searchTerm || 'None',
         },
         totals: {
-          freight: items.reduce((sum, r) => sum + Number(r.total_freight || 0), 0),
-          expenses: items.reduce((sum, r) => sum + Number(r.total_expenses || 0), 0),
-          balance: items.reduce((sum, r) => sum + Number(r.balance_to_driver || 0), 0),
-          paid: items.reduce((sum, r) => sum + Number(r.paid_amount || 0), 0),
+          freight: totalFreight,
+          expenses: totalExpenses,
+          balance: totalBalance,
+          paid: totalPaid,
         }
       };
 
@@ -284,13 +369,187 @@ export const SettlementsPage: React.FC = () => {
         console.warn('LocalStorage error:', storageErr);
       }
 
-      setExcelNotice(`Excel downloaded successfully to your computer & saved to Local Storage (${items.length} records).`);
+      setExcelNotice(`Excel downloaded successfully to your computer & saved to Local Storage (${items.length} records with totals).`);
       setTimeout(() => setExcelNotice(null), 6000);
     } catch (err: any) {
       console.error('Failed to export Excel:', err);
       alert(err.message || 'Error occurred while exporting Excel.');
     } finally {
       setIsExportingExcel(false);
+    }
+  };
+
+  // ── Direct Print Option for Settlements Master ──
+  const handlePrintMaster = async () => {
+    try {
+      setIsPrintingMaster(true);
+      const res = await settlementService.getSettlements({
+        page: 1,
+        limit: 10000,
+        status: statusFilter || undefined,
+        driver_id: driverFilter || undefined,
+        vehicle_id: vehicleFilter || undefined,
+        party_id: partyFilter || undefined,
+        from_date: fromDate || undefined,
+        to_date: toDate || undefined,
+        search: searchTerm || undefined,
+      });
+
+      const items: Settlement[] = res.data.items || [];
+      if (items.length === 0) {
+        alert('No settlement records found matching your filters to print.');
+        setIsPrintingMaster(false);
+        return;
+      }
+
+      const totalCount = items.length;
+      const totalWeight = items.reduce((sum, s) => sum + Number(s.goods_weight || 0), 0);
+      const totalFreight = items.reduce((sum, s) => sum + Number(s.total_freight || 0), 0);
+      const totalAdvance = items.reduce((sum, s) => sum + Number(s.advance_paid || 0), 0);
+      const totalExpenses = items.reduce((sum, s) => sum + Number(s.total_expenses || 0), 0);
+      const totalBalance = items.reduce((sum, s) => sum + Number(s.balance_to_driver || 0), 0);
+      const totalPaid = items.reduce((sum, s) => sum + Number(s.paid_amount || 0), 0);
+
+      const selectedTruck = vehicleFilter ? vehicles.find((v) => String(v.id) === String(vehicleFilter))?.lorry_number : 'All';
+      const selectedDriver = driverFilter ? drivers.find((d) => String(d.id) === String(driverFilter))?.name : 'All';
+      const selectedParty = partyFilter ? parties.find((p) => String(p.id) === String(partyFilter))?.name : 'All';
+      const dateRangeText = fromDate && toDate ? `${formatDateDMY(fromDate)} to ${formatDateDMY(toDate)}` : fromDate ? `From ${formatDateDMY(fromDate)}` : toDate ? `Up to ${formatDateDMY(toDate)}` : 'All Dates';
+
+      const printHtml = `
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>KSP Logistics - Settlements Master Audit Report</title>
+  <style>
+    * { box-sizing: border-box; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif; margin: 0; padding: 20px; color: #1e293b; background: #fff; font-size: 11.5px; }
+    @page { size: landscape; margin: 10mm; }
+    .header-bar { display: flex; justify-content: space-between; align-items: flex-start; padding-bottom: 12px; border-bottom: 2px solid #0f172a; margin-bottom: 14px; }
+    .company-title { font-size: 20px; font-weight: 800; color: #0f172a; letter-spacing: 0.5px; margin: 0 0 4px 0; }
+    .report-subtitle { font-size: 13px; font-weight: 700; color: #059669; margin: 0 0 4px 0; text-transform: uppercase; letter-spacing: 0.5px; }
+    .meta-text { font-size: 11px; color: #64748b; margin: 0; }
+    .kpi-highlight .kpi-value { color: #047857; }
+    table { width: 100%; border-collapse: collapse; font-size: 11px; margin-top: 10px; }
+    th { background: #0f172a; color: #ffffff; font-weight: 700; text-align: left; padding: 7px 8px; font-size: 10.5px; }
+    th.num, td.num { text-align: right; }
+    th.center, td.center { text-align: center; }
+    td { padding: 6px 8px; border-bottom: 1px solid #e2e8f0; vertical-align: middle; }
+    tr:nth-child(even) td { background: #fbfcfe; }
+    .footer-row td { background: #f1f5f9 !important; font-weight: 800; border-top: 2px solid #0f172a; border-bottom: 2px solid #0f172a; color: #0f172a; }
+    .badge { display: inline-block; padding: 2px 6px; border-radius: 4px; font-size: 9.5px; font-weight: 700; text-align: center; }
+    .badge-paid { background: #dcfce7; color: #166534; }
+    .badge-pending { background: #fef9c3; color: #854d0e; }
+    .badge-partial { background: #e0e7ff; color: #3730a3; }
+    .badge-verified { background: #f0fdf4; color: #15803d; border: 1px solid #86efac; }
+    .print-btn-bar { display: flex; justify-content: flex-end; gap: 10px; margin-bottom: 16px; }
+    .print-btn { background: #059669; color: #fff; border: none; padding: 8px 16px; border-radius: 6px; font-weight: 600; cursor: pointer; font-size: 12px; }
+    @media print {
+      .print-btn-bar { display: none !important; }
+      body { padding: 0; }
+    }
+  </style>
+</head>
+<body>
+  <div class="print-btn-bar">
+    <button class="print-btn" onclick="window.print()">Print Report / Save as PDF</button>
+    <button class="print-btn" style="background:#64748b" onclick="window.close()">Close</button>
+  </div>
+
+  <div class="header-bar">
+    <div>
+      <h1 class="company-title">KSP TRANSPORT &amp; LOGISTICS</h1>
+      <div class="report-subtitle">SETTLEMENTS MASTER AUDIT REPORT</div>
+      <p class="meta-text">
+        <strong>Filters:</strong> Lorry: ${selectedTruck} | Driver: ${selectedDriver} | Party: ${selectedParty} | Status: ${statusFilter || 'All'} | Date: ${dateRangeText}
+      </p>
+    </div>
+    <div style="text-align: right;">
+      <div style="font-weight: 800; font-size: 13px; color: #0f172a;">Total Settlements: ${totalCount}</div>
+      <p class="meta-text" style="margin-top: 4px;">Generated on: ${new Date().toLocaleString('en-IN')}</p>
+    </div>
+  </div>
+  <table>
+    <thead>
+      <tr>
+        <th class="center" style="width: 35px;">S.No</th>
+        <th style="width: 75px;">Settlement ID</th>
+        <th style="width: 75px;">Date</th>
+        <th style="width: 85px;">Lorry No</th>
+        <th>Driver Name</th>
+        <th>Party Name</th>
+        <th>Destination</th>
+        <th class="num" style="width: 75px;">Freight (₹)</th>
+        <th class="num" style="width: 70px;">Advance (₹)</th>
+        <th class="num" style="width: 70px;">Expenses (₹)</th>
+        <th class="num" style="width: 75px;">Balance (₹)</th>
+        <th class="num" style="width: 70px;">Paid (₹)</th>
+        <th class="center" style="width: 80px;">Status</th>
+      </tr>
+    </thead>
+    <tbody>
+      ${items.map((s, idx) => {
+        let badgeClass = 'badge-pending';
+        if (s.settlement_status === 'SETTLED') badgeClass = 'badge-paid';
+        else if (s.settlement_status === 'VERIFIED') badgeClass = 'badge-verified';
+
+        return `
+        <tr>
+          <td class="center">${idx + 1}</td>
+          <td><strong>SET-${s.id}</strong></td>
+          <td>${s.trip_date ? s.trip_date.slice(0, 10) : '-'}</td>
+          <td><strong>${s.lorry_number || '-'}</strong></td>
+          <td>${s.driver_name || '-'}</td>
+          <td>${s.party_name || '-'}</td>
+          <td>${s.to_location || s.from_location || '-'}</td>
+          <td class="num">${Number(s.total_freight || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td>
+          <td class="num">${Number(s.advance_paid || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td>
+          <td class="num">${Number(s.total_expenses || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td>
+          <td class="num"><strong>${Number(s.balance_to_driver || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</strong></td>
+          <td class="num">${Number(s.paid_amount || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td>
+          <td class="center"><span class="badge ${badgeClass}">${s.settlement_status}</span></td>
+        </tr>
+        `;
+      }).join('')}
+      <tr class="footer-row">
+        <td class="center" colspan="2">TOTAL</td>
+        <td colspan="5"><strong>Total Count: ${totalCount} Settlements</strong></td>
+        <td class="num"><strong>₹${totalFreight.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</strong></td>
+        <td class="num"><strong>₹${totalAdvance.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</strong></td>
+        <td class="num"><strong>₹${totalExpenses.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</strong></td>
+        <td class="num"><strong>₹${totalBalance.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</strong></td>
+        <td class="num"><strong>₹${totalPaid.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</strong></td>
+        <td class="center"><strong>${totalCount} Settlements</strong></td>
+      </tr>
+    </tbody>
+  </table>
+  
+  <div style="margin-top: 24px; display: flex; justify-content: space-between; font-size: 10px; color: #94a3b8; border-top: 1px solid #e2e8f0; padding-top: 8px;">
+    <span>KSP Service Management ERP</span>
+    <span>Settlements Master Audit Record</span>
+  </div>
+</body>
+</html>
+      `;
+
+      const printWin = window.open('', '_blank', 'width=1100,height=850');
+      if (!printWin) {
+        alert('Please allow pop-ups for this website to print.');
+        setIsPrintingMaster(false);
+        return;
+      }
+      printWin.document.open();
+      printWin.document.write(printHtml);
+      printWin.document.close();
+      printWin.focus();
+      setTimeout(() => {
+        printWin.print();
+      }, 500);
+    } catch (err: any) {
+      console.error('Failed to print settlements master', err);
+      alert(err.message || 'Failed to print settlements.');
+    } finally {
+      setIsPrintingMaster(false);
     }
   };
 
@@ -367,29 +626,73 @@ export const SettlementsPage: React.FC = () => {
     setIsSlipModalOpen(true);
   };
 
+  const getNetBalance = (s: Settlement) => {
+    if (s.net_balance_to_driver !== undefined && s.net_balance_to_driver !== null) {
+      return parseFloat(String(s.net_balance_to_driver)) || 0;
+    }
+    return parseFloat(String(s.balance_to_driver || 0)) || 0;
+  };
+
   const openPayModal = (settlement: Settlement) => {
     setPayTarget(settlement);
-    setPayAmount(Math.abs(parseFloat(String(settlement.balance_to_driver || 0))).toFixed(2));
-    setPayMode('CASH');
+    const netBal = getNetBalance(settlement);
+    if (netBal <= 0) {
+      setPayAmount('0');
+      setPayMode('ADJUSTED_ADVANCE' as any);
+      setPayNotes('Trip expenses deducted from driver advance balance');
+    } else {
+      setPayAmount(netBal.toFixed(2));
+      setPayMode('CASH');
+      setPayNotes('');
+    }
     setPayDate(new Date().toISOString().split('T')[0]);
     setPayRef('');
-    setPayNotes('');
     setPayError('');
     setIsPayModalOpen(true);
+  };
+
+  const handleSettleFromAdvance = async (settlement: Settlement) => {
+    const netBal = getNetBalance(settlement);
+    const surplus = Math.abs(netBal);
+    const msg = surplus > 0
+      ? `Settle Trip #${settlement.trip_id} by deducting ₹${Number(settlement.total_expenses).toLocaleString('en-IN')} expenses from driver advance balance?\n\nDriver holds ₹${surplus.toLocaleString('en-IN')} remaining advance in hand.\nNo cash payout will be made.`
+      : `Settle Trip #${settlement.trip_id} by deducting expenses from driver advance balance?\nNo cash payout required.`;
+    
+    if (!window.confirm(msg)) {
+      return;
+    }
+    try {
+      setIsPaying(true);
+      await settlementService.settlePayment(settlement.id, {
+        payment_mode: 'ADJUSTED_ADVANCE' as any,
+        payment_date: new Date().toISOString().split('T')[0],
+        paid_amount: 0,
+        notes: `Trip expenses of ₹${Number(settlement.total_expenses).toFixed(2)} deducted from driver advance balance. Remaining driver advance: ₹${surplus.toFixed(2)}.`,
+      });
+      loadSettlements();
+    } catch (err: any) {
+      alert(err.response?.data?.message || err.message || 'Failed to settle from advance.');
+    } finally {
+      setIsPaying(false);
+    }
   };
 
   const handlePayDriver = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!payTarget) return;
-    const amount = parseFloat(payAmount);
-    if (!amount || amount <= 0) { setPayError('Please enter a valid amount.'); return; }
+    const isAdjusted = (payMode as string) === 'ADJUSTED_ADVANCE';
+    const amount = parseFloat(payAmount) || 0;
+    if (!isAdjusted && amount <= 0) {
+      setPayError('Please enter a valid amount.');
+      return;
+    }
     setPayError('');
     try {
       setIsPaying(true);
       await settlementService.settlePayment(payTarget.id, {
         payment_mode: payMode,
         payment_date: payDate,
-        paid_amount: amount,
+        paid_amount: isAdjusted ? 0 : amount,
         reference_no: payRef || undefined,
         notes: payNotes || undefined,
       });
@@ -442,8 +745,8 @@ export const SettlementsPage: React.FC = () => {
     const isSettled = s.settlement_status === 'SETTLED';
     const tripDate = s.trip_date ? formatDateDMY(s.trip_date) : '—';
     const payDate = s.payment_date ? formatDateDMY(s.payment_date) : '';
-    const netPayable = parseFloat(String(s.balance_to_driver || 0));
-    const isPositive = netPayable >= 0;
+    const netPayable = getNetBalance(s);
+    const isPositive = netPayable > 0;
 
     const expenseRows = (s.expense_items && s.expense_items.length > 0)
       ? s.expense_items.map((item, idx) => `
@@ -791,22 +1094,41 @@ export const SettlementsPage: React.FC = () => {
         <span>Less: Total Driver Expenses Incurred:</span>
         <strong style="color: #b45309;">(-) ${formatCurrency(s.total_expenses)}</strong>
       </div>
+      ${Number(s.previous_driver_balance || 0) > 0 ? `
       <div class="calc-row">
-        <span>Less: Trip Advance Already Paid to Driver:</span>
-        <strong style="color: #475569;">(-) ${formatCurrency(s.advance_paid)}</strong>
+        <span>Driver Advance Brought Forward from Prior Trips:</span>
+        <strong style="color: #1d4ed8;">${formatCurrency(s.previous_driver_balance || 0)}</strong>
       </div>
+      ` : ''}
+      <div class="calc-row">
+        <span>Trip Advance Paid to Driver:</span>
+        <strong style="color: #475569;">${formatCurrency(s.advance_paid)}</strong>
+      </div>
+      ${netPayable <= 0 ? `
+      <div class="calc-row" style="background: #eff6ff; color: #1d4ed8; font-weight: 700;">
+        <span>REMAINING ADVANCE IN DRIVER HAND:</span>
+        <span>₹${Math.abs(netPayable).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
+      </div>
+      <div class="calc-row highlight" style="background: #f0fdf4; color: #15803d;">
+        <span>NET CASH PAYABLE BY OFFICE:</span>
+        <span>₹0.00 (Covered by Advance)</span>
+      </div>
+      ` : `
       <div class="calc-row highlight">
         <span>NET BALANCE PAYABLE TO DRIVER:</span>
-        <span>${isPositive ? '+' : ''}${formatCurrency(s.balance_to_driver)}</span>
+        <span>+${formatCurrency(netPayable)}</span>
       </div>
+      `}
     </div>
 
     ${isSettled && s.payment_mode ? `
       <div class="discharge-box">
-        <div class="discharge-title">✔ OFFICIAL DISBURSEMENT RECEIPT</div>
+        <div class="discharge-title">✔ ${s.payment_mode === 'ADJUSTED_ADVANCE' ? 'OFFICIAL ADVANCE ADJUSTMENT RECORD' : 'OFFICIAL DISBURSEMENT RECEIPT'}</div>
         <div style="line-height: 1.6;">
-          Paid Amount: <strong>${formatCurrency(s.paid_amount || s.balance_to_driver)}</strong> via <strong>${s.payment_mode}</strong>
-          ${s.payment_date ? ` · Paid on <strong>${formatDateDMY(s.payment_date)}</strong>` : ''}
+          ${s.payment_mode === 'ADJUSTED_ADVANCE'
+            ? `Status: <strong>Trip Expenses (${formatCurrency(s.total_expenses)}) Adjusted from Driver Advance</strong> · Driver holds <strong>₹${Math.abs(netPayable).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</strong> advance remaining in hand`
+            : `Paid Amount: <strong>${formatCurrency(s.paid_amount || netPayable)}</strong> via <strong>${s.payment_mode}</strong>`}
+          ${s.payment_date ? ` · Settled on <strong>${formatDateDMY(s.payment_date)}</strong>` : ''}
           ${s.reference_no ? ` · Ref/UTR: <strong>${s.reference_no}</strong>` : ''}
           ${s.settled_by_name ? ` · Authorized &amp; Disbursed by: <strong>${s.settled_by_name}</strong>` : ''}
         </div>
@@ -895,6 +1217,7 @@ export const SettlementsPage: React.FC = () => {
   };
 
   const payModeIcon = (mode: string) => {
+    if (mode === 'ADJUSTED_ADVANCE') return <CheckCircle size={13} style={{ verticalAlign: 'middle', marginRight: 4, color: '#2563eb' }} />;
     if (mode === 'UPI') return <Smartphone size={13} style={{ verticalAlign: 'middle', marginRight: 4, color: '#7c3aed' }} />;
     if (mode === 'CASH') return <Banknote size={13} style={{ verticalAlign: 'middle', marginRight: 4, color: '#15803d' }} />;
     return <IndianRupee size={13} style={{ verticalAlign: 'middle', marginRight: 4, color: '#1e40af' }} />;
@@ -931,11 +1254,42 @@ export const SettlementsPage: React.FC = () => {
     { header: 'Advance Paid', render: (s) => formatCurrency(s.advance_paid) },
     {
       header: 'Balance to Driver',
-      render: (s) => (
-        <strong style={{ color: s.balance_to_driver >= 0 ? 'var(--success-700)' : 'var(--danger-700)' }}>
-          {formatCurrency(s.balance_to_driver)}
-        </strong>
-      ),
+      render: (s) => {
+        const netBal = getNetBalance(s);
+        const isSettled = s.settlement_status === 'SETTLED';
+        if (isSettled) {
+          if (s.payment_mode === 'ADJUSTED_ADVANCE') {
+            return (
+              <div>
+                <span style={{ color: '#15803d', fontWeight: 700, fontSize: '13px' }}>₹0.00</span>
+                <div style={{ fontSize: '11px', color: '#2563eb', fontWeight: 600 }}>Adjusted from Advance</div>
+              </div>
+            );
+          }
+          return (
+            <div>
+              <span style={{ color: '#15803d', fontWeight: 700, fontSize: '13px' }}>₹0.00</span>
+              <div style={{ fontSize: '11px', color: '#15803d', fontWeight: 600 }}>Paid {formatCurrency(s.paid_amount || s.balance_to_driver)}</div>
+            </div>
+          );
+        }
+        if (netBal > 0) {
+          return (
+            <div>
+              <strong style={{ color: '#b91c1c', fontSize: '13px' }}>+{formatCurrency(netBal)}</strong>
+              <div style={{ fontSize: '11px', color: '#b91c1c', fontWeight: 600 }}>Payable to Driver</div>
+            </div>
+          );
+        }
+        return (
+          <div>
+            <span style={{ color: '#1d4ed8', fontWeight: 700, fontSize: '13px' }}>
+              ₹{Math.abs(netBal).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+            </span>
+            <div style={{ fontSize: '11px', color: '#1d4ed8', fontWeight: 600 }}>in Driver Hand</div>
+          </div>
+        );
+      },
     },
     {
       header: 'Payment',
@@ -943,7 +1297,7 @@ export const SettlementsPage: React.FC = () => {
         s.settlement_status === 'SETTLED' && s.payment_mode ? (
           <span style={{ fontSize: '12px' }}>
             {payModeIcon(s.payment_mode)}
-            <span style={{ fontWeight: 600 }}>{s.payment_mode}</span>
+            <span style={{ fontWeight: 600 }}>{s.payment_mode === 'ADJUSTED_ADVANCE' ? 'ADVANCE ADJUSTED' : s.payment_mode}</span>
             {s.payment_date && <div style={{ color: 'var(--text-muted)', fontSize: '11px' }}>{formatDateDMY(s.payment_date)}</div>}
           </span>
         ) : <span style={{ color: 'var(--text-muted)', fontSize: '12px' }}>—</span>
@@ -958,14 +1312,25 @@ export const SettlementsPage: React.FC = () => {
             <Eye size={13} /> Slip
           </button>
           {(s.settlement_status === 'PENDING' || s.settlement_status === 'VERIFIED') && (
-            <button
-              onClick={() => openPayModal(s)}
-              className="btn btn-sm"
-              title="Pay Driver"
-              style={{ background: '#15803d', color: '#fff', border: 'none', borderRadius: '6px', padding: '4px 10px', display: 'flex', alignItems: 'center', gap: '4px', fontSize: '12px', cursor: 'pointer' }}
-            >
-              <IndianRupee size={13} /> Pay Driver
-            </button>
+            (getNetBalance(s) > 0) ? (
+              <button
+                onClick={() => openPayModal(s)}
+                className="btn btn-sm"
+                title="Pay Driver"
+                style={{ background: '#15803d', color: '#fff', border: 'none', borderRadius: '6px', padding: '4px 10px', display: 'flex', alignItems: 'center', gap: '4px', fontSize: '12px', cursor: 'pointer' }}
+              >
+                <IndianRupee size={13} /> Pay Driver (₹{getNetBalance(s).toLocaleString('en-IN')})
+              </button>
+            ) : (
+              <button
+                onClick={() => handleSettleFromAdvance(s)}
+                className="btn btn-sm"
+                title="Settle (Adjusted from Driver Advance Balance)"
+                style={{ background: '#2563eb', color: '#fff', border: 'none', borderRadius: '6px', padding: '4px 10px', display: 'flex', alignItems: 'center', gap: '4px', fontSize: '12px', cursor: 'pointer' }}
+              >
+                <CheckCircle size={13} /> Settle (Advance Adjusted)
+              </button>
+            )
           )}
           <button
             onClick={() => handleDeleteSettlement(s)}
@@ -983,8 +1348,23 @@ export const SettlementsPage: React.FC = () => {
     <div>
       <div className="card-header" style={{ marginBottom: '24px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '14px' }}>
         <div>
-          <h2 style={{ fontSize: '22px', fontWeight: 800 }}>Trip Settlements</h2>
-          <p style={{ color: 'var(--text-muted)', fontSize: '13.5px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+            <h2 style={{ fontSize: '22px', fontWeight: 800, margin: 0 }}>Trip Settlements</h2>
+            <span
+              style={{
+                fontSize: '13px',
+                fontWeight: 700,
+                color: '#059669',
+                background: '#ecfdf5',
+                padding: '3px 10px',
+                borderRadius: '12px',
+                border: '1px solid #a7f3d0',
+              }}
+            >
+              Total: {total} Settlements
+            </span>
+          </div>
+          <p style={{ color: 'var(--text-muted)', fontSize: '13.5px', marginTop: '4px' }}>
             Generate final trip settlement slips, audit driver balances, export Excel reports & print settlement vouchers
           </p>
         </div>
@@ -997,25 +1377,6 @@ export const SettlementsPage: React.FC = () => {
             title="View settlements Excel export logs stored in local storage"
           >
             <Database size={15} /> Local Storage Logs
-          </button>
-          <button
-            type="button"
-            onClick={handleExportExcel}
-            disabled={isExportingExcel}
-            className="btn btn-outline"
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '6px',
-              borderColor: '#10b981',
-              color: '#059669',
-              background: '#ecfdf5',
-              fontWeight: 600,
-            }}
-            title="Download filtered settlement records as an Excel spreadsheet and save to local storage"
-          >
-            <FileSpreadsheet size={16} />
-            {isExportingExcel ? 'Exporting Excel...' : 'Download Excel'}
           </button>
           <button onClick={() => setIsGenerateModalOpen(true)} className="btn btn-primary">
             <PlusCircle size={18} /> Settle Trip
@@ -1240,6 +1601,30 @@ export const SettlementsPage: React.FC = () => {
               <RefreshCw size={13} /> Reset
             </button>
 
+            {/* Print Master Report */}
+            <button
+              type="button"
+              onClick={handlePrintMaster}
+              disabled={isPrintingMaster}
+              className="btn btn-outline"
+              style={{
+                height: '36px',
+                padding: '0 12px',
+                fontSize: '12px',
+                fontWeight: 600,
+                display: 'flex',
+                alignItems: 'center',
+                gap: '5px',
+                borderColor: '#3b82f6',
+                color: '#1d4ed8',
+                background: '#eff6ff',
+              }}
+              title="Direct print Settlements Master audit records"
+            >
+              {isPrintingMaster ? <Loader2 size={13} className="animate-spin" /> : <Printer size={13} />}
+              {isPrintingMaster ? 'Preparing...' : 'Print'}
+            </button>
+
             {/* Quick Export Button */}
             <button
               type="button"
@@ -1324,148 +1709,190 @@ export const SettlementsPage: React.FC = () => {
       >
         {payTarget && (
           <form onSubmit={handlePayDriver}>
-            <div style={{
-              background: 'linear-gradient(135deg, #f0fdf4 0%, #dcfce7 100%)',
-              border: '1px solid #86efac',
-              borderRadius: '10px',
-              padding: '14px 18px',
-              marginBottom: '20px',
-            }}>
-              <div style={{ fontSize: '13px', color: '#166534', marginBottom: '4px', fontWeight: 600 }}>
-                Settlement #{payTarget.id} — Trip #{payTarget.trip_id}
-              </div>
-              <div style={{ fontSize: '13px', color: '#374151' }}>
-                <strong>{payTarget.driver_name}</strong> &nbsp;|&nbsp; {payTarget.lorry_number}
-              </div>
-              <div style={{ fontSize: '12px', color: '#6b7280', marginTop: '4px' }}>
-                Balance to pay: <strong style={{ color: '#15803d', fontSize: '16px' }}>{formatCurrency(payTarget.balance_to_driver)}</strong>
-              </div>
-            </div>
+            {(() => {
+              const netBal = getNetBalance(payTarget);
+              const isAdvanceCovered = netBal <= 0;
+              return (
+                <>
+                  {isAdvanceCovered ? (
+                    <div style={{
+                      background: 'linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%)',
+                      border: '1.5px solid #93c5fd',
+                      borderRadius: '10px',
+                      padding: '14px 18px',
+                      marginBottom: '20px',
+                    }}>
+                      <div style={{ fontSize: '13px', color: '#1e40af', marginBottom: '4px', fontWeight: 700 }}>
+                        Settlement #{payTarget.id} — Trip #{payTarget.trip_id}
+                      </div>
+                      <div style={{ fontSize: '13px', color: '#1e3a8a' }}>
+                        <strong>{payTarget.driver_name}</strong> &nbsp;|&nbsp; {payTarget.lorry_number}
+                      </div>
+                      <div style={{ fontSize: '13px', color: '#15803d', marginTop: '8px', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        <CheckCircle size={16} /> Trip expenses ({formatCurrency(payTarget.total_expenses)}) fully covered by driver advance
+                      </div>
+                      <div style={{ fontSize: '12px', color: '#1e40af', marginTop: '4px' }}>
+                        Driver holds <strong>₹{Math.abs(netBal).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</strong> remaining advance in hand for next trips.
+                      </div>
+                      <div style={{ fontSize: '11.5px', color: '#64748b', marginTop: '6px', fontStyle: 'italic' }}>
+                        No cash disbursement is needed from office. Confirming will settle this trip voucher and carry forward the driver's advance balance.
+                      </div>
+                    </div>
+                  ) : (
+                    <div style={{
+                      background: 'linear-gradient(135deg, #fef2f2 0%, #fee2e2 100%)',
+                      border: '1px solid #fca5a5',
+                      borderRadius: '10px',
+                      padding: '14px 18px',
+                      marginBottom: '20px',
+                    }}>
+                      <div style={{ fontSize: '13px', color: '#991b1b', marginBottom: '4px', fontWeight: 600 }}>
+                        Settlement #{payTarget.id} — Trip #{payTarget.trip_id}
+                      </div>
+                      <div style={{ fontSize: '13px', color: '#374151' }}>
+                        <strong>{payTarget.driver_name}</strong> &nbsp;|&nbsp; {payTarget.lorry_number}
+                      </div>
+                      <div style={{ fontSize: '12px', color: '#6b7280', marginTop: '4px' }}>
+                        Net balance payable to driver: <strong style={{ color: '#b91c1c', fontSize: '16px' }}>{formatCurrency(netBal)}</strong>
+                      </div>
+                    </div>
+                  )}
 
-            <div className="form-group" style={{ marginBottom: '18px' }}>
-              <label className="form-label" style={{ marginBottom: '10px' }}>Payment Mode *</label>
-              <div style={{ display: 'flex', gap: '10px' }}>
-                {(['CASH', 'UPI', 'BANK_TRANSFER'] as const).map((mode) => (
-                  <button
-                    key={mode}
-                    type="button"
-                    onClick={() => setPayMode(mode)}
-                    style={{
-                      flex: 1,
-                      padding: '10px 8px',
-                      borderRadius: '8px',
-                      border: payMode === mode ? '2px solid var(--primary-600, #2563eb)' : '2px solid #e5e7eb',
-                      background: payMode === mode ? '#eff6ff' : '#fff',
-                      cursor: 'pointer',
-                      fontWeight: payMode === mode ? 700 : 500,
-                      fontSize: '13px',
-                      color: payMode === mode ? '#1d4ed8' : '#374151',
-                      display: 'flex',
-                      flexDirection: 'column',
-                      alignItems: 'center',
-                      gap: '4px',
-                      transition: 'all 0.15s ease',
-                    }}
-                  >
-                    {mode === 'CASH' && <Banknote size={22} color={payMode === 'CASH' ? '#15803d' : '#9ca3af'} />}
-                    {mode === 'UPI' && <Smartphone size={22} color={payMode === 'UPI' ? '#7c3aed' : '#9ca3af'} />}
-                    {mode === 'BANK_TRANSFER' && <IndianRupee size={22} color={payMode === 'BANK_TRANSFER' ? '#1e40af' : '#9ca3af'} />}
-                    {mode === 'CASH' ? 'Cash' : mode === 'UPI' ? 'UPI' : 'Bank Transfer'}
-                  </button>
-                ))}
-              </div>
-            </div>
+                  {!isAdvanceCovered && (
+                    <div className="form-group" style={{ marginBottom: '18px' }}>
+                      <label className="form-label" style={{ marginBottom: '10px' }}>Payment Mode *</label>
+                      <div style={{ display: 'flex', gap: '10px' }}>
+                        {(['CASH', 'UPI', 'BANK_TRANSFER'] as const).map((mode) => (
+                          <button
+                            key={mode}
+                            type="button"
+                            onClick={() => setPayMode(mode)}
+                            style={{
+                              flex: 1,
+                              padding: '10px 8px',
+                              borderRadius: '8px',
+                              border: payMode === mode ? '2px solid var(--primary-600, #2563eb)' : '2px solid #e5e7eb',
+                              background: payMode === mode ? '#eff6ff' : '#fff',
+                              cursor: 'pointer',
+                              fontWeight: payMode === mode ? 700 : 500,
+                              fontSize: '13px',
+                              color: payMode === mode ? '#1d4ed8' : '#374151',
+                              display: 'flex',
+                              flexDirection: 'column',
+                              alignItems: 'center',
+                              gap: '4px',
+                              transition: 'all 0.15s ease',
+                            }}
+                          >
+                            {mode === 'CASH' && <Banknote size={22} color={payMode === 'CASH' ? '#15803d' : '#9ca3af'} />}
+                            {mode === 'UPI' && <Smartphone size={22} color={payMode === 'UPI' ? '#7c3aed' : '#9ca3af'} />}
+                            {mode === 'BANK_TRANSFER' && <IndianRupee size={22} color={payMode === 'BANK_TRANSFER' ? '#1e40af' : '#9ca3af'} />}
+                            {mode === 'CASH' ? 'Cash' : mode === 'UPI' ? 'UPI' : 'Bank Transfer'}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
 
-            <div className="form-group">
-              <label className="form-label">Amount to Pay (₹) *</label>
-              <input
-                type="number"
-                className="form-control"
-                value={payAmount}
-                onChange={(e) => setPayAmount(e.target.value)}
-                min="0.01"
-                step="0.01"
-                required
-                placeholder="Enter amount"
-              />
-            </div>
+                  {!isAdvanceCovered && (
+                    <div className="form-group">
+                      <label className="form-label">Amount to Pay (₹) *</label>
+                      <input
+                        type="number"
+                        className="form-control"
+                        value={payAmount}
+                        onChange={(e) => setPayAmount(e.target.value)}
+                        min="0.01"
+                        step="0.01"
+                        required
+                        placeholder="Enter amount"
+                      />
+                    </div>
+                  )}
 
-            <div className="form-group">
-              <label className="form-label">Payment Date *</label>
-              <input
-                type="date"
-                className="form-control"
-                value={payDate}
-                onChange={(e) => setPayDate(e.target.value)}
-                required
-              />
-            </div>
+                  <div className="form-group">
+                    <label className="form-label">Settlement Date *</label>
+                    <input
+                      type="date"
+                      className="form-control"
+                      value={payDate}
+                      onChange={(e) => setPayDate(e.target.value)}
+                      required
+                    />
+                  </div>
 
-            {(payMode === 'UPI' || payMode === 'BANK_TRANSFER') && (
-              <div className="form-group">
-                <label className="form-label">
-                  {payMode === 'UPI' ? 'UPI Transaction ID / Reference (optional)' : 'Bank Reference No. (optional)'}
-                </label>
-                <input
-                  type="text"
-                  className="form-control"
-                  value={payRef}
-                  onChange={(e) => setPayRef(e.target.value)}
-                  placeholder={payMode === 'UPI' ? 'e.g. 123456789012' : 'e.g. NEFT123456'}
-                />
-              </div>
-            )}
+                  {!isAdvanceCovered && (payMode === 'UPI' || payMode === 'BANK_TRANSFER') && (
+                    <div className="form-group">
+                      <label className="form-label">
+                        {payMode === 'UPI' ? 'UPI Transaction ID / Reference (optional)' : 'Bank Reference No. (optional)'}
+                      </label>
+                      <input
+                        type="text"
+                        className="form-control"
+                        value={payRef}
+                        onChange={(e) => setPayRef(e.target.value)}
+                        placeholder={payMode === 'UPI' ? 'e.g. 123456789012' : 'e.g. NEFT123456'}
+                      />
+                    </div>
+                  )}
 
-            <div className="form-group">
-              <label className="form-label">Notes (optional)</label>
-              <input
-                type="text"
-                className="form-control"
-                value={payNotes}
-                onChange={(e) => setPayNotes(e.target.value)}
-                placeholder="e.g. Final settlement for trip"
-              />
-            </div>
+                  <div className="form-group">
+                    <label className="form-label">Notes (optional)</label>
+                    <input
+                      type="text"
+                      className="form-control"
+                      value={payNotes}
+                      onChange={(e) => setPayNotes(e.target.value)}
+                      placeholder={isAdvanceCovered ? 'e.g. Expenses deducted from driver advance balance' : 'e.g. Final settlement for trip'}
+                    />
+                  </div>
 
-            {payMode === 'CASH' && (
-              <div style={{
-                background: '#f0fdf4', border: '1px solid #86efac', borderRadius: '6px',
-                padding: '8px 12px', fontSize: '12px', color: '#166534', marginBottom: '14px',
-              }}>
-                <Banknote size={13} style={{ marginRight: 5, verticalAlign: 'middle' }} />
-                Cash payment — will be recorded and settlement marked as SETTLED.
-              </div>
-            )}
-            {payMode === 'UPI' && (
-              <div style={{
-                background: '#faf5ff', border: '1px solid #c4b5fd', borderRadius: '6px',
-                padding: '8px 12px', fontSize: '12px', color: '#6d28d9', marginBottom: '14px',
-              }}>
-                <Smartphone size={13} style={{ marginRight: 5, verticalAlign: 'middle' }} />
-                UPI payment — enter the transaction reference ID for records.
-              </div>
-            )}
+                  {isAdvanceCovered && (
+                    <div style={{
+                      background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: '6px',
+                      padding: '8px 12px', fontSize: '12px', color: '#1e40af', marginBottom: '14px',
+                    }}>
+                      <CheckCircle size={13} style={{ marginRight: 5, verticalAlign: 'middle' }} />
+                      Advance Adjusted Settlement — no office cash payout needed.
+                    </div>
+                  )}
 
-            {payError && (
-              <div style={{
-                background: '#fef2f2', border: '1px solid #fca5a5', borderRadius: '6px',
-                padding: '10px 14px', color: '#b91c1c', fontSize: '13px', marginBottom: '12px',
-              }}>
-                {payError}
-              </div>
-            )}
+                  {!isAdvanceCovered && payMode === 'CASH' && (
+                    <div style={{
+                      background: '#f0fdf4', border: '1px solid #86efac', borderRadius: '6px',
+                      padding: '8px 12px', fontSize: '12px', color: '#166534', marginBottom: '14px',
+                    }}>
+                      <Banknote size={13} style={{ marginRight: 5, verticalAlign: 'middle' }} />
+                      Cash payment — will be recorded and settlement marked as SETTLED.
+                    </div>
+                  )}
 
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '4px' }}>
-              <button type="button" onClick={() => setIsPayModalOpen(false)} className="btn btn-outline">Cancel</button>
-              <button
-                type="submit"
-                className="btn btn-primary"
-                disabled={isPaying}
-                style={{ background: '#15803d', borderColor: '#15803d' }}
-              >
-                {isPaying ? 'Recording...' : `Pay via ${payMode === 'BANK_TRANSFER' ? 'Bank Transfer' : payMode}`}
-              </button>
-            </div>
+                  {payError && (
+                    <div style={{
+                      background: '#fef2f2', border: '1px solid #fca5a5', borderRadius: '6px',
+                      padding: '10px 14px', color: '#b91c1c', fontSize: '13px', marginBottom: '12px',
+                    }}>
+                      {payError}
+                    </div>
+                  )}
+
+                  <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '4px' }}>
+                    <button type="button" onClick={() => setIsPayModalOpen(false)} className="btn btn-outline">Cancel</button>
+                    <button
+                      type="submit"
+                      className="btn btn-primary"
+                      disabled={isPaying}
+                      style={{
+                        background: isAdvanceCovered ? '#2563eb' : '#15803d',
+                        borderColor: isAdvanceCovered ? '#2563eb' : '#15803d',
+                      }}
+                    >
+                      {isPaying ? 'Recording...' : isAdvanceCovered ? 'Settle (Advance Adjusted)' : `Pay via ${payMode === 'BANK_TRANSFER' ? 'Bank Transfer' : payMode}`}
+                    </button>
+                  </div>
+                </>
+              );
+            })()}
           </form>
         )}
       </Modal>
@@ -1697,14 +2124,33 @@ export const SettlementsPage: React.FC = () => {
                   <span>Less: Total Driver Expenses Incurred:</span>
                   <strong style={{ color: '#b45309' }}>(-) {formatCurrency(selectedSettlement.total_expenses)}</strong>
                 </div>
+                {Number(selectedSettlement.previous_driver_balance || 0) > 0 && (
+                  <div style={{ display: 'flex', justifyContent: 'space-between', padding: '7px 14px', fontSize: '12px', borderBottom: '1px solid #e2e8f0' }}>
+                    <span>Driver Advance Brought Forward from Prior Trips:</span>
+                    <strong style={{ color: '#1d4ed8' }}>{formatCurrency(selectedSettlement.previous_driver_balance || 0)}</strong>
+                  </div>
+                )}
                 <div style={{ display: 'flex', justifyContent: 'space-between', padding: '7px 14px', fontSize: '12px', borderBottom: '1px solid #e2e8f0' }}>
-                  <span>Less: Trip Advance Already Paid to Driver:</span>
-                  <strong style={{ color: '#475569' }}>(-) {formatCurrency(selectedSettlement.advance_paid)}</strong>
+                  <span>Trip Advance Paid to Driver:</span>
+                  <strong style={{ color: '#475569' }}>{formatCurrency(selectedSettlement.advance_paid)}</strong>
                 </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', padding: '10px 14px', background: '#f0fdf4', fontWeight: 900, fontSize: '14.5px', color: '#15803d', borderTop: '1.5px solid #0f172a' }}>
-                  <span>NET BALANCE PAYABLE TO DRIVER:</span>
-                  <span>{parseFloat(String(selectedSettlement.balance_to_driver || 0)) >= 0 ? '+' : ''}{formatCurrency(selectedSettlement.balance_to_driver)}</span>
-                </div>
+                {getNetBalance(selectedSettlement) <= 0 ? (
+                  <>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 14px', background: '#eff6ff', fontWeight: 800, fontSize: '13px', color: '#1d4ed8', borderTop: '1px solid #bfdbfe' }}>
+                      <span>REMAINING ADVANCE IN DRIVER HAND:</span>
+                      <span>₹{Math.abs(getNetBalance(selectedSettlement)).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', padding: '9px 14px', background: '#f0fdf4', fontWeight: 900, fontSize: '14px', color: '#15803d', borderTop: '1px solid #bbf7d0' }}>
+                      <span>NET CASH PAYABLE BY OFFICE:</span>
+                      <span>₹0.00 (Covered by Advance)</span>
+                    </div>
+                  </>
+                ) : (
+                  <div style={{ display: 'flex', justifyContent: 'space-between', padding: '10px 14px', background: '#fef2f2', fontWeight: 900, fontSize: '14.5px', color: '#b91c1c', borderTop: '1.5px solid #0f172a' }}>
+                    <span>NET BALANCE PAYABLE TO DRIVER:</span>
+                    <span>+{formatCurrency(getNetBalance(selectedSettlement))}</span>
+                  </div>
+                )}
               </div>
 
               {/* Payment Info if SETTLED */}
@@ -1784,13 +2230,23 @@ export const SettlementsPage: React.FC = () => {
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '20px' }}>
               <div style={{ display: 'flex', gap: '8px' }}>
                 {(selectedSettlement.settlement_status === 'PENDING' || selectedSettlement.settlement_status === 'VERIFIED') && (
-                  <button
-                    onClick={() => { setIsSlipModalOpen(false); openPayModal(selectedSettlement); }}
-                    className="btn btn-primary"
-                    style={{ background: '#15803d', borderColor: '#15803d' }}
-                  >
-                    <IndianRupee size={15} /> Pay Driver
-                  </button>
+                  (getNetBalance(selectedSettlement) > 0) ? (
+                    <button
+                      onClick={() => { setIsSlipModalOpen(false); openPayModal(selectedSettlement); }}
+                      className="btn btn-primary"
+                      style={{ background: '#15803d', borderColor: '#15803d', display: 'flex', alignItems: 'center', gap: '6px' }}
+                    >
+                      <IndianRupee size={15} /> Pay Driver (₹{getNetBalance(selectedSettlement).toLocaleString('en-IN')})
+                    </button>
+                  ) : (
+                    <button
+                      onClick={() => { setIsSlipModalOpen(false); handleSettleFromAdvance(selectedSettlement); }}
+                      className="btn btn-primary"
+                      style={{ background: '#2563eb', borderColor: '#2563eb', display: 'flex', alignItems: 'center', gap: '6px' }}
+                    >
+                      <CheckCircle size={15} /> Settle (Advance Adjusted)
+                    </button>
+                  )
                 )}
               </div>
               <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>

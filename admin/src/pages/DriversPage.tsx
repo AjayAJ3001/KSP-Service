@@ -1615,6 +1615,33 @@ export const DriversPage: React.FC = () => {
       accessor: (d) => (d.created_at ? toIST(d.created_at) : '—'),
     },
     {
+      header: 'Advance Balance',
+      render: (d) => {
+        const bal = Math.max(0, parseFloat(String(d.remaining_advance_balance ?? 0)) || 0);
+        const given = parseFloat(String(d.total_advance_given ?? 0)) || 0;
+        if (given === 0) return <span style={{ color: '#94a3b8', fontSize: '12px' }}>—</span>;
+        return (
+          <div>
+            <span
+              style={{
+                display: 'inline-block',
+                padding: '3px 10px',
+                borderRadius: '12px',
+                fontSize: '12px',
+                fontWeight: 700,
+                background: bal > 0 ? '#eff6ff' : '#f0fdf4',
+                color: bal > 0 ? '#1d4ed8' : '#15803d',
+                border: `1px solid ${bal > 0 ? '#bfdbfe' : '#bbf7d0'}`,
+              }}
+              title={bal > 0 ? `₹${bal.toLocaleString('en-IN')} cash in driver hand` : 'Fully settled'}
+            >
+              {bal > 0 ? `₹${bal.toLocaleString('en-IN', { maximumFractionDigits: 0 })} In Hand` : '₹0 Settled'}
+            </span>
+          </div>
+        );
+      },
+    },
+    {
       header: 'Actions',
       render: (d) => (
         <div style={{ display: 'flex', gap: '6px' }}>

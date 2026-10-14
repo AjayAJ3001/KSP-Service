@@ -1,4 +1,5 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { useFocusEffect } from '@react-navigation/native';
 import { formatDateDMY } from '../utils/dateUtils';
 import {
   View,
@@ -592,7 +593,11 @@ export const HomeScreen: React.FC<{ navigation: any }> = ({ navigation }) => {
   const [tripsModalVisible, setTripsModalVisible] = useState(false);
   const [selectedRecentTrip, setSelectedRecentTrip] = useState<Trip | null>(null);
 
-  useEffect(() => { loadDashboard(); }, []);
+  useFocusEffect(
+    useCallback(() => {
+      loadDashboard();
+    }, [])
+  );
 
   const loadDashboard = async () => {
     try {

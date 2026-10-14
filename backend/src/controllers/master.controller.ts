@@ -24,7 +24,34 @@ export const getDrivers = asyncHandler(async (req: AuthRequest, res: Response): 
   const total = parseInt(countResult.rows[0].count);
 
   const result = await query(
-    `SELECT * FROM drivers WHERE ${where} ORDER BY name ASC LIMIT $${paramIdx} OFFSET $${paramIdx + 1}`,
+    `SELECT d.*,
+            (
+              COALESCE((SELECT SUM(da.amount) FROM driver_advances da WHERE da.driver_id = d.id), 0) +
+              COALESCE((SELECT SUM(ta.amount) FROM truck_advances ta WHERE ta.driver_id = d.id), 0) +
+              COALESCE((SELECT SUM(tr.advance_paid) FROM trips tr WHERE tr.driver_id = d.id AND tr.status NOT IN ('CANCELLED', 'DRAFT') AND NOT EXISTS (SELECT 1 FROM truck_advances ta WHERE ta.trip_id = tr.id)), 0) +
+              COALESCE((SELECT SUM(dsp.amount) FROM driver_settlement_payments dsp JOIN settlements st ON dsp.settlement_id = st.id JOIN trips tr ON st.trip_id = tr.id WHERE tr.driver_id = d.id), 0)
+            ) as total_advance_given,
+            COALESCE((
+              SELECT SUM(
+                COALESCE(s.total_expenses, (SELECT SUM(de.amount) FROM driver_expenses de WHERE de.trip_id = t.id), 0)
+              )
+              FROM trips t LEFT JOIN settlements s ON s.trip_id = t.id
+              WHERE t.driver_id = d.id AND t.status NOT IN ('CANCELLED', 'DRAFT')
+            ), 0) as total_expenses_reported,
+            GREATEST(0,
+              COALESCE((SELECT SUM(da.amount) FROM driver_advances da WHERE da.driver_id = d.id), 0) +
+              COALESCE((SELECT SUM(ta.amount) FROM truck_advances ta WHERE ta.driver_id = d.id), 0) +
+              COALESCE((SELECT SUM(tr.advance_paid) FROM trips tr WHERE tr.driver_id = d.id AND tr.status NOT IN ('CANCELLED', 'DRAFT') AND NOT EXISTS (SELECT 1 FROM truck_advances ta WHERE ta.trip_id = tr.id)), 0) +
+              COALESCE((SELECT SUM(dsp.amount) FROM driver_settlement_payments dsp JOIN settlements st ON dsp.settlement_id = st.id JOIN trips tr ON st.trip_id = tr.id WHERE tr.driver_id = d.id), 0) -
+              COALESCE((
+                SELECT SUM(
+                  COALESCE(s.total_expenses, (SELECT SUM(de.amount) FROM driver_expenses de WHERE de.trip_id = t.id), 0)
+                )
+                FROM trips t LEFT JOIN settlements s ON s.trip_id = t.id
+                WHERE t.driver_id = d.id AND t.status NOT IN ('CANCELLED', 'DRAFT')
+              ), 0)
+            ) as remaining_advance_balance
+     FROM drivers d WHERE ${where} ORDER BY name ASC LIMIT $${paramIdx} OFFSET $${paramIdx + 1}`,
     [...params, limit, offset]
   );
 
@@ -32,7 +59,37 @@ export const getDrivers = asyncHandler(async (req: AuthRequest, res: Response): 
 });
 
 export const getDriverById = asyncHandler(async (req: AuthRequest, res: Response): Promise<void> => {
-  const result = await query('SELECT * FROM drivers WHERE id = $1', [req.params.id]);
+  const result = await query(
+    `SELECT d.*,
+            (
+              COALESCE((SELECT SUM(da.amount) FROM driver_advances da WHERE da.driver_id = d.id), 0) +
+              COALESCE((SELECT SUM(ta.amount) FROM truck_advances ta WHERE ta.driver_id = d.id), 0) +
+              COALESCE((SELECT SUM(tr.advance_paid) FROM trips tr WHERE tr.driver_id = d.id AND tr.status NOT IN ('CANCELLED', 'DRAFT') AND NOT EXISTS (SELECT 1 FROM truck_advances ta WHERE ta.trip_id = tr.id)), 0) +
+              COALESCE((SELECT SUM(dsp.amount) FROM driver_settlement_payments dsp JOIN settlements st ON dsp.settlement_id = st.id JOIN trips tr ON st.trip_id = tr.id WHERE tr.driver_id = d.id), 0)
+            ) as total_advance_given,
+            COALESCE((
+              SELECT SUM(
+                COALESCE(s.total_expenses, (SELECT SUM(de.amount) FROM driver_expenses de WHERE de.trip_id = t.id), 0)
+              )
+              FROM trips t LEFT JOIN settlements s ON s.trip_id = t.id
+              WHERE t.driver_id = d.id AND t.status NOT IN ('CANCELLED', 'DRAFT')
+            ), 0) as total_expenses_reported,
+            GREATEST(0,
+              COALESCE((SELECT SUM(da.amount) FROM driver_advances da WHERE da.driver_id = d.id), 0) +
+              COALESCE((SELECT SUM(ta.amount) FROM truck_advances ta WHERE ta.driver_id = d.id), 0) +
+              COALESCE((SELECT SUM(tr.advance_paid) FROM trips tr WHERE tr.driver_id = d.id AND tr.status NOT IN ('CANCELLED', 'DRAFT') AND NOT EXISTS (SELECT 1 FROM truck_advances ta WHERE ta.trip_id = tr.id)), 0) +
+              COALESCE((SELECT SUM(dsp.amount) FROM driver_settlement_payments dsp JOIN settlements st ON dsp.settlement_id = st.id JOIN trips tr ON st.trip_id = tr.id WHERE tr.driver_id = d.id), 0) -
+              COALESCE((
+                SELECT SUM(
+                  COALESCE(s.total_expenses, (SELECT SUM(de.amount) FROM driver_expenses de WHERE de.trip_id = t.id), 0)
+                )
+                FROM trips t LEFT JOIN settlements s ON s.trip_id = t.id
+                WHERE t.driver_id = d.id AND t.status NOT IN ('CANCELLED', 'DRAFT')
+              ), 0)
+            ) as remaining_advance_balance
+     FROM drivers d WHERE id = $1`,
+    [req.params.id]
+  );
   if (result.rows.length === 0) throw new AppError('Driver not found.', 404);
   res.json({ success: true, message: 'Driver retrieved.', data: result.rows[0] });
 });

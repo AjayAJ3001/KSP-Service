@@ -43,7 +43,21 @@ export const getSettlements = asyncHandler(async (req: AuthRequest, res: Respons
     `SELECT s.*, t.trip_date, t.advance_paid, t.total_freight, t.goods_weight, t.freight_rate,
             v.lorry_number, d.name as driver_name, d.mobile_number as driver_mobile,
             p.name as party_name, r.from_location, r.to_location,
-            u.name as settled_by_name
+            u.name as settled_by_name,
+            (
+              COALESCE((SELECT SUM(da.amount) FROM driver_advances da WHERE da.driver_id = d.id), 0) +
+              COALESCE((SELECT SUM(ta.amount) FROM truck_advances ta WHERE ta.driver_id = d.id), 0) +
+              COALESCE((SELECT SUM(tr.advance_paid) FROM trips tr WHERE tr.driver_id = d.id AND tr.status NOT IN ('CANCELLED', 'DRAFT') AND NOT EXISTS (SELECT 1 FROM truck_advances ta WHERE ta.trip_id = tr.id)), 0) +
+              COALESCE((SELECT SUM(dsp.amount) FROM driver_settlement_payments dsp JOIN settlements st ON dsp.settlement_id = st.id JOIN trips tr ON st.trip_id = tr.id WHERE tr.driver_id = d.id), 0) -
+              COALESCE((
+                SELECT SUM(
+                  COALESCE(st.total_expenses, (SELECT SUM(de.amount) FROM driver_expenses de WHERE de.trip_id = tr.id), 0)
+                )
+                FROM trips tr
+                LEFT JOIN settlements st ON st.trip_id = tr.id
+                WHERE tr.driver_id = d.id AND tr.status NOT IN ('CANCELLED', 'DRAFT')
+              ), 0)
+            ) as driver_current_balance
      FROM settlements s
      JOIN trips t ON s.trip_id = t.id
      JOIN vehicles v ON t.vehicle_id = v.id
@@ -67,6 +81,20 @@ export const getSettlementByTripId = asyncHandler(async (req: AuthRequest, res: 
             v.lorry_number, d.name as driver_name, d.mobile_number as driver_mobile,
             p.name as party_name, r.from_location, r.to_location,
             u.name as settled_by_name,
+            (
+              COALESCE((SELECT SUM(da.amount) FROM driver_advances da WHERE da.driver_id = d.id), 0) +
+              COALESCE((SELECT SUM(ta.amount) FROM truck_advances ta WHERE ta.driver_id = d.id), 0) +
+              COALESCE((SELECT SUM(tr.advance_paid) FROM trips tr WHERE tr.driver_id = d.id AND tr.status NOT IN ('CANCELLED', 'DRAFT') AND NOT EXISTS (SELECT 1 FROM truck_advances ta WHERE ta.trip_id = tr.id)), 0) +
+              COALESCE((SELECT SUM(dsp.amount) FROM driver_settlement_payments dsp JOIN settlements st ON dsp.settlement_id = st.id JOIN trips tr ON st.trip_id = tr.id WHERE tr.driver_id = d.id), 0) -
+              COALESCE((
+                SELECT SUM(
+                  COALESCE(st.total_expenses, (SELECT SUM(de.amount) FROM driver_expenses de WHERE de.trip_id = tr.id), 0)
+                )
+                FROM trips tr
+                LEFT JOIN settlements st ON st.trip_id = tr.id
+                WHERE tr.driver_id = d.id AND tr.status NOT IN ('CANCELLED', 'DRAFT')
+              ), 0)
+            ) as driver_current_balance,
             (SELECT json_agg(json_build_object('expense_type', de.expense_type, 'description', de.description, 'amount', de.amount))
              FROM driver_expenses de WHERE de.trip_id = t.id) as expense_items,
             (SELECT json_agg(json_build_object('id', dsp.id, 'amount', dsp.amount, 'payment_mode', dsp.payment_mode, 'payment_date', dsp.payment_date, 'reference_no', dsp.reference_no, 'notes', dsp.notes, 'created_at', dsp.created_at))
@@ -94,6 +122,20 @@ export const getSettlementById = asyncHandler(async (req: AuthRequest, res: Resp
             v.lorry_number, d.name as driver_name, d.mobile_number as driver_mobile,
             p.name as party_name, r.from_location, r.to_location,
             u.name as settled_by_name,
+            (
+              COALESCE((SELECT SUM(da.amount) FROM driver_advances da WHERE da.driver_id = d.id), 0) +
+              COALESCE((SELECT SUM(ta.amount) FROM truck_advances ta WHERE ta.driver_id = d.id), 0) +
+              COALESCE((SELECT SUM(tr.advance_paid) FROM trips tr WHERE tr.driver_id = d.id AND tr.status NOT IN ('CANCELLED', 'DRAFT') AND NOT EXISTS (SELECT 1 FROM truck_advances ta WHERE ta.trip_id = tr.id)), 0) +
+              COALESCE((SELECT SUM(dsp.amount) FROM driver_settlement_payments dsp JOIN settlements st ON dsp.settlement_id = st.id JOIN trips tr ON st.trip_id = tr.id WHERE tr.driver_id = d.id), 0) -
+              COALESCE((
+                SELECT SUM(
+                  COALESCE(st.total_expenses, (SELECT SUM(de.amount) FROM driver_expenses de WHERE de.trip_id = tr.id), 0)
+                )
+                FROM trips tr
+                LEFT JOIN settlements st ON st.trip_id = tr.id
+                WHERE tr.driver_id = d.id AND tr.status NOT IN ('CANCELLED', 'DRAFT')
+              ), 0)
+            ) as driver_current_balance,
             (SELECT json_agg(json_build_object('expense_type', de.expense_type, 'description', de.description, 'amount', de.amount))
              FROM driver_expenses de WHERE de.trip_id = t.id) as expense_items,
             (SELECT json_agg(json_build_object('id', dsp.id, 'amount', dsp.amount, 'payment_mode', dsp.payment_mode, 'payment_date', dsp.payment_date, 'reference_no', dsp.reference_no, 'notes', dsp.notes, 'created_at', dsp.created_at))
@@ -122,7 +164,7 @@ export const generateSettlement = asyncHandler(async (req: AuthRequest, res: Res
 
     // Get trip with expense totals
     const tripResult = await client.query(
-      `SELECT t.*, v.lorry_number, d.name as driver_name, p.name as party_name, r.from_location, r.to_location
+      `SELECT t.*, v.lorry_number, d.name as driver_name, d.id as d_id, p.name as party_name, r.from_location, r.to_location
        FROM trips t
        JOIN vehicles v ON t.vehicle_id = v.id
        JOIN drivers d ON t.driver_id = d.id
@@ -144,33 +186,152 @@ export const generateSettlement = asyncHandler(async (req: AuthRequest, res: Res
     const existingSettlement = await client.query('SELECT id FROM settlements WHERE trip_id = $1', [trip_id]);
     if (existingSettlement.rows.length > 0) throw new AppError('Settlement already exists for this trip.', 409);
 
+    // Ensure table columns exist
+    await client.query(`
+      ALTER TABLE settlements 
+      ADD COLUMN IF NOT EXISTS previous_driver_balance DECIMAL(12,2) DEFAULT 0,
+      ADD COLUMN IF NOT EXISTS net_balance_to_driver DECIMAL(12,2) DEFAULT 0
+    `).catch(() => {});
+
     // Calculate totals — backend is source of truth
     const expenseResult = await client.query(
       `SELECT COALESCE(SUM(amount), 0) as total FROM driver_expenses WHERE trip_id = $1`,
       [trip_id]
     );
 
-    const total_expenses = parseFloat(expenseResult.rows[0].total);
-    const advance_paid = parseFloat(trip.advance_paid);
-    const balance_to_driver = total_expenses - advance_paid;
+    const total_expenses = parseFloat(expenseResult.rows[0].total) || 0;
+    const trip_advance_paid = parseFloat(trip.advance_paid) || 0;
 
-    // Create settlement
-    const settlementResult = await client.query(
-      `INSERT INTO settlements (trip_id, total_freight, total_expenses, advance_paid, balance_to_driver, settlement_status, created_by)
-       VALUES ($1, $2, $3, $4, $5, 'PENDING', $6) RETURNING *`,
-      [trip_id, trip.total_freight, total_expenses, advance_paid, balance_to_driver, req.user?.id]
+    // === DRIVER ADVANCE BALANCE DEDUCTION LOGIC ===
+    // "again the driver come another trip means need to take the expenses amount from driver advance balance"
+    // Look up prior advance balance for this driver outside this trip
+    const driverAdvanceStats = await client.query(
+      `SELECT
+         COALESCE((SELECT SUM(da.amount) FROM driver_advances da WHERE da.driver_id = $1), 0) +
+         COALESCE((SELECT SUM(ta.amount) FROM truck_advances ta WHERE ta.driver_id = $1 AND (ta.trip_id IS NULL OR ta.trip_id != $2)), 0) +
+         COALESCE((SELECT SUM(t.advance_paid) FROM trips t WHERE t.driver_id = $1 AND t.id != $2 AND t.status NOT IN ('CANCELLED', 'DRAFT') AND NOT EXISTS (SELECT 1 FROM truck_advances ta WHERE ta.trip_id = t.id)), 0) +
+         COALESCE((SELECT SUM(dsp.amount) FROM driver_settlement_payments dsp JOIN settlements s ON dsp.settlement_id = s.id JOIN trips t ON s.trip_id = t.id WHERE t.driver_id = $1 AND t.id != $2), 0)
+         as total_prior_advance_given,
+
+         COALESCE((
+           SELECT SUM(
+             COALESCE(s.total_expenses, (SELECT SUM(de.amount) FROM driver_expenses de WHERE de.trip_id = t.id), 0)
+           )
+           FROM trips t
+           LEFT JOIN settlements s ON s.trip_id = t.id
+           WHERE t.driver_id = $1 AND t.id != $2 AND t.status NOT IN ('CANCELLED', 'DRAFT')
+         ), 0) as total_prior_expenses
+      `,
+      [trip.driver_id, trip_id]
     );
 
-    // Update trip status to SETTLED only if freight payment has also been fully received
+    const total_prior_advance_given = parseFloat(driverAdvanceStats.rows[0]?.total_prior_advance_given || 0);
+    const total_prior_expenses = parseFloat(driverAdvanceStats.rows[0]?.total_prior_expenses || 0);
+
+    // Prior advance cash in driver hand before this trip (positive = driver holds cash in hand)
+    const previous_driver_balance = total_prior_advance_given - total_prior_expenses;
+    const total_advance_available = previous_driver_balance + trip_advance_paid;
+
+    let balance_to_driver = 0;
+    let net_balance_to_driver = 0;
+    let auto_settle = false;
+
+    if (total_advance_available >= total_expenses) {
+      // Advance completely covers trip expenses!
+      const remaining_advance_in_hand = total_advance_available - total_expenses;
+      balance_to_driver = 0;
+      net_balance_to_driver = -remaining_advance_in_hand; // negative = surplus advance held by driver
+      auto_settle = true;
+    } else {
+      // Expenses exceed available advance; company owes driver the difference
+      const excess = total_expenses - total_advance_available;
+      balance_to_driver = excess;
+      net_balance_to_driver = excess;
+      auto_settle = false;
+    }
+
+    const initialStatus = auto_settle ? 'SETTLED' : 'PENDING';
+    const initialMode = auto_settle ? 'ADJUSTED_ADVANCE' : null;
+    const initialPayDate = auto_settle ? (trip.trip_date || new Date().toISOString().split('T')[0]) : null;
+    const initialNotes = auto_settle
+      ? `Expenses ₹${total_expenses.toLocaleString('en-IN')} deducted from advance balance. Driver holds ₹${Math.abs(net_balance_to_driver).toLocaleString('en-IN')} advance in hand.`
+      : null;
+
+    // Create settlement with carry-forward fields
+    const settlementResult = await client.query(
+      `INSERT INTO settlements (
+         trip_id, total_freight, total_expenses, advance_paid, balance_to_driver,
+         previous_driver_balance, net_balance_to_driver, settlement_status,
+         payment_mode, payment_date, paid_amount, notes, settled_by, settled_at, created_by
+       )
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, ${auto_settle ? 'NOW()' : 'NULL'}, $14)
+       RETURNING *`,
+      [
+        trip_id,
+        trip.total_freight,
+        total_expenses,
+        trip_advance_paid,
+        balance_to_driver,
+        previous_driver_balance,
+        net_balance_to_driver,
+        initialStatus,
+        initialMode,
+        initialPayDate,
+        0,
+        initialNotes,
+        auto_settle ? req.user?.id : null,
+        req.user?.id,
+      ]
+    );
+
+    // If auto-settled, also record in driver_settlement_payments for audit ledger
+    if (auto_settle) {
+      await client.query(
+        `INSERT INTO driver_settlement_payments (settlement_id, trip_id, amount, payment_mode, payment_date, notes, created_by)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+        [settlementResult.rows[0].id, trip_id, 0, 'ADJUSTED_ADVANCE', initialPayDate, initialNotes, req.user?.id]
+      );
+    }
+
+    // When settlement slip is generated, record trip advance in truck_advances so manager balance reflects it
+    if (trip_advance_paid > 0) {
+      const advCheck = await client.query('SELECT id FROM truck_advances WHERE trip_id = $1', [trip_id]);
+      if (advCheck.rows.length === 0) {
+        await client.query(
+          `INSERT INTO truck_advances (vehicle_id, driver_id, manager_id, amount, advance_date, notes, created_by, trip_id)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+          [
+            trip.vehicle_id,
+            trip.driver_id,
+            trip.created_by || req.user?.id,
+            trip_advance_paid,
+            trip.created_at || new Date(),
+            `Advance for Trip #${trip_id} (${trip.lorry_number || ''})`,
+            req.user?.id,
+            trip_id,
+          ]
+        );
+      }
+    }
+
+    // When settlement is generated, the trip is officially committed:
+    // Move from DRAFT → PAYMENT_PENDING (or SETTLED if fully paid + auto_settle)
     const pmtSum = await client.query(
       `SELECT COALESCE(SUM(received_amount), 0) as total_received FROM trip_payments WHERE trip_id = $1`,
       [trip_id]
     );
     const totalRecv = parseFloat(pmtSum.rows[0].total_received);
     const totalFr = parseFloat(trip.total_freight);
-    if (totalRecv >= totalFr) {
+    if (totalRecv >= totalFr && auto_settle) {
       await client.query(`UPDATE trips SET status = 'SETTLED', updated_at = NOW() WHERE id = $1`, [trip_id]);
+    } else {
+      // Ensure trip is at least PAYMENT_PENDING (activates it from DRAFT)
+      await client.query(
+        `UPDATE trips SET status = CASE WHEN status = 'DRAFT' THEN 'PAYMENT_PENDING' ELSE status END, updated_at = NOW() WHERE id = $1`,
+        [trip_id]
+      );
     }
+
 
     const expensesResult = await client.query(
       `SELECT expense_type, description, amount FROM driver_expenses WHERE trip_id = $1 ORDER BY id ASC`,
@@ -179,12 +340,27 @@ export const generateSettlement = asyncHandler(async (req: AuthRequest, res: Res
 
     await client.query('COMMIT');
 
-    await createAuditLog(req.user?.id, 'GENERATE_SETTLEMENT', 'SETTLEMENTS', settlementResult.rows[0].id, { trip_id, balance_to_driver });
+    await createAuditLog(req.user?.id, 'GENERATE_SETTLEMENT', 'SETTLEMENTS', settlementResult.rows[0].id, {
+      trip_id, balance_to_driver, previous_driver_balance, net_balance_to_driver, auto_settle,
+    });
 
     res.status(201).json({
       success: true,
-      message: 'Settlement generated successfully.',
-      data: { ...settlementResult.rows[0], ...trip, expense_items: expensesResult.rows },
+      message: auto_settle
+        ? `Trip settlement generated and settled automatically (₹${total_expenses.toFixed(2)} expenses covered by advance).`
+        : 'Trip settlement slip generated successfully.',
+      data: {
+        ...settlementResult.rows[0],
+        lorry_number: trip.lorry_number,
+        driver_name: trip.driver_name,
+        party_name: trip.party_name,
+        from_location: trip.from_location,
+        to_location: trip.to_location,
+        trip_date: trip.trip_date,
+        goods_weight: trip.goods_weight,
+        freight_rate: trip.freight_rate,
+        expense_items: expensesResult.rows,
+      },
     });
   } catch (error) {
     await client.query('ROLLBACK');
@@ -193,6 +369,7 @@ export const generateSettlement = asyncHandler(async (req: AuthRequest, res: Res
     client.release();
   }
 });
+
 
 export const verifySettlement = asyncHandler(async (req: AuthRequest, res: Response): Promise<void> => {
   const { id } = req.params;
@@ -214,8 +391,8 @@ export const settlePayment = asyncHandler(async (req: AuthRequest, res: Response
   const { payment_mode, payment_date, paid_amount, reference_no, notes } = req.body;
 
   const mode = (payment_mode || 'CASH').toUpperCase();
-  if (!['CASH', 'UPI', 'BANK_TRANSFER'].includes(mode)) {
-    throw new AppError('Payment mode must be CASH, UPI, or BANK_TRANSFER.', 400);
+  if (!['CASH', 'UPI', 'BANK_TRANSFER', 'ADJUSTED_ADVANCE'].includes(mode)) {
+    throw new AppError('Payment mode must be CASH, UPI, BANK_TRANSFER, or ADJUSTED_ADVANCE.', 400);
   }
 
   const client = await getClient();
@@ -226,16 +403,21 @@ export const settlePayment = asyncHandler(async (req: AuthRequest, res: Response
     if (sResult.rows.length === 0) throw new AppError('Settlement not found.', 404);
     const settlement = sResult.rows[0];
 
-    const amount = paid_amount !== undefined && paid_amount !== null
-      ? parseFloat(paid_amount)
-      : Math.abs(parseFloat(settlement.balance_to_driver || 0));
+    const isAdjusted = mode === 'ADJUSTED_ADVANCE';
+    const amount = isAdjusted
+      ? 0
+      : (paid_amount !== undefined && paid_amount !== null
+          ? parseFloat(paid_amount)
+          : Math.max(0, parseFloat(settlement.net_balance_to_driver ?? settlement.balance_to_driver ?? 0)));
+
     const payDate = payment_date || new Date().toISOString().split('T')[0];
+    const finalNotes = notes || (isAdjusted ? 'Trip expenses deducted from driver advance balance' : null);
 
     // Record into driver_settlement_payments table
     await client.query(
       `INSERT INTO driver_settlement_payments (settlement_id, trip_id, amount, payment_mode, payment_date, reference_no, notes, created_by)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-      [settlement.id, settlement.trip_id, amount, mode, payDate, reference_no || null, notes || null, req.user?.id]
+      [settlement.id, settlement.trip_id, amount, mode, payDate, reference_no || null, finalNotes, req.user?.id]
     );
 
     // Update settlement record
@@ -252,7 +434,7 @@ export const settlePayment = asyncHandler(async (req: AuthRequest, res: Response
            updated_at = NOW()
        WHERE id = $7
        RETURNING *`,
-      [mode, payDate, amount, reference_no || null, notes || null, req.user?.id, id]
+      [mode, payDate, amount, reference_no || null, finalNotes, req.user?.id, id]
     );
 
     // If freight is also settled, update trip status to SETTLED
@@ -277,7 +459,9 @@ export const settlePayment = asyncHandler(async (req: AuthRequest, res: Response
 
     res.json({
       success: true,
-      message: `Driver settlement of ₹${amount.toFixed(2)} recorded successfully via ${mode}.`,
+      message: isAdjusted
+        ? 'Trip settlement marked settled via driver advance adjustment.'
+        : `Driver settlement of ₹${amount.toFixed(2)} recorded successfully via ${mode}.`,
       data: updatedSettlement.rows[0],
     });
   } catch (error) {

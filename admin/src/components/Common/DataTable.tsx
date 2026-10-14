@@ -22,6 +22,7 @@ interface DataTableProps<T> {
   actions?: React.ReactNode;
   emptyMessage?: string;
   showSerialNumber?: boolean;
+  footer?: React.ReactNode;
 }
 
 export function DataTable<T extends { id?: string | number }>({
@@ -38,6 +39,7 @@ export function DataTable<T extends { id?: string | number }>({
   actions,
   emptyMessage = 'No records found.',
   showSerialNumber = true,
+  footer,
 }: DataTableProps<T>) {
   const totalPages = Math.ceil(total / limit) || 1;
   const colSpanCount = columns.length + (showSerialNumber ? 1 : 0);
@@ -113,6 +115,7 @@ export function DataTable<T extends { id?: string | number }>({
               })
             )}
           </tbody>
+          {footer && <tfoot>{footer}</tfoot>}
         </table>
       </div>
 

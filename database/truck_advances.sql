@@ -4,6 +4,8 @@
 CREATE TABLE IF NOT EXISTS truck_advances (
   id SERIAL PRIMARY KEY,
   vehicle_id INTEGER NOT NULL REFERENCES vehicles(id),
+  driver_id INTEGER REFERENCES drivers(id),
+  trip_id INTEGER REFERENCES trips(id) ON DELETE CASCADE,
   manager_id INTEGER NOT NULL REFERENCES users(id),
   amount DECIMAL(12,2) NOT NULL CHECK (amount > 0),
   advance_date TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
@@ -15,4 +17,5 @@ CREATE TABLE IF NOT EXISTS truck_advances (
 
 CREATE INDEX IF NOT EXISTS idx_truck_advances_manager ON truck_advances(manager_id);
 CREATE INDEX IF NOT EXISTS idx_truck_advances_vehicle ON truck_advances(vehicle_id);
+CREATE INDEX IF NOT EXISTS idx_truck_advances_driver ON truck_advances(driver_id);
 CREATE INDEX IF NOT EXISTS idx_truck_advances_date ON truck_advances(advance_date);

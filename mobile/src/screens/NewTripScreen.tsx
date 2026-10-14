@@ -58,8 +58,12 @@ export const NewTripScreen: React.FC<Props> = ({ navigation, route }) => {
     }
     setTripDate(formatted);
   };
-  const [selectedVehicleId, setSelectedVehicleId] = useState<number | null>(null);
-  const [selectedDriverId, setSelectedDriverId] = useState<number | null>(null);
+  const [selectedVehicleId, setSelectedVehicleId] = useState<number | null>(
+    route?.params?.preselectedVehicleId ?? null
+  );
+  const [selectedDriverId, setSelectedDriverId] = useState<number | null>(
+    route?.params?.preselectedDriverId ?? null
+  );
   const [selectedPartyId, setSelectedPartyId] = useState<number | null>(null);
   const [selectedRouteId, setSelectedRouteId] = useState<number | null>(null);
   const [selectedUnitId, setSelectedUnitId] = useState<number | null>(null);
@@ -67,6 +71,9 @@ export const NewTripScreen: React.FC<Props> = ({ navigation, route }) => {
   const [freightRate, setFreightRate] = useState('');
   const [advancePaid, setAdvancePaid] = useState(
     route?.params?.advancePaid ? String(route.params.advancePaid) : '0'
+  );
+  const [draftTripId, setDraftTripId] = useState<number | null>(
+    route?.params?.draftTripId ?? null
   );
 
   // Modal Dropdown State
@@ -97,11 +104,9 @@ export const NewTripScreen: React.FC<Props> = ({ navigation, route }) => {
     onProceed: () => {},
     onCancel: () => {},
   });
-
-  // True when truck was pre-selected from GiveTruckAdvanceScreen — lock it
-  const isTruckLocked = !!(route?.params?.preselectedVehicleId);
-  // True when advance was pre-filled from GiveTruckAdvanceScreen — lock it
-  const isAdvanceLocked = !!(route?.params?.advancePaid);
+  // Pre-selected indicators from GiveTruckAdvanceScreen (editable, not locked)
+  const hasPreselectedTruck = !!(route?.params?.preselectedVehicleId);
+  const hasPreselectedAdvance = !!(route?.params?.advancePaid);
 
   useEffect(() => {
     loadLookups();
@@ -114,6 +119,14 @@ export const NewTripScreen: React.FC<Props> = ({ navigation, route }) => {
       setSelectedVehicleId(preselectedId);
     }
   }, [vehicles, route?.params?.preselectedVehicleId]);
+
+  // Pre-select driver if we came from GiveTruckAdvanceScreen
+  useEffect(() => {
+    const preselectedDriver = route?.params?.preselectedDriverId;
+    if (preselectedDriver && drivers.length > 0) {
+      setSelectedDriverId(preselectedDriver);
+    }
+  }, [drivers, route?.params?.preselectedDriverId]);
 
   const loadLookups = async () => {
     try {
@@ -403,10 +416,12 @@ export const NewTripScreen: React.FC<Props> = ({ navigation, route }) => {
         freight_rate: rate,
         goods_weight: weight,
         advance_paid: parseFloat(advancePaid) || 0,
+        cancel_draft_trip_id: draftTripId || undefined,
       });
 
+      setDraftTripId(res.data.id);
       const fullTripRes = await mobileTripService.getTripById(res.data.id);
-      navigation.navigate('PartyPayment', { trip: fullTripRes.data });
+      navigation.navigate('PartyPayment', { trip: fullTripRes.data, draftTripId: res.data.id });
     } catch (err: any) {
       setError(err.message || 'Failed to create trip.');
     } finally {
@@ -471,26 +486,22 @@ export const NewTripScreen: React.FC<Props> = ({ navigation, route }) => {
             </View>
           </View>
 
-          {/* Truck Number — locked if pre-selected from advance screen */}
+          {/* Truck Number — pre-selected from advance if available, but fully editable */}
           <View style={styles.formRow}>
-            <Text style={styles.fieldLabel}>Truck Number *</Text>
-            {isTruckLocked ? (
-              <View style={[styles.dropdownBtn, styles.dropdownLocked]}>
-                <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1, gap: 10 }}>
-                  <Truck size={18} color={COLORS.accent} />
-                  <Text style={styles.dropdownSelectedText}>
-                    {selectedVehicle ? selectedVehicle.lorry_number : '...'}
-                  </Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
+              <Text style={styles.fieldLabel}>Truck Number *</Text>
+              {hasPreselectedTruck && selectedVehicleId === route?.params?.preselectedVehicleId && (
+                <View style={{ backgroundColor: '#eff6ff', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, borderWidth: 1, borderColor: '#bfdbfe' }}>
+                  <Text style={{ fontSize: 10, fontWeight: '700', color: '#1d4ed8' }}>FROM ADVANCE (TAP TO CHANGE)</Text>
                 </View>
-                <Lock size={15} color={COLORS.textMuted} />
-              </View>
-            ) : (
-              <TouchableOpacity
-                style={styles.dropdownBtn}
-                onPress={() =>
-                  openDropdown(
-                    'Select Truck Number',
-                    vehicles.map((v) => {
+              )}
+            </View>
+            <TouchableOpacity
+              style={styles.dropdownBtn}
+              onPress={() =>
+                openDropdown(
+                  'Select Truck Number',
+                  vehicles.map((v) => {
                       const alerts = getVehicleComplianceAlerts(v);
                       let sub = v.goodshed_loading_expense
                         ? `Goodshed Loading Exp: ₹${parseFloat(String(v.goodshed_loading_expense)).toLocaleString('en-IN')}`
@@ -522,7 +533,6 @@ export const NewTripScreen: React.FC<Props> = ({ navigation, route }) => {
                 </View>
                 <ChevronDown size={18} color={COLORS.textMuted} />
               </TouchableOpacity>
-            )}
 
             {/* Selected Truck 30-day Compliance Alert Banner */}
             {selectedVehicle && (() => {
@@ -654,6 +664,11 @@ export const NewTripScreen: React.FC<Props> = ({ navigation, route }) => {
                 <Text style={selectedDriver ? styles.dropdownSelectedText : styles.dropdownPlaceholder}>
                   {selectedDriver ? selectedDriver.name : 'Select Driver'}
                 </Text>
+                {route?.params?.preselectedDriverId && selectedDriverId === route?.params?.preselectedDriverId && (
+                  <View style={{ backgroundColor: '#ecfdf5', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, marginLeft: 4 }}>
+                    <Text style={{ fontSize: 10, fontWeight: '700', color: '#059669' }}>FROM ADVANCE</Text>
+                  </View>
+                )}
               </View>
               <ChevronDown size={18} color={COLORS.textMuted} />
             </TouchableOpacity>
@@ -686,6 +701,20 @@ export const NewTripScreen: React.FC<Props> = ({ navigation, route }) => {
                     );
                   }
                 } catch {}
+              }
+              return null;
+            })()}
+
+            {(() => {
+              if (selectedDriver && Number(selectedDriver.remaining_advance_balance || 0) > 0) {
+                const bal = parseFloat(String(selectedDriver.remaining_advance_balance));
+                return (
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 6, backgroundColor: '#eff6ff', padding: 8, borderRadius: 6, borderWidth: 1, borderColor: '#bfdbfe' }}>
+                    <Text style={{ fontSize: 12, color: '#1d4ed8', fontWeight: '700' }}>
+                      💰 Driver Advance in Hand: ₹{bal.toLocaleString('en-IN', { maximumFractionDigits: 0 })} (Expenses can be deducted from this)
+                    </Text>
+                  </View>
+                );
               }
               return null;
             })()}
@@ -773,23 +802,33 @@ export const NewTripScreen: React.FC<Props> = ({ navigation, route }) => {
 
           {/* Advance to Driver */}
           <View style={styles.formRow}>
-            <Text style={styles.fieldLabel}>Advance Paid to Driver (₹)</Text>
-            {isAdvanceLocked ? (
-              <View style={[styles.input, styles.lockedInput]}>
-                <Lock size={14} color={COLORS.textMuted} style={{ marginRight: 6 }} />
-                <Text style={styles.lockedInputText}>₹{parseFloat(advancePaid).toLocaleString('en-IN')}</Text>
-                <Text style={styles.lockedInputNote}> · Paid via truck advance</Text>
-              </View>
-            ) : (
-              <TextInput
-                style={styles.input}
-                placeholder="0.00"
-                placeholderTextColor={COLORS.textLight}
-                keyboardType="decimal-pad"
-                value={advancePaid}
-                onChangeText={setAdvancePaid}
-              />
-            )}
+            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
+              <Text style={styles.fieldLabel}>Advance Paid to Driver (₹)</Text>
+              {hasPreselectedAdvance && (
+                <View style={{ backgroundColor: '#eff6ff', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, borderWidth: 1, borderColor: '#bfdbfe' }}>
+                  <Text style={{ fontSize: 10, fontWeight: '700', color: '#1d4ed8' }}>PRE-FILLED FROM ADVANCE</Text>
+                </View>
+              )}
+            </View>
+            <TextInput
+              style={styles.input}
+              placeholder="0.00"
+              placeholderTextColor={COLORS.textLight}
+              keyboardType="decimal-pad"
+              value={advancePaid}
+              onChangeText={setAdvancePaid}
+            />
+            {(() => {
+              if (selectedDriver && Number(selectedDriver.remaining_advance_balance || 0) > 0) {
+                const bal = parseFloat(String(selectedDriver.remaining_advance_balance));
+                return (
+                  <Text style={{ fontSize: 11, color: '#1d4ed8', marginTop: 4, fontWeight: '600' }}>
+                    Driver has ₹{bal.toLocaleString('en-IN', { maximumFractionDigits: 0 })} advance in hand. Enter 0 if expenses should come from this.
+                  </Text>
+                );
+              }
+              return null;
+            })()}
           </View>
         </View>
 

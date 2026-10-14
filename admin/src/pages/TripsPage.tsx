@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { Navigation, Plus, Eye, CheckCircle, Search, Filter, Trash2, AlertTriangle, Calendar, Truck } from 'lucide-react';
+import * as XLSX from 'xlsx';
+import { Navigation, Plus, Eye, CheckCircle, Search, Filter, Trash2, AlertTriangle, Calendar, Truck, Printer, FileSpreadsheet, Loader2, RefreshCw } from 'lucide-react';
 import { tripService, vehicleService, driverService, partyService, routeService, unitService, freightRateService } from '../services/adminService';
 import { Trip, Vehicle, Driver, Party, Route, Unit, FreightRate } from '../types';
 import { DataTable, Column } from '../components/Common/DataTable';
@@ -17,6 +18,8 @@ export const TripsPage: React.FC = () => {
   const [fromDate, setFromDate] = useState('');
   const [toDate, setToDate] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [isExportingExcel, setIsExportingExcel] = useState(false);
+  const [isPrinting, setIsPrinting] = useState(false);
 
   // Lookups
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
@@ -310,6 +313,402 @@ export const TripsPage: React.FC = () => {
     return `₹${num.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
   };
 
+  const resetFilters = () => {
+    setStatusFilter('');
+    setPartyFilter('');
+    setFromDate('');
+    setToDate('');
+    setPage(1);
+  };
+
+  const handleExportExcel = async () => {
+    try {
+      setIsExportingExcel(true);
+      const res = await tripService.getTrips({
+        page: 1,
+        limit: 10000,
+        status: statusFilter || undefined,
+        party_id: partyFilter || undefined,
+        from_date: fromDate || undefined,
+        to_date: toDate || undefined,
+      });
+
+      const items: Trip[] = res.data.items || [];
+      if (items.length === 0) {
+        alert('No trip records found matching your filters to export.');
+        setIsExportingExcel(false);
+        return;
+      }
+
+      const totalTripsCount = items.length;
+      const totalWeight = items.reduce((sum, t) => sum + (Number(t.goods_weight) || 0), 0);
+      const totalFreight = items.reduce((sum, t) => sum + (Number(t.total_freight) || 0), 0);
+      const totalAdvance = items.reduce((sum, t) => sum + (Number(t.advance_paid) || 0), 0);
+      const totalReceived = items.reduce((sum, t) => sum + (Number(t.total_received) || 0), 0);
+      const totalBalanceDue = items.reduce((sum, t) => sum + (Number(t.balance_due) || 0), 0);
+
+      // Format data rows
+      const excelRows: any[] = items.map((t, index) => ({
+        'S.No': index + 1,
+        'Trip ID': `TRIP-${t.id}`,
+        'Trip Date': formatDateDMY(t.trip_date),
+        'Lorry Number': t.lorry_number || '-',
+        'Party Name': t.party_name || '-',
+        'Unit / Destination': t.to_location || t.from_location || t.unit_name || '-',
+        'Driver Name': t.driver_name || '-',
+        'Goods Weight': Number(t.goods_weight || 0),
+        'Unit': t.unit_abbreviation || 'Tons',
+        'Freight Rate (Rs)': Number(t.freight_rate || 0),
+        'Total Freight (Rs)': Number(t.total_freight || 0),
+        'Advance Paid (Rs)': Number(t.advance_paid || 0),
+        'Received (Rs)': Number(t.total_received || 0),
+        'Balance Due (Rs)': Number(t.balance_due || 0),
+        'Status': t.status,
+      }));
+
+      // Add blank separator row
+      excelRows.push({
+        'S.No': '',
+        'Trip ID': '',
+        'Trip Date': '',
+        'Lorry Number': '',
+        'Party Name': '',
+        'Unit / Destination': '',
+        'Driver Name': '',
+        'Goods Weight': '',
+        'Unit': '',
+        'Freight Rate (Rs)': '',
+        'Total Freight (Rs)': '',
+        'Advance Paid (Rs)': '',
+        'Received (Rs)': '',
+        'Balance Due (Rs)': '',
+        'Status': '',
+      });
+
+      // Add Grand Total row with Total Trips Count prominently included
+      excelRows.push({
+        'S.No': '',
+        'Trip ID': 'TOTAL SUMMARY',
+        'Trip Date': `Total Trips: ${totalTripsCount}`,
+        'Lorry Number': `Count: ${totalTripsCount}`,
+        'Party Name': '',
+        'Unit / Destination': '',
+        'Driver Name': '',
+        'Goods Weight': Number(totalWeight.toFixed(3)),
+        'Unit': 'Total MT',
+        'Freight Rate (Rs)': '',
+        'Total Freight (Rs)': Number(totalFreight.toFixed(2)),
+        'Advance Paid (Rs)': Number(totalAdvance.toFixed(2)),
+        'Received (Rs)': Number(totalReceived.toFixed(2)),
+        'Balance Due (Rs)': Number(totalBalanceDue.toFixed(2)),
+        'Status': `Total: ${totalTripsCount} Trips`,
+      });
+
+      // Generate Worksheet
+      const worksheet = XLSX.utils.json_to_sheet(excelRows);
+
+      // Auto Column Widths
+      worksheet['!cols'] = [
+        { wch: 8 },  // S.No
+        { wch: 16 }, // Trip ID
+        { wch: 22 }, // Trip Date / Total Trips
+        { wch: 18 }, // Lorry Number
+        { wch: 26 }, // Party Name
+        { wch: 25 }, // Unit / Destination
+        { wch: 22 }, // Driver Name
+        { wch: 16 }, // Goods Weight
+        { wch: 12 }, // Unit
+        { wch: 18 }, // Freight Rate
+        { wch: 20 }, // Total Freight
+        { wch: 18 }, // Advance Paid
+        { wch: 16 }, // Received
+        { wch: 16 }, // Balance Due
+        { wch: 22 }, // Status
+      ];
+
+      // Create Workbook
+      const workbook = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(workbook, worksheet, 'Trips Master');
+
+      // Create Executive Summary Sheet
+      const selectedPartyName = partyFilter ? parties.find((p) => String(p.id) === String(partyFilter))?.name : 'All';
+      const summaryRows = [
+        { 'Summary Field': 'TOTAL TRIPS COUNT', 'Value': `${totalTripsCount} Trips` },
+        { 'Summary Field': 'Total Goods Weight', 'Value': `${totalWeight.toFixed(3)} MT/Tons` },
+        { 'Summary Field': 'Total Freight Amount', 'Value': `₹${totalFreight.toLocaleString('en-IN', { minimumFractionDigits: 2 })}` },
+        { 'Summary Field': 'Total Advance Paid to Drivers', 'Value': `₹${totalAdvance.toLocaleString('en-IN', { minimumFractionDigits: 2 })}` },
+        { 'Summary Field': 'Total Amount Received', 'Value': `₹${totalReceived.toLocaleString('en-IN', { minimumFractionDigits: 2 })}` },
+        { 'Summary Field': 'Total Balance Due', 'Value': `₹${totalBalanceDue.toLocaleString('en-IN', { minimumFractionDigits: 2 })}` },
+        { 'Summary Field': 'Status Filter', 'Value': statusFilter || 'All Statuses' },
+        { 'Summary Field': 'Party Filter', 'Value': selectedPartyName || 'All Parties' },
+        { 'Summary Field': 'From Date', 'Value': fromDate ? formatDateDMY(fromDate) : 'All' },
+        { 'Summary Field': 'To Date', 'Value': toDate ? formatDateDMY(toDate) : 'All' },
+        { 'Summary Field': 'Generated Date & Time', 'Value': new Date().toLocaleString('en-IN') },
+      ];
+      const summaryWorksheet = XLSX.utils.json_to_sheet(summaryRows);
+      summaryWorksheet['!cols'] = [{ wch: 32 }, { wch: 35 }];
+      XLSX.utils.book_append_sheet(workbook, summaryWorksheet, 'Summary');
+
+      const dateTag = new Date().toISOString().slice(0, 10);
+      const filename = `KSP_Trips_Master_Export_${dateTag}.xlsx`;
+
+      XLSX.writeFile(workbook, filename);
+    } catch (err: any) {
+      console.error('Failed to export trips to Excel', err);
+      alert(err.message || 'Failed to export trips to Excel.');
+    } finally {
+      setIsExportingExcel(false);
+    }
+  };
+
+  const handlePrint = async () => {
+    try {
+      setIsPrinting(true);
+      const res = await tripService.getTrips({
+        page: 1,
+        limit: 10000,
+        status: statusFilter || undefined,
+        party_id: partyFilter || undefined,
+        from_date: fromDate || undefined,
+        to_date: toDate || undefined,
+      });
+
+      const items: Trip[] = res.data.items || [];
+      if (items.length === 0) {
+        alert('No trip records found matching your filters to print.');
+        setIsPrinting(false);
+        return;
+      }
+
+      const totalTripsCount = items.length;
+      const totalWeight = items.reduce((sum, t) => sum + (Number(t.goods_weight) || 0), 0);
+      const totalFreight = items.reduce((sum, t) => sum + (Number(t.total_freight) || 0), 0);
+      const totalAdvance = items.reduce((sum, t) => sum + (Number(t.advance_paid) || 0), 0);
+      const totalReceived = items.reduce((sum, t) => sum + (Number(t.total_received) || 0), 0);
+      const totalBalanceDue = items.reduce((sum, t) => sum + (Number(t.balance_due) || 0), 0);
+
+      const selectedPartyName = partyFilter ? parties.find((p) => String(p.id) === String(partyFilter))?.name : 'All';
+      const dateRangeText = fromDate && toDate ? `${formatDateDMY(fromDate)} to ${formatDateDMY(toDate)}` : fromDate ? `From ${formatDateDMY(fromDate)}` : toDate ? `Up to ${formatDateDMY(toDate)}` : 'All Dates';
+
+      const printHtml = `
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>KSP Logistics - Trips Master Dispatch Report</title>
+  <style>
+    * { box-sizing: border-box; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif; margin: 0; padding: 20px; color: #1e293b; background: #fff; font-size: 12px; }
+    @page { size: landscape; margin: 10mm; }
+    .header-bar { display: flex; justify-content: space-between; align-items: flex-start; padding-bottom: 14px; border-bottom: 2px solid #0f172a; margin-bottom: 14px; }
+    .company-title { font-size: 20px; font-weight: 800; color: #0f172a; letter-spacing: 0.5px; margin: 0 0 4px 0; }
+    .report-subtitle { font-size: 13px; font-weight: 700; color: #2563eb; margin: 0 0 4px 0; text-transform: uppercase; letter-spacing: 0.5px; }
+    .meta-text { font-size: 11px; color: #64748b; margin: 0; }
+    .kpi-highlight .kpi-value { color: #1d4ed8; }
+    table { width: 100%; border-collapse: collapse; font-size: 11px; margin-top: 10px; }
+    th { background: #0f172a; color: #ffffff; font-weight: 700; text-align: left; padding: 7px 8px; font-size: 11px; }
+    th.num, td.num { text-align: right; }
+    th.center, td.center { text-align: center; }
+    td { padding: 6px 8px; border-bottom: 1px solid #e2e8f0; vertical-align: middle; }
+    tr:nth-child(even) td { background: #fbfcfe; }
+    .footer-row td { background: #f1f5f9 !important; font-weight: 800; border-top: 2px solid #0f172a; border-bottom: 2px solid #0f172a; color: #0f172a; }
+    .badge { display: inline-block; padding: 2px 6px; border-radius: 4px; font-size: 9.5px; font-weight: 700; text-align: center; }
+    .badge-paid { background: #dcfce7; color: #166534; }
+    .badge-pending { background: #fef9c3; color: #854d0e; }
+    .badge-partial { background: #e0e7ff; color: #3730a3; }
+    .badge-settled { background: #f1f5f9; color: #475569; }
+    .badge-cancel { background: #fee2e2; color: #991b1b; }
+    .print-btn-bar { display: flex; justify-content: flex-end; gap: 10px; margin-bottom: 16px; }
+    .print-btn { background: #2563eb; color: #fff; border: none; padding: 8px 16px; border-radius: 6px; font-weight: 600; cursor: pointer; font-size: 12px; }
+    @media print {
+      .print-btn-bar { display: none !important; }
+      body { padding: 0; }
+    }
+  </style>
+</head>
+<body>
+  <div class="print-btn-bar">
+    <button class="print-btn" onclick="window.print()">Print Report / Save as PDF</button>
+    <button class="print-btn" style="background:#64748b" onclick="window.close()">Close</button>
+  </div>
+
+  <div class="header-bar">
+    <div>
+      <h1 class="company-title">KSP TRANSPORT &amp; LOGISTICS</h1>
+      <div class="report-subtitle">TRIPS MASTER DISPATCH REPORT</div>
+      <p class="meta-text">
+        <strong>Filters:</strong> Status: ${statusFilter || 'All'} | Party: ${selectedPartyName || 'All'} | Date Range: ${dateRangeText}
+      </p>
+    </div>
+    <div style="text-align: right;">
+      <div style="font-weight: 800; font-size: 13px; color: #0f172a;">Total Trips: ${totalTripsCount}</div>
+      <p class="meta-text" style="margin-top: 4px;">Generated on: ${new Date().toLocaleString('en-IN')}</p>
+    </div>
+  </div>
+  <table>
+    <thead>
+      <tr>
+        <th class="center" style="width: 35px;">S.No</th>
+        <th style="width: 70px;">Date</th>
+        <th style="width: 85px;">Lorry No</th>
+        <th>Party Name</th>
+        <th>Unit / Destination</th>
+        <th>Driver</th>
+        <th class="num" style="width: 70px;">Weight</th>
+        <th class="num" style="width: 65px;">Rate (₹)</th>
+        <th class="num" style="width: 85px;">Freight (₹)</th>
+        <th class="num" style="width: 75px;">Advance (₹)</th>
+        <th class="num" style="width: 75px;">Received (₹)</th>
+        <th class="num" style="width: 75px;">Balance (₹)</th>
+        <th class="center" style="width: 75px;">Status</th>
+      </tr>
+    </thead>
+    <tbody>
+      ${items.map((t, idx) => {
+        let badgeClass = 'badge-settled';
+        if (t.status === 'SETTLED') badgeClass = 'badge-settled';
+        else if (t.status === 'PAYMENT_PENDING') badgeClass = 'badge-pending';
+        else if (t.status === 'PARTIALLY_PAID') badgeClass = 'badge-partial';
+        else if (t.status === 'CANCELLED') badgeClass = 'badge-cancel';
+
+        return `
+        <tr>
+          <td class="center">${idx + 1}</td>
+          <td>${formatDateDMY(t.trip_date)}</td>
+          <td><strong>${t.lorry_number || '-'}</strong></td>
+          <td>${t.party_name || '-'}</td>
+          <td>${t.to_location || t.from_location || t.unit_name || '-'}</td>
+          <td>${t.driver_name || '-'}</td>
+          <td class="num">${Number(t.goods_weight || 0).toFixed(2)} ${t.unit_abbreviation || 'T'}</td>
+          <td class="num">${Number(t.freight_rate || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td>
+          <td class="num"><strong>${Number(t.total_freight || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</strong></td>
+          <td class="num">${Number(t.advance_paid || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td>
+          <td class="num">${Number(t.total_received || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td>
+          <td class="num"><strong>${Number(t.balance_due || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</strong></td>
+          <td class="center"><span class="badge ${badgeClass}">${t.status}</span></td>
+        </tr>
+        `;
+      }).join('')}
+      <tr class="footer-row">
+        <td class="center" colspan="2">TOTAL</td>
+        <td colspan="4"><strong>Total Count: ${totalTripsCount} Trips</strong></td>
+        <td class="num"><strong>${totalWeight.toFixed(2)} MT</strong></td>
+        <td></td>
+        <td class="num"><strong>₹${totalFreight.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</strong></td>
+        <td class="num"><strong>₹${totalAdvance.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</strong></td>
+        <td class="num"><strong>₹${totalReceived.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</strong></td>
+        <td class="num"><strong>₹${totalBalanceDue.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</strong></td>
+        <td class="center"><strong>${totalTripsCount} Trips</strong></td>
+      </tr>
+    </tbody>
+  </table>
+  
+  <div style="margin-top: 24px; display: flex; justify-content: space-between; font-size: 10px; color: #94a3b8; border-top: 1px solid #e2e8f0; padding-top: 8px;">
+    <span>KSP Service Management ERP</span>
+    <span>Page 1 of 1 (Report generated by Admin)</span>
+  </div>
+</body>
+</html>
+      `;
+
+      const printWin = window.open('', '_blank', 'width=1100,height=850');
+      if (!printWin) {
+        alert('Please allow pop-ups for this website to print.');
+        setIsPrinting(false);
+        return;
+      }
+      printWin.document.open();
+      printWin.document.write(printHtml);
+      printWin.document.close();
+      printWin.focus();
+      setTimeout(() => {
+        printWin.print();
+      }, 500);
+    } catch (err: any) {
+      console.error('Failed to print trips', err);
+      alert(err.message || 'Failed to print trips.');
+    } finally {
+      setIsPrinting(false);
+    }
+  };
+
+  const handlePrintSingleTrip = (trip: Trip) => {
+    const singleTripHtml = `
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Trip Voucher #${trip.id} - ${trip.lorry_number}</title>
+  <style>
+    * { box-sizing: border-box; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif; margin: 0; padding: 24px; color: #1e293b; background: #fff; font-size: 13px; }
+    @page { size: portrait; margin: 12mm; }
+    .card { border: 2px solid #0f172a; border-radius: 8px; padding: 20px; }
+    .header { text-align: center; border-bottom: 2px solid #0f172a; padding-bottom: 12px; margin-bottom: 16px; }
+    .title { font-size: 22px; font-weight: 800; color: #0f172a; margin: 0; }
+    .sub { font-size: 12px; color: #64748b; margin-top: 4px; text-transform: uppercase; font-weight: 700; letter-spacing: 0.5px; }
+    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 16px; }
+    .row-item { display: flex; justify-content: space-between; border-bottom: 1px dashed #cbd5e1; padding: 6px 0; }
+    .label { color: #64748b; font-weight: 600; }
+    .val { font-weight: 700; color: #0f172a; }
+    .totals-box { background: #f8fafc; border: 1px solid #cbd5e1; border-radius: 6px; padding: 12px 16px; margin: 16px 0; }
+    .totals-row { display: flex; justify-content: space-between; padding: 4px 0; font-size: 14px; }
+    .grand { font-size: 16px; font-weight: 800; color: #0f172a; border-top: 1px solid #94a3b8; padding-top: 8px; margin-top: 4px; }
+    .signatures { display: flex; justify-content: space-between; margin-top: 40px; padding-top: 20px; }
+    .sig-line { border-top: 1px solid #0f172a; width: 180px; text-align: center; font-size: 11px; padding-top: 6px; color: #475569; }
+    .print-btn-bar { display: flex; justify-content: flex-end; gap: 10px; margin-bottom: 16px; }
+    .btn { background: #2563eb; color: #fff; border: none; padding: 8px 16px; border-radius: 6px; font-weight: 600; cursor: pointer; }
+    @media print { .print-btn-bar { display: none !important; } }
+  </style>
+</head>
+<body>
+  <div class="print-btn-bar">
+    <button class="btn" onclick="window.print()">Print Voucher</button>
+    <button class="btn" style="background:#64748b" onclick="window.close()">Close</button>
+  </div>
+  <div class="card">
+    <div class="header">
+      <h1 class="title">KSP TRANSPORT &amp; LOGISTICS</h1>
+      <div class="sub">OFFICIAL FREIGHT DISPATCH VOUCHER / CHALLAN</div>
+      <div style="margin-top: 6px; font-size: 12px; font-weight: 700; color: #2563eb;">Trip Reference #TRIP-${trip.id}</div>
+    </div>
+    <div class="grid">
+      <div class="row-item"><span class="label">Trip Date:</span><span class="val">${formatDateDMY(trip.trip_date)}</span></div>
+      <div class="row-item"><span class="label">Lorry Number:</span><span class="val">${trip.lorry_number}</span></div>
+      <div class="row-item"><span class="label">Party Name:</span><span class="val">${trip.party_name}</span></div>
+      <div class="row-item"><span class="label">Driver Name:</span><span class="val">${trip.driver_name}</span></div>
+      <div class="row-item"><span class="label">Unit / Destination:</span><span class="val">${trip.to_location || trip.from_location}</span></div>
+      <div class="row-item"><span class="label">Status:</span><span class="val">${trip.status}</span></div>
+      <div class="row-item"><span class="label">Goods Weight:</span><span class="val">${trip.goods_weight} ${trip.unit_abbreviation || 'Tons'}</span></div>
+      <div class="row-item"><span class="label">Freight Rate:</span><span class="val">₹${parseFloat(String(trip.freight_rate)).toLocaleString('en-IN')}/${trip.unit_abbreviation || 'T'}</span></div>
+    </div>
+
+    <div class="totals-box">
+      <div class="totals-row"><span>Total Freight Billed:</span><strong>₹${parseFloat(String(trip.total_freight || 0)).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</strong></div>
+      <div class="totals-row"><span>Advance Paid to Driver:</span><strong>₹${parseFloat(String(trip.advance_paid || 0)).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</strong></div>
+      <div class="totals-row"><span>Amount Received:</span><strong style="color:#15803d">₹${parseFloat(String(trip.total_received || 0)).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</strong></div>
+      <div class="totals-row grand"><span>Balance Due from Party:</span><strong style="color:#b91c1c">₹${parseFloat(String(trip.balance_due || 0)).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</strong></div>
+    </div>
+
+    <div class="signatures">
+      <div class="sig-line">Driver's Signature</div>
+      <div class="sig-line">Prepared By (Manager)</div>
+      <div class="sig-line">Authorized Signatory</div>
+    </div>
+  </div>
+</body>
+</html>
+    `;
+
+    const printWin = window.open('', '_blank', 'width=800,height=900');
+    if (!printWin) return;
+    printWin.document.open();
+    printWin.document.write(singleTripHtml);
+    printWin.document.close();
+    printWin.focus();
+    setTimeout(() => { printWin.print(); }, 400);
+  };
+
   const columns: Column<Trip>[] = [
     {
       header: 'Trip Date',
@@ -364,6 +763,14 @@ export const TripsPage: React.FC = () => {
             <Eye size={14} />
           </button>
           <button
+            onClick={() => handlePrintSingleTrip(t)}
+            className="btn btn-outline btn-sm"
+            title="Print Trip Voucher"
+            style={{ color: '#1d4ed8', borderColor: '#bfdbfe' }}
+          >
+            <Printer size={14} />
+          </button>
+          <button
             onClick={() => handleDeleteTrip(t)}
             className="btn btn-danger btn-sm"
             title="Delete Trip"
@@ -377,28 +784,34 @@ export const TripsPage: React.FC = () => {
 
   return (
     <div>
-      <div className="card-header" style={{ marginBottom: '24px' }}>
+      <div className="card-header" style={{ marginBottom: '24px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '14px' }}>
         <div>
-          <h2 style={{ fontSize: '22px', fontWeight: 800 }}>Trip Management</h2>
-          <p style={{ color: 'var(--text-muted)', fontSize: '13.5px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+            <h2 style={{ fontSize: '22px', fontWeight: 800, margin: 0 }}>Trip Management</h2>
+            <span
+              style={{
+                fontSize: '13px',
+                fontWeight: 700,
+                color: '#1d4ed8',
+                background: '#eff6ff',
+                padding: '3px 10px',
+                borderRadius: '12px',
+                border: '1px solid #bfdbfe',
+              }}
+            >
+              Total: {total} Trips
+            </span>
+          </div>
+          <p style={{ color: 'var(--text-muted)', fontSize: '13.5px', marginTop: '4px' }}>
             Create and track freight dispatch trips, lorry allocations & delivery status
           </p>
         </div>
-        <button
-          onClick={() => {
-            resetForm();
-            setIsCreateModalOpen(true);
-          }}
-          className="btn btn-primary"
-        >
-          <Plus size={18} /> New Trip Entry
-        </button>
       </div>
 
       <div className="card">
         {/* Filters */}
         <div className="search-filter-bar" style={{ marginBottom: '16px' }}>
-          <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', alignItems: 'center' }}>
             <select
               className="form-control form-select"
               style={{ width: '180px' }}
@@ -454,6 +867,66 @@ export const TripsPage: React.FC = () => {
                   setPage(1);
                 }}
               />
+            </div>
+
+            {(statusFilter || partyFilter || fromDate || toDate) && (
+              <button
+                type="button"
+                onClick={resetFilters}
+                className="btn btn-outline"
+                style={{ fontSize: '13px', display: 'flex', alignItems: 'center', gap: '6px' }}
+                title="Reset all filters"
+              >
+                <RefreshCw size={14} /> Reset
+              </button>
+            )}
+
+            {/* Print & Download Options directly near filters */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <button
+                type="button"
+                onClick={handlePrint}
+                disabled={isPrinting}
+                className="btn btn-outline"
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  borderColor: '#3b82f6',
+                  color: '#1d4ed8',
+                  background: '#eff6ff',
+                  fontWeight: 600,
+                  height: '38px',
+                  padding: '0 12px',
+                  fontSize: '12.5px',
+                }}
+                title="Print Trips Master dispatch list"
+              >
+                {isPrinting ? <Loader2 size={14} className="animate-spin" /> : <Printer size={14} />}
+                {isPrinting ? 'Preparing...' : 'Print'}
+              </button>
+              <button
+                type="button"
+                onClick={handleExportExcel}
+                disabled={isExportingExcel}
+                className="btn btn-outline"
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  borderColor: '#10b981',
+                  color: '#059669',
+                  background: '#ecfdf5',
+                  fontWeight: 600,
+                  height: '38px',
+                  padding: '0 12px',
+                  fontSize: '12.5px',
+                }}
+                title="Download trips as an Excel spreadsheet with total count"
+              >
+                {isExportingExcel ? <Loader2 size={14} className="animate-spin" /> : <FileSpreadsheet size={14} />}
+                {isExportingExcel ? 'Exporting...' : 'Excel'}
+              </button>
             </div>
           </div>
         </div>
@@ -598,6 +1071,14 @@ export const TripsPage: React.FC = () => {
                     );
                   }
                 }
+                if (selDriver && Number(selDriver.remaining_advance_balance || 0) > 0) {
+                  const bal = parseFloat(String(selDriver.remaining_advance_balance));
+                  return (
+                    <div style={{ marginTop: '6px', fontSize: '12px', color: '#1d4ed8', background: '#eff6ff', padding: '6px 10px', borderRadius: '6px', border: '1px solid #bfdbfe', display: 'flex', alignItems: 'center', gap: '6px', fontWeight: 600 }}>
+                      <span>💰 Driver Advance in Hand: ₹{bal.toLocaleString('en-IN', { maximumFractionDigits: 0 })} (Trip expenses can be deducted from this balance)</span>
+                    </div>
+                  );
+                }
                 return null;
               })()}
             </div>
@@ -696,6 +1177,18 @@ export const TripsPage: React.FC = () => {
                 value={formData.advance_paid}
                 onChange={(e) => setFormData({ ...formData, advance_paid: e.target.value })}
               />
+              {(() => {
+                const selDriver = drivers.find((d) => d.id === Number(formData.driver_id));
+                const bal = parseFloat(String(selDriver?.remaining_advance_balance ?? 0));
+                if (bal > 0) {
+                  return (
+                    <div style={{ marginTop: '4px', fontSize: '11.5px', color: '#1d4ed8' }}>
+                      Driver holds <strong>₹{bal.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</strong> advance in hand. Leave as <strong>0</strong> if trip expenses should be taken from this existing balance.
+                    </div>
+                  );
+                }
+                return null;
+              })()}
             </div>
           </div>
 
@@ -802,6 +1295,14 @@ export const TripsPage: React.FC = () => {
             </div>
 
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '20px' }}>
+              <button
+                type="button"
+                onClick={() => handlePrintSingleTrip(selectedTrip)}
+                className="btn btn-outline"
+                style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#1d4ed8', borderColor: '#bfdbfe' }}
+              >
+                <Printer size={15} /> Print Trip Voucher
+              </button>
               <button type="button" onClick={() => setIsViewModalOpen(false)} className="btn btn-outline">
                 Close
               </button>

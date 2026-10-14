@@ -29,7 +29,14 @@ export const getTrips = asyncHandler(async (req: AuthRequest, res: Response): Pr
     conditions.push(`t.created_by = $${paramIdx}`); params.push(created_by); paramIdx++;
   }
 
-  if (status) { conditions.push(`t.status = $${paramIdx}`); params.push(status); paramIdx++; }
+  if (status) {
+    conditions.push(`t.status = $${paramIdx}`);
+    params.push(status);
+    paramIdx++;
+  } else {
+    // By default, exclude DRAFT trips so unfinished drafts never show in official trips lists
+    conditions.push("t.status != 'DRAFT'");
+  }
   if (party_id) { conditions.push(`t.party_id = $${paramIdx}`); params.push(party_id); paramIdx++; }
   if (driver_id) { conditions.push(`t.driver_id = $${paramIdx}`); params.push(driver_id); paramIdx++; }
   if (vehicle_id) { conditions.push(`t.vehicle_id = $${paramIdx}`); params.push(vehicle_id); paramIdx++; }
@@ -48,13 +55,20 @@ export const getTrips = asyncHandler(async (req: AuthRequest, res: Response): Pr
             r.from_location, r.to_location, u.name as unit_name,
             u.abbreviation as unit_abbreviation,
             (SELECT COALESCE(SUM(received_amount), 0) FROM trip_payments WHERE trip_id = t.id) as total_received,
-            (t.total_freight - COALESCE((SELECT SUM(received_amount) FROM trip_payments WHERE trip_id = t.id), 0)) as balance_due
+            (t.total_freight - COALESCE((SELECT SUM(received_amount) FROM trip_payments WHERE trip_id = t.id), 0)) as balance_due,
+            s.id as settlement_id,
+            s.settlement_status,
+            s.net_balance_to_driver,
+            s.payment_mode as settlement_payment_mode,
+            COALESCE(s.total_expenses, (SELECT COALESCE(SUM(de.amount), 0) FROM driver_expenses de WHERE de.trip_id = t.id), 0) as total_expenses,
+            (t.advance_paid - COALESCE(s.total_expenses, (SELECT COALESCE(SUM(de.amount), 0) FROM driver_expenses de WHERE de.trip_id = t.id), 0)) as trip_driver_balance
      FROM trips t
      JOIN vehicles v ON t.vehicle_id = v.id
      JOIN drivers d ON t.driver_id = d.id
      JOIN parties p ON t.party_id = p.id
      JOIN routes r ON t.route_id = r.id
      JOIN units u ON t.unit_id = u.id
+     LEFT JOIN settlements s ON s.trip_id = t.id
      WHERE ${where}
      ORDER BY t.trip_date DESC, t.created_at DESC
      LIMIT $${paramIdx} OFFSET $${paramIdx + 1}`,
@@ -93,7 +107,7 @@ export const getTripById = asyncHandler(async (req: AuthRequest, res: Response):
 });
 
 export const createTrip = asyncHandler(async (req: AuthRequest, res: Response): Promise<void> => {
-  const { vehicle_id, driver_id, party_id, route_id, unit_id, freight_rate_id, freight_rate, goods_weight, advance_paid, trip_date } = req.body;
+  const { vehicle_id, driver_id, party_id, route_id, unit_id, freight_rate_id, freight_rate, goods_weight, advance_paid, trip_date, cancel_draft_trip_id } = req.body;
 
   if (!vehicle_id || !driver_id || !party_id || !route_id || !freight_rate || !goods_weight || !trip_date) {
     throw new AppError('Vehicle, driver, party, route, freight rate, weight and date are required.', 400);
@@ -118,18 +132,49 @@ export const createTrip = asyncHandler(async (req: AuthRequest, res: Response): 
     normalized_trip_date = `${y}-${m}-${d}`;
   }
 
-  const result = await query(
-    `INSERT INTO trips (vehicle_id, driver_id, party_id, route_id, unit_id, freight_rate_id,
-     freight_rate, goods_weight, total_freight, advance_paid, trip_date, status, created_by)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 'PAYMENT_PENDING', $12)
-     RETURNING *`,
-    [vehicle_id, driver_id, party_id, route_id, effectiveUnitId, freight_rate_id || null,
-     freight_rate, goods_weight, total_freight, advance_paid || 0, normalized_trip_date, req.user?.id]
-  );
+  const client = await getClient();
+  try {
+    await client.query('BEGIN');
 
-  await createAuditLog(req.user?.id, 'CREATE_TRIP', 'TRIPS', result.rows[0].id, { trip_date, total_freight });
-  res.status(201).json({ success: true, message: 'Trip created successfully.', data: result.rows[0] });
+    // If a previous DRAFT trip exists (manager went back and changed details), delete it cleanly
+    if (cancel_draft_trip_id) {
+      await client.query(`DELETE FROM driver_expenses WHERE trip_id = $1`, [cancel_draft_trip_id]);
+      await client.query(`DELETE FROM trips WHERE id = $1 AND status = 'DRAFT'`, [cancel_draft_trip_id]);
+      await createAuditLog(req.user?.id, 'CANCEL_DRAFT_TRIP', 'TRIPS', cancel_draft_trip_id, { reason: 'Manager resubmitted with updated details' });
+    }
+
+    const result = await client.query(
+      `INSERT INTO trips (vehicle_id, driver_id, party_id, route_id, unit_id, freight_rate_id,
+       freight_rate, goods_weight, total_freight, advance_paid, trip_date, status, created_by)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 'DRAFT', $12)
+       RETURNING *`,
+      [vehicle_id, driver_id, party_id, route_id, effectiveUnitId, freight_rate_id || null,
+       freight_rate, goods_weight, total_freight, advance_paid || 0, normalized_trip_date, req.user?.id]
+    );
+
+    await client.query('COMMIT');
+    await createAuditLog(req.user?.id, 'CREATE_TRIP', 'TRIPS', result.rows[0].id, { trip_date, total_freight, status: 'DRAFT' });
+    res.status(201).json({ success: true, message: 'Trip created successfully.', data: result.rows[0] });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
 });
+
+export const deleteDraftTrip = asyncHandler(async (req: AuthRequest, res: Response): Promise<void> => {
+  const { id } = req.params;
+  const draftCheck = await query(`SELECT id FROM trips WHERE id = $1 AND status = 'DRAFT'`, [id]);
+  if (draftCheck.rows.length === 0) {
+    throw new AppError('Draft trip not found or already finalized.', 404);
+  }
+  await query('DELETE FROM driver_expenses WHERE trip_id = $1', [id]);
+  await query('DELETE FROM trips WHERE id = $1 AND status = \'DRAFT\'', [id]);
+  await createAuditLog(req.user?.id, 'DELETE_DRAFT_TRIP', 'TRIPS', parseInt(id as string), { reason: 'Draft trip cancelled' });
+  res.json({ success: true, message: 'Draft trip discarded successfully.' });
+});
+
 
 export const updateTripStatus = asyncHandler(async (req: AuthRequest, res: Response): Promise<void> => {
   const { status } = req.body;

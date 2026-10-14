@@ -35,24 +35,28 @@ import {
   FileText,
   BadgeCheck,
   RotateCcw,
+  UserCheck,
 } from 'lucide-react-native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
-import { mobileLookupService, mobileTruckAdvanceService } from '../services/mobileService';
-import { Vehicle, RootStackParamList } from '../types';
+import { mobileLookupService, mobileTruckAdvanceService, mobileDashboardService } from '../services/mobileService';
+import { Vehicle, Driver, RootStackParamList } from '../types';
 import { COLORS, SPACING, RADIUS, SHADOWS } from '../constants/theme';
 import { ComplianceAlertModal, ComplianceDoc } from '../components/ComplianceAlertModal';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'GiveTruckAdvance'>;
 
 export const GiveTruckAdvanceScreen: React.FC<Props> = ({ navigation, route }) => {
-  const availableBalance = route.params?.availableBalance ?? 0;
+  const initialBalance = route.params?.availableBalance ?? 0;
+  const [availableBalance, setAvailableBalance] = useState<number>(initialBalance);
 
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
+  const [drivers, setDrivers] = useState<Driver[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   // Form state
   const [selectedVehicle, setSelectedVehicle] = useState<Vehicle | null>(null);
+  const [selectedDriver, setSelectedDriver] = useState<Driver | null>(null);
   const [amount, setAmount] = useState('');
   const [notes, setNotes] = useState('');
   const [error, setError] = useState('');
@@ -76,6 +80,8 @@ export const GiveTruckAdvanceScreen: React.FC<Props> = ({ navigation, route }) =
   // Modals state
   const [vehicleModalVisible, setVehicleModalVisible] = useState(false);
   const [vehicleSearch, setVehicleSearch] = useState('');
+  const [driverModalVisible, setDriverModalVisible] = useState(false);
+  const [driverSearch, setDriverSearch] = useState('');
 
   // Technical Confirmation Modal
   const [confirmModalVisible, setConfirmModalVisible] = useState(false);
@@ -89,6 +95,8 @@ export const GiveTruckAdvanceScreen: React.FC<Props> = ({ navigation, route }) =
     amount: number;
     lorry_number: string;
     vehicle_id: number;
+    driver_id?: number;
+    driver_name?: string;
     remainingBalance: number;
     date: string;
   } | null>(null);
@@ -137,8 +145,16 @@ export const GiveTruckAdvanceScreen: React.FC<Props> = ({ navigation, route }) =
   const loadVehicles = async () => {
     try {
       setIsLoading(true);
-      const res = await mobileLookupService.getVehicles();
-      setVehicles(res.data.items);
+      const [vRes, dRes, dashRes] = await Promise.all([
+        mobileLookupService.getVehicles(),
+        mobileLookupService.getDrivers(),
+        mobileDashboardService.getDashboard().catch(() => null),
+      ]);
+      setVehicles(vRes.data.items);
+      setDrivers(dRes.data.items);
+      if (dashRes?.data?.manager_available_balance !== undefined) {
+        setAvailableBalance(dashRes.data.manager_available_balance);
+      }
     } catch {
       setError('Failed to load vehicles. Check your connection.');
     } finally {
@@ -211,8 +227,9 @@ export const GiveTruckAdvanceScreen: React.FC<Props> = ({ navigation, route }) =
       (v.vehicle_type ?? '').toLowerCase().includes(vehicleSearch.toLowerCase())
   );
 
-  // Open Technical Confirmation Dialog
-  const handleOpenConfirmation = () => {
+  // Proceed directly to Trip Dispatch with preselected Truck, Driver, and Advance Amount
+  // Advance is officially recorded and reduced ONLY when the trip settlement slip is generated!
+  const handleProceedToTrip = () => {
     setError('');
     const numAmount = parseFloat(amount);
 
@@ -229,27 +246,17 @@ export const GiveTruckAdvanceScreen: React.FC<Props> = ({ navigation, route }) =
       return;
     }
 
-    const now = new Date();
-    const timeStr = now.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-    const dateStr = formatDateDMY(now);
-    setConfirmTimestamp(`${dateStr} • ${timeStr}`);
+    // Seamlessly navigate to NewTripScreen with pre-filled details.
+    // Advance will ONLY be finalized when the trip slip / bill is generated!
+    navigation.navigate('NewTrip', {
+      preselectedVehicleId: selectedVehicle.id,
+      preselectedDriverId: selectedDriver?.id,
+      advancePaid: numAmount,
+    });
+  };
 
-    setConfirmModalVisible(true);
-    confirmScale.setValue(0.85);
-    confirmOpacity.setValue(0);
-    Animated.parallel([
-      Animated.spring(confirmScale, {
-        toValue: 1,
-        friction: 6,
-        tension: 90,
-        useNativeDriver: true,
-      }),
-      Animated.timing(confirmOpacity, {
-        toValue: 1,
-        duration: 250,
-        useNativeDriver: true,
-      }),
-    ]).start();
+  const handleOpenConfirmation = () => {
+    handleProceedToTrip();
   };
 
   const closeConfirmation = () => {
@@ -262,40 +269,8 @@ export const GiveTruckAdvanceScreen: React.FC<Props> = ({ navigation, route }) =
 
   // Dispatch Confirmed Advance via API
   const handleConfirmDispatch = async () => {
-    if (!selectedVehicle) return;
-    const numAmount = parseFloat(amount);
-
-    try {
-      setIsSubmitting(true);
-      setError('');
-
-      const res = await mobileTruckAdvanceService.giveAdvance({
-        vehicle_id: selectedVehicle.id,
-        amount: numAmount,
-        notes: notes.trim() || undefined,
-      });
-
-      const remainingBal = Math.max(0, availableBalance - numAmount);
-      const advanceData = {
-        id: res.data?.id,
-        amount: numAmount,
-        lorry_number: selectedVehicle.lorry_number,
-        vehicle_id: selectedVehicle.id,
-        remainingBalance: remainingBal,
-        date: formatDateDMY(new Date()),
-      };
-
-      setCreatedAdvance(advanceData);
-
-      // Close confirmation dialog & open colorful animated celebration modal
-      setConfirmModalVisible(false);
-      triggerSuccessCelebration();
-    } catch (err: any) {
-      setError(err?.message || 'Failed to record advance. Please try again.');
-      setConfirmModalVisible(false);
-    } finally {
-      setIsSubmitting(false);
-    }
+    setConfirmModalVisible(false);
+    handleProceedToTrip();
   };
 
   // Trigger Rich Colorful Animated Success UI & Toast
@@ -405,10 +380,17 @@ export const GiveTruckAdvanceScreen: React.FC<Props> = ({ navigation, route }) =
   const handleResetForm = () => {
     setSuccessModalVisible(false);
     setSelectedVehicle(null);
+    setSelectedDriver(null);
     setAmount('');
     setNotes('');
     setError('');
   };
+
+  const filteredDrivers = drivers.filter(
+    (d) =>
+      d.name.toLowerCase().includes(driverSearch.toLowerCase()) ||
+      (d.mobile_number ?? '').includes(driverSearch)
+  );
 
   if (isLoading) {
     return (
@@ -557,6 +539,33 @@ export const GiveTruckAdvanceScreen: React.FC<Props> = ({ navigation, route }) =
             );
           })()}
 
+          {/* Driver Selector */}
+          <Text style={styles.fieldLabel}>Select Driver (Optional)</Text>
+          <TouchableOpacity
+            style={[styles.dropdownBtn, !selectedDriver && styles.dropdownBtnPlaceholder]}
+            onPress={() => {
+              setDriverSearch('');
+              setDriverModalVisible(true);
+            }}
+          >
+            <UserCheck size={18} color={selectedDriver ? COLORS.primary : COLORS.textLight} />
+            <Text style={[styles.dropdownText, !selectedDriver && styles.dropdownPlaceholderText]}>
+              {selectedDriver
+                ? `${selectedDriver.name}${selectedDriver.mobile_number ? ` — ${selectedDriver.mobile_number}` : ''}`
+                : 'Tap to select driver (optional)'}
+            </Text>
+            {selectedDriver ? (
+              <TouchableOpacity onPress={() => setSelectedDriver(null)} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+                <X size={16} color={COLORS.textLight} />
+              </TouchableOpacity>
+            ) : (
+              <ChevronDown size={18} color={COLORS.textLight} />
+            )}
+          </TouchableOpacity>
+          <Text style={{ fontSize: 11, color: COLORS.textMuted, marginTop: 3, marginBottom: 6, marginLeft: 2 }}>
+            Link a driver to track per-driver advance balance across trips.
+          </Text>
+
           {/* Amount Field */}
           <Text style={styles.fieldLabel}>Advance Amount (₹) *</Text>
           <View style={styles.amountInputWrapper}>
@@ -598,15 +607,23 @@ export const GiveTruckAdvanceScreen: React.FC<Props> = ({ navigation, route }) =
           )}
 
           {/* Submit Button to Trigger Technical Popup */}
+          {/* Submit Button to Trigger Trip Dispatch */}
           <TouchableOpacity
             style={[styles.submitBtn, (!selectedVehicle || !amount) && styles.submitBtnDisabled]}
-            onPress={handleOpenConfirmation}
+            onPress={handleProceedToTrip}
             activeOpacity={0.85}
           >
             <ShieldCheck size={20} color={COLORS.white} />
-            <Text style={styles.submitBtnText}>Review & Authorize Advance</Text>
+            <Text style={styles.submitBtnText}>PROCEED TO TRIP DISPATCH</Text>
             <ArrowRight size={18} color={COLORS.white} />
           </TouchableOpacity>
+
+          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, marginTop: 12 }}>
+            <ShieldCheck size={14} color="#059669" />
+            <Text style={{ fontSize: 11.5, color: '#059669', fontWeight: '600', textAlign: 'center' }}>
+              Advance will be finalized & reduced only when the trip slip is generated.
+            </Text>
+          </View>
         </View>
       </ScrollView>
 
@@ -658,6 +675,20 @@ export const GiveTruckAdvanceScreen: React.FC<Props> = ({ navigation, route }) =
                   ) : null}
                 </View>
               </View>
+
+              {/* Driver Row */}
+              {selectedDriver && (
+                <View style={styles.techSpecRow}>
+                  <Text style={styles.techSpecLabel}>ASSIGNED DRIVER</Text>
+                  <View style={styles.assetBadge}>
+                    <UserCheck size={14} color="#38bdf8" />
+                    <Text style={styles.assetBadgeText}>{selectedDriver.name}</Text>
+                    {selectedDriver.mobile_number ? (
+                      <Text style={styles.assetSubText}>• {selectedDriver.mobile_number}</Text>
+                    ) : null}
+                  </View>
+                </View>
+              )}
 
               {/* Big Amount Card */}
               <View style={styles.techAmountBox}>
@@ -809,6 +840,16 @@ export const GiveTruckAdvanceScreen: React.FC<Props> = ({ navigation, route }) =
                   </View>
                 </View>
 
+                {createdAdvance?.driver_name && (
+                  <View style={styles.receiptDetailRow}>
+                    <Text style={styles.receiptDetailKey}>Assigned Driver</Text>
+                    <View style={styles.receiptTruckTag}>
+                      <UserCheck size={13} color="#1d4ed8" />
+                      <Text style={styles.receiptTruckText}>{createdAdvance.driver_name}</Text>
+                    </View>
+                  </View>
+                )}
+
                 <View style={styles.receiptDetailRow}>
                   <Text style={styles.receiptDetailKey}>Remaining Balance</Text>
                   <Text style={styles.receiptBalText}>
@@ -832,6 +873,7 @@ export const GiveTruckAdvanceScreen: React.FC<Props> = ({ navigation, route }) =
                   if (createdAdvance) {
                     navigation.replace('NewTrip', {
                       preselectedVehicleId: createdAdvance.vehicle_id,
+                      preselectedDriverId: createdAdvance.driver_id,
                       advancePaid: createdAdvance.amount,
                     });
                   }
@@ -950,6 +992,82 @@ export const GiveTruckAdvanceScreen: React.FC<Props> = ({ navigation, route }) =
               ListEmptyComponent={
                 <View style={styles.modalEmpty}>
                   <Text style={styles.modalEmptyText}>No trucks found.</Text>
+                </View>
+              }
+            />
+          </View>
+        </View>
+      </Modal>
+
+      {/* ========================================================================= */}
+      {/* 4. DRIVER PICKER MODAL                                                    */}
+      {/* ========================================================================= */}
+      <Modal visible={driverModalVisible} animationType="slide" transparent onRequestClose={() => setDriverModalVisible(false)}>
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContainer}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Select Driver</Text>
+              <TouchableOpacity onPress={() => setDriverModalVisible(false)}>
+                <X size={22} color={COLORS.primary} />
+              </TouchableOpacity>
+            </View>
+
+            {/* Search */}
+            <View style={styles.searchRow}>
+              <Search size={16} color={COLORS.textMuted} />
+              <TextInput
+                style={styles.searchInput}
+                placeholder="Search by driver name or mobile..."
+                placeholderTextColor={COLORS.textLight}
+                value={driverSearch}
+                onChangeText={setDriverSearch}
+                autoFocus
+              />
+            </View>
+
+            <FlatList
+              data={filteredDrivers}
+              keyExtractor={(item) => String(item.id)}
+              style={{ maxHeight: 400 }}
+              renderItem={({ item }) => (
+                <TouchableOpacity
+                  style={[
+                    styles.modalItem,
+                    selectedDriver?.id === item.id && styles.modalItemSelected,
+                  ]}
+                  onPress={() => {
+                    setSelectedDriver(item);
+                    setDriverModalVisible(false);
+                  }}
+                >
+                  <View style={styles.modalItemLeft}>
+                    <View
+                      style={[
+                        styles.truckIconBadge,
+                        selectedDriver?.id === item.id && styles.truckIconBadgeSelected,
+                        { backgroundColor: selectedDriver?.id === item.id ? '#1d4ed8' : '#eff6ff' },
+                      ]}
+                    >
+                      <UserCheck
+                        size={18}
+                        color={selectedDriver?.id === item.id ? '#ffffff' : COLORS.primary}
+                      />
+                    </View>
+                    <View style={{ marginLeft: 12, flex: 1 }}>
+                      <Text style={styles.modalItemTitle}>{item.name}</Text>
+                      {item.mobile_number && (
+                        <Text style={styles.modalItemSub}>{item.mobile_number}</Text>
+                      )}
+                    </View>
+                  </View>
+                  {selectedDriver?.id === item.id && (
+                    <Check size={18} color={COLORS.accent} />
+                  )}
+                </TouchableOpacity>
+              )}
+              ListEmptyComponent={
+                <View style={styles.modalEmpty}>
+                  <Text style={styles.modalEmptyText}>No drivers found.</Text>
                 </View>
               }
             />

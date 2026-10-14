@@ -15,20 +15,27 @@ export const getOwnerAdvances = asyncHandler(async (req: AuthRequest, res: Respo
   const from_date = req.query.from_date as string;
   const to_date = req.query.to_date as string;
   const search = req.query.search as string;
+  const payment_mode = req.query.payment_mode as string;
 
   let conditions = ['1=1'];
   const params: any[] = [];
   let paramIdx = 1;
 
+  if (payment_mode) {
+    conditions.push(`oa.payment_mode = $${paramIdx}`);
+    params.push(payment_mode);
+    paramIdx++;
+  }
+
   if (owner_id) {
     conditions.push(`oa.owner_id = $${paramIdx}`);
-    params.push(owner_id);
+    params.push(parseInt(owner_id));
     paramIdx++;
   }
 
   if (manager_id) {
     conditions.push(`oa.manager_id = $${paramIdx}`);
-    params.push(manager_id);
+    params.push(parseInt(manager_id));
     paramIdx++;
   }
 

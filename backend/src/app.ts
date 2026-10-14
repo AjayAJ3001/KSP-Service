@@ -27,6 +27,7 @@ import truckAdvanceRoutes from './routes/truckAdvance.routes';
 import unloadingRateRoutes from './routes/unloadingRate.routes';
 import driverBataRateRoutes from './routes/driverBataRate.routes';
 import otherExpenseLimitRoutes from './routes/otherExpenseLimit.routes';
+import driverAdvanceRoutes from './routes/driverAdvance.routes';
 
 import { errorHandler, notFound } from './middleware/errorHandler';
 
@@ -82,6 +83,7 @@ app.use('/api/truck-advances', truckAdvanceRoutes);
 app.use('/api/unloading-rates', unloadingRateRoutes);
 app.use('/api/driver-bata-rates', driverBataRateRoutes);
 app.use('/api/other-expense-limits', otherExpenseLimitRoutes);
+app.use('/api/driver-advances', driverAdvanceRoutes);
 
 // Error handling
 app.use(notFound);

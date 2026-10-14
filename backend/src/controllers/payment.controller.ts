@@ -38,8 +38,8 @@ export const addPayment = asyncHandler(async (req: AuthRequest, res: Response): 
     if (tripResult.rows.length === 0) throw new AppError('Trip not found.', 404);
     const trip = tripResult.rows[0];
 
-    if (trip.status === 'CANCELLED') {
-      throw new AppError('Cannot add payment to a cancelled trip.', 400);
+    if (trip.status === 'CANCELLED' || trip.status === 'DRAFT') {
+      throw new AppError('Cannot add payment to a draft or cancelled trip. Please complete the trip settlement first.', 400);
     }
 
     const currentReceived = parseFloat(trip.total_received) || 0;
@@ -98,7 +98,7 @@ export const getPartyLedger = asyncHandler(async (req: AuthRequest, res: Respons
   const from_date = req.query.from_date as string;
   const to_date = req.query.to_date as string;
 
-  let conditions = ['t.party_id = $1'];
+  let conditions = ["t.party_id = $1", "t.status NOT IN ('CANCELLED', 'DRAFT')"];
   const params: any[] = [party_id];
   let paramIdx = 2;
 

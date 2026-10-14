@@ -29,6 +29,10 @@ export interface Driver {
   status: 'ACTIVE' | 'INACTIVE';
   created_at: string;
   updated_at: string;
+  // Live advance balance (populated by getDrivers)
+  total_advance_given?: number;
+  total_expenses_reported?: number;
+  remaining_advance_balance?: number;
 }
 
 export interface Vehicle {
@@ -240,6 +244,11 @@ export interface Trip {
   unit_abbreviation?: string;
   total_received?: number;
   balance_due?: number;
+  // Settlement data (populated by getTrips)
+  settlement_id?: number;
+  settlement_status?: 'PENDING' | 'VERIFIED' | 'SETTLED' | string;
+  total_expenses?: number;
+  trip_driver_balance?: number;
   created_by?: number;
   created_at: string;
   updated_at: string;
@@ -290,10 +299,13 @@ export interface Settlement {
   total_expenses: number;
   advance_paid: number;
   balance_to_driver: number;
+  previous_driver_balance?: number;
+  net_balance_to_driver?: number;
+  driver_current_balance?: number;
   settlement_status: 'PENDING' | 'VERIFIED' | 'SETTLED';
   verified_by?: number;
   verified_at?: string;
-  payment_mode?: 'CASH' | 'UPI' | 'BANK_TRANSFER';
+  payment_mode?: 'CASH' | 'UPI' | 'BANK_TRANSFER' | 'ADJUSTED_ADVANCE' | string;
   payment_date?: string;
   paid_amount?: number;
   reference_no?: string;
@@ -371,3 +383,85 @@ export interface PaginatedData<T> {
   limit: number;
   totalPages: number;
 }
+
+export interface DriverAdvance {
+  id: number;
+  driver_id: number;
+  manager_id: number;
+  vehicle_id?: number;
+  trip_id?: number;
+  amount: number;
+  advance_date: string;
+  payment_mode?: 'CASH' | 'UPI' | 'BANK_TRANSFER' | string;
+  notes?: string;
+  driver_name: string;
+  driver_mobile?: string;
+  driver_license?: string;
+  manager_name: string;
+  manager_email?: string;
+  lorry_number?: string;
+  vehicle_type?: string;
+  created_by_name?: string;
+  created_at: string;
+  // Trip details
+  trip_date?: string;
+  trip_status?: string;
+  party_name?: string;
+  from_location?: string;
+  to_location?: string;
+  goods_weight?: number | string;
+  freight_rate?: number | string;
+  total_freight?: number | string;
+  unit_name?: string;
+  unit_abbreviation?: string;
+  trip_advance_paid?: number | string;
+  trip_driver_expenses?: number | string;
+  // Live balance
+  driver_balance_in_hand?: number;
+  source_type?: 'DIRECT_DRIVER_ADVANCE' | 'TRIP_TRUCK_ADVANCE' | string;
+}
+
+export interface DriverAdvanceSummary {
+  row_key?: string;
+  driver_id: number;
+  driver_name: string;
+  driver_mobile?: string;
+  driver_license?: string;
+  status: string;
+  // Trip & truck info
+  trip_id?: number;
+  trip_date?: string;
+  trip_status?: string;
+  lorry_number?: string;
+  vehicle_type?: string;
+  party_name?: string;
+  from_location?: string;
+  to_location?: string;
+  goods_weight?: number | string;
+  freight_rate?: number | string;
+  total_freight?: number | string;
+  unit_name?: string;
+  unit_abbreviation?: string;
+  trip_advance_paid?: number | string;
+  trip_driver_expenses?: number | string;
+  is_active_trip?: boolean;
+  // Financial summary
+  total_advance_given: number;
+  advance_count: number;
+  total_trip_advance_used: number;
+  trip_count: number;
+  total_expenses_reported: number;
+  loading_expense?: number | string;
+  bata_expense?: number | string;
+  cleaning_expense?: number | string;
+  other_expense?: number | string;
+  trip_balance?: number | string;
+  overall_balance_in_hand?: number | string;
+  remaining_advance_balance: number;
+  balance_in_hand: number;
+  settlement_net_balance: number;
+  settlement_id?: number | null;
+  settlement_status?: 'SETTLED' | 'PENDING' | 'VERIFIED' | 'CASH_IN_HAND' | string;
+  latest_settlement_status?: string | null;
+}
+

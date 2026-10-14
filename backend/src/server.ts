@@ -64,6 +64,8 @@ const startServer = async () => {
       UPDATE vehicles SET tds_expiry_date = dts_expiry_date WHERE tds_expiry_date IS NULL AND dts_expiry_date IS NOT NULL;
       UPDATE vehicles SET tds_certificate_url = dts_certificate_url WHERE tds_certificate_url IS NULL AND dts_certificate_url IS NOT NULL;
       UPDATE vehicles SET rc_reg_date = rc_expiry_date WHERE rc_reg_date IS NULL AND rc_expiry_date IS NOT NULL;
+      ALTER TABLE trips DROP CONSTRAINT IF EXISTS trips_status_check;
+      ALTER TABLE trips ADD CONSTRAINT trips_status_check CHECK (status IN ('NEW', 'DRAFT', 'PAYMENT_PENDING', 'PARTIALLY_PAID', 'SETTLED', 'CANCELLED'));
     `);
     client.release();
 

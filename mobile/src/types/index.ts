@@ -28,6 +28,8 @@ export interface Driver {
   id_proof_type?: string;
   id_proof_url?: string;
   status: 'ACTIVE' | 'INACTIVE';
+  total_advance_given?: number;
+  remaining_advance_balance?: number;
   created_at?: string;
 }
 
@@ -204,7 +206,7 @@ export interface Trip {
   goods_weight: number;
   total_freight: number;
   advance_paid: number;
-  status: 'NEW' | 'PAYMENT_PENDING' | 'PARTIALLY_PAID' | 'SETTLED' | 'CANCELLED';
+  status: 'DRAFT' | 'NEW' | 'PAYMENT_PENDING' | 'PARTIALLY_PAID' | 'SETTLED' | 'CANCELLED';
   lorry_number?: string;
   driver_name?: string;
   driver_mobile?: string;
@@ -236,6 +238,9 @@ export interface Settlement {
   total_expenses: number;
   advance_paid: number;
   balance_to_driver: number;
+  previous_driver_balance?: number;
+  net_balance_to_driver?: number;
+  driver_current_balance?: number;
   settlement_status: 'PENDING' | 'VERIFIED' | 'SETTLED';
   trip_date?: string;
   lorry_number?: string;
@@ -358,9 +363,9 @@ export type RootStackParamList = {
   Splash: undefined;
   Login: undefined;
   MainTabs: undefined;
-  NewTrip: { preselectedVehicleId?: number; advancePaid?: number } | undefined;
+  NewTrip: { preselectedVehicleId?: number; preselectedDriverId?: number; advancePaid?: number; draftTripId?: number } | undefined;
   GiveTruckAdvance: { availableBalance: number };
-  PartyPayment: { trip: Trip };
+  PartyPayment: { trip: Trip; draftTripId?: number };
   DriverExpenses: { trip: Trip };
   SettlementReceipt: { trip: Trip; settlement?: Settlement };
   // Admin Screens

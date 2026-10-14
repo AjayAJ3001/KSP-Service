@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { ShieldAlert, Plus, Edit2, Trash2, Info, Lock, CheckCircle2 } from 'lucide-react';
+import { ShieldAlert, Plus, Edit2, Trash2, Lock, CheckCircle2 } from 'lucide-react';
 import { otherExpenseLimitService, partyService } from '../services/adminService';
 import { OtherExpenseLimit, Party } from '../types';
 import { DataTable, Column } from '../components/Common/DataTable';
@@ -269,10 +269,6 @@ export const OtherExpenseLimitPage: React.FC = () => {
             <ShieldAlert size={24} color="#f59e0b" />
             Other Expense Limits Master
           </h2>
-          <p style={{ color: 'var(--text-muted)', fontSize: '13.5px', marginTop: '2px' }}>
-            Control the maximum allowed amount mobile drivers can enter under{' '}
-            <strong>5. Other Expenses</strong>.
-          </p>
         </div>
         <button
           onClick={openCreateModal}
@@ -359,32 +355,6 @@ export const OtherExpenseLimitPage: React.FC = () => {
           </button>
         </div>
       )}
-
-      {/* Info Callout Card */}
-      <div
-        style={{
-          background: '#fffbeb',
-          border: '1px solid #fde68a',
-          borderRadius: '10px',
-          padding: '14px 18px',
-          marginBottom: '20px',
-          display: 'flex',
-          gap: '12px',
-          alignItems: 'flex-start',
-        }}
-      >
-        <Info size={20} color="#b45309" style={{ flexShrink: 0, marginTop: '2px' }} />
-        <div style={{ fontSize: '13px', color: '#78350f', lineHeight: 1.5 }}>
-          <strong style={{ color: '#92400e', display: 'block', marginBottom: '2px' }}>
-            How the limit validation works in the Mobile App:
-          </strong>
-          • Drivers enter the Other Expense amount manually.<br />
-          • When moving away from the field (<strong>onBlur</strong>) or tapping away, the app
-          validates against this master table.<br />
-          • If the rate typed is above the master limit (e.g. typing 250 when limit is 200), an
-          alert popup immediately warns: <em>"Amount Exceeds Allowed Limit: Maximum allowed limit is ₹200."</em> and prevents saving.
-        </div>
-      </div>
 
       {/* Filter Card */}
       <div className="card" style={{ marginBottom: '16px', padding: '16px 20px' }}>

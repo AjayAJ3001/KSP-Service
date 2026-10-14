@@ -122,6 +122,9 @@ export const DriverExpensesScreen: React.FC<{ route: any; navigation: any }> = (
   const [balanceToDriver, setBalanceToDriver] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
 
+  // Driver's carry-forward advance balance from prior trips (fetched from drivers API)
+  const [driverCarryForwardBalance, setDriverCarryForwardBalance] = useState<number>(0);
+
   // Loading amount auto-retrieved based on selected truck
   const [truckLoadingAmount, setTruckLoadingAmount] = useState<number>(0);
   const [truckCleaningAmount, setTruckCleaningAmount] = useState<number>(0);
@@ -204,6 +207,20 @@ export const DriverExpensesScreen: React.FC<{ route: any; navigation: any }> = (
   const loadExpenses = async () => {
     try {
       setIsLoading(true);
+
+      // Fetch driver's carry-forward advance balance (balance from prior trips still in hand)
+      try {
+        const driversRes = await mobileLookupService.getDrivers();
+        const matchedDriver = driversRes.data.items.find((d) => d.id === trip.driver_id);
+        if (matchedDriver && Number(matchedDriver.remaining_advance_balance || 0) > 0) {
+          setDriverCarryForwardBalance(parseFloat(String(matchedDriver.remaining_advance_balance)));
+        } else {
+          setDriverCarryForwardBalance(0);
+        }
+      } catch (e) {
+        console.log('Could not fetch driver carry-forward balance:', e);
+      }
+
       const res = await mobileExpenseService.getTripExpenses(trip.id);
       const fetchedExpenses = res.data.expenses || [];
       setExpenses(fetchedExpenses);
@@ -211,41 +228,48 @@ export const DriverExpensesScreen: React.FC<{ route: any; navigation: any }> = (
       setAdvancePaid(res.data.advance_paid || 0);
       setBalanceToDriver(res.data.balance_to_driver || 0);
 
-      // 2. Resolve cleaning charge from admin panel per destination unit
-      //    Matched by active Krishi unit keywords or trip's to_location.
+      // 2. Resolve cleaning charge:
+      //    - Krishi parties → look up from master cleaning_expense_rates table
+      //    - All other parties → fixed ₹100 cleaning charge
       let cleaningExp = 0;
-      try {
-        const cleaningRates = await mobileLookupService.getCleaningExpenseRates();
-        if (cleaningRates.data && cleaningRates.data.length > 0) {
-          let matched: typeof cleaningRates.data[0] | undefined;
+      if (isKrishiParty) {
+        // Krishi: match from master table by unit keywords or to_location
+        try {
+          const cleaningRates = await mobileLookupService.getCleaningExpenseRates();
+          if (cleaningRates.data && cleaningRates.data.length > 0) {
+            let matched: typeof cleaningRates.data[0] | undefined;
 
-          // Priority 1: match using all keywords of the active Krishi unit
-          if (activeKrishiUnit) {
-            matched = cleaningRates.data.find((cr) =>
-              cr.unit_name &&
-              activeKrishiUnit.keywords.some((kw) =>
-                cr.unit_name.toUpperCase().includes(kw.toUpperCase()) ||
-                kw.toUpperCase().includes(cr.unit_name.toUpperCase())
-              )
-            );
-          }
+            // Priority 1: match using all keywords of the active Krishi unit
+            if (activeKrishiUnit) {
+              matched = cleaningRates.data.find((cr) =>
+                cr.unit_name &&
+                activeKrishiUnit.keywords.some((kw) =>
+                  cr.unit_name.toUpperCase().includes(kw.toUpperCase()) ||
+                  kw.toUpperCase().includes(cr.unit_name.toUpperCase())
+                )
+              );
+            }
 
-          // Priority 2: match by trip's to_location against unit_name
-          if (!matched && trip.to_location) {
-            const locUpper = trip.to_location.toUpperCase();
-            matched = cleaningRates.data.find((cr) =>
-              cr.unit_name &&
-              (locUpper.includes(cr.unit_name.toUpperCase()) ||
-               cr.unit_name.toUpperCase().split(/[\s\-–]+/).some((word: string) => locUpper.includes(word)))
-            );
-          }
+            // Priority 2: match by trip's to_location against unit_name
+            if (!matched && trip.to_location) {
+              const locUpper = trip.to_location.toUpperCase();
+              matched = cleaningRates.data.find((cr) =>
+                cr.unit_name &&
+                (locUpper.includes(cr.unit_name.toUpperCase()) ||
+                 cr.unit_name.toUpperCase().split(/[\s\-–]+/).some((word: string) => locUpper.includes(word)))
+              );
+            }
 
-          if (matched) {
-            cleaningExp = parseFloat(String(matched.cleaning_charge)) || 0;
+            if (matched) {
+              cleaningExp = parseFloat(String(matched.cleaning_charge)) || 0;
+            }
           }
+        } catch (e) {
+          console.log('Could not fetch cleaning expense rates:', e);
         }
-      } catch (e) {
-        console.log('Could not fetch cleaning expense rates:', e);
+      } else {
+        // Non-Krishi parties: fixed ₹100 cleaning charge
+        cleaningExp = 100;
       }
       setTruckCleaningAmount(cleaningExp);
 
@@ -369,9 +393,11 @@ export const DriverExpensesScreen: React.FC<{ route: any; navigation: any }> = (
               : prev.CLEANING_CHARGE.amount,
           description:
             existingCleaning.length === 0 && prev.CLEANING_CHARGE.description === '' && cleaningExp > 0
-              ? activeKrishiUnit
-                ? `Cleaning charge: Unit ${activeKrishiUnit.unitNumber} - ${activeKrishiUnit.name}`
-                : `Cleaning charge for ${trip.to_location || trip.lorry_number || 'truck'}`
+              ? isKrishiParty
+                ? (activeKrishiUnit
+                    ? `Cleaning charge: Unit ${activeKrishiUnit.unitNumber} - ${activeKrishiUnit.name}`
+                    : `Cleaning charge for ${trip.to_location || trip.lorry_number || 'truck'}`)
+                : `Cleaning charge (₹100 fixed)`
               : prev.CLEANING_CHARGE.description,
         },
       }));
@@ -436,9 +462,11 @@ export const DriverExpensesScreen: React.FC<{ route: any; navigation: any }> = (
           try {
             await mobileExpenseService.addExpense(trip.id, {
               expense_type: 'CLEANING_CHARGE',
-              description: matchedUnit
-                ? `Cleaning charge: Unit ${matchedUnit.unitNumber} - ${matchedUnit.name}`
-                : `Cleaning charge for ${trip.to_location || trip.lorry_number || 'truck'}`,
+              description: isKrishiParty
+                ? (matchedUnit
+                    ? `Cleaning charge: Unit ${matchedUnit.unitNumber} - ${matchedUnit.name}`
+                    : `Cleaning charge for ${trip.to_location || trip.lorry_number || 'truck'}`)
+                : `Cleaning charge (₹100 fixed)`,
               amount: cleaningExp,
             });
             hasSavedAny = true;
@@ -600,11 +628,13 @@ export const DriverExpensesScreen: React.FC<{ route: any; navigation: any }> = (
       }
     }
 
-    // If Cleaning Charge and truck cleaning rate exists, strictly enforce it
+    // If Cleaning Charge: enforce fixed ₹100 for non-Krishi, or master rate for Krishi
     if (catKey === 'CLEANING_CHARGE' && truckCleaningAmount > 0) {
       amt = truckCleaningAmount;
       if (!desc) {
-        desc = `Cleaning charge for ${trip.lorry_number || 'truck'}`;
+        desc = isKrishiParty
+          ? `Cleaning charge for ${trip.to_location || trip.lorry_number || 'truck'}`
+          : `Cleaning charge (₹100 fixed)`;
       }
     }
 
@@ -795,10 +825,49 @@ export const DriverExpensesScreen: React.FC<{ route: any; navigation: any }> = (
         </View>
 
         <View style={styles.kpiCard}>
-          <Text style={styles.kpiLabel}>ADVANCE GIVEN</Text>
+          <Text style={styles.kpiLabel}>THIS TRIP ADVANCE</Text>
           <Text style={styles.kpiValue}>{formatCurrency(advancePaid)}</Text>
         </View>
       </View>
+
+      {/* Driver Carry-Forward Advance Banner (Previous advance still in hand) */}
+      {driverCarryForwardBalance > 0 && (
+        <View
+          style={{
+            backgroundColor: '#eff6ff',
+            borderColor: '#3b82f6',
+            borderWidth: 1.5,
+            borderRadius: 14,
+            padding: 14,
+            marginBottom: 12,
+            flexDirection: 'row',
+            alignItems: 'center',
+            gap: 10,
+          }}
+        >
+          <View style={{ flex: 1 }}>
+            <Text style={{ fontSize: 11, fontWeight: '700', color: '#1e40af', letterSpacing: 0.5, marginBottom: 2 }}>
+              💰 PREVIOUS ADVANCE IN HAND
+            </Text>
+            <Text style={{ fontSize: 13, fontWeight: '800', color: '#1d4ed8' }}>
+              {formatCurrency(driverCarryForwardBalance)}
+            </Text>
+            <Text style={{ fontSize: 11, color: '#3b82f6', marginTop: 2 }}>
+              Driver already holds this from prior trips — deducted during settlement
+            </Text>
+          </View>
+          <View
+            style={{
+              backgroundColor: '#dbeafe',
+              borderRadius: 8,
+              paddingHorizontal: 10,
+              paddingVertical: 6,
+            }}
+          >
+            <Text style={{ fontSize: 10, fontWeight: '800', color: '#1d4ed8' }}>CARRY{'\n'}FORWARD</Text>
+          </View>
+        </View>
+      )}
 
       {/* Balance to Driver Banner */}
       <View
@@ -813,6 +882,7 @@ export const DriverExpensesScreen: React.FC<{ route: any; navigation: any }> = (
           </Text>
           <Text style={styles.balanceBannerSub}>
             Expenses {formatCurrency(totalExpenses)} - Advance {formatCurrency(advancePaid)}
+            {driverCarryForwardBalance > 0 ? ` - Prior Balance ${formatCurrency(driverCarryForwardBalance)}` : ''}
           </Text>
         </View>
         <Text

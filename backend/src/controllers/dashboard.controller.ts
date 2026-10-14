@@ -16,7 +16,7 @@ export const getDashboard = asyncHandler(async (req: AuthRequest, res: Response)
     query(`SELECT COUNT(*) as total FROM drivers WHERE status = 'ACTIVE'`),
     query(`SELECT COUNT(*) as total FROM vehicles WHERE status = 'ACTIVE'`),
     query(`SELECT COUNT(*) as total FROM parties WHERE status = 'ACTIVE'`),
-    query(`SELECT COUNT(*) as total FROM trips WHERE trip_date = $1`, [today]),
+    query(`SELECT COUNT(*) as total FROM trips WHERE trip_date = $1 AND status != 'DRAFT'`, [today]),
     query(`SELECT COUNT(*) as total FROM trips WHERE status IN ('PAYMENT_PENDING', 'PARTIALLY_PAID')`),
     query(`SELECT COUNT(*) as total FROM trips WHERE status = 'SETTLED'`),
     query(`SELECT COUNT(*) as total FROM settlements WHERE settlement_status = 'PENDING'`),
@@ -34,7 +34,8 @@ export const getDashboard = asyncHandler(async (req: AuthRequest, res: Response)
        JOIN parties p ON t.party_id = p.id
        JOIN routes r ON t.route_id = r.id
        LEFT JOIN units u ON t.unit_id = u.id
-       ORDER BY t.created_at DESC LIMIT 10`
+       WHERE t.status != 'DRAFT'
+        ORDER BY t.created_at DESC LIMIT 10`
     ),
     query(
       `SELECT COALESCE(SUM(t.total_freight), 0) as total_freight,
@@ -43,7 +44,7 @@ export const getDashboard = asyncHandler(async (req: AuthRequest, res: Response)
        FROM trips t
        LEFT JOIN (SELECT trip_id, SUM(received_amount) as received FROM trip_payments GROUP BY trip_id) tp
        ON t.id = tp.trip_id
-       WHERE t.status NOT IN ('CANCELLED')`
+       WHERE t.status NOT IN ('CANCELLED', 'DRAFT')`
     ),
     // Vehicles with any document expiring within 30 days (or already expired)
     query(
@@ -128,7 +129,7 @@ export const getMobileDashboard = asyncHandler(async (req: AuthRequest, res: Res
        JOIN parties p ON t.party_id = p.id
        JOIN routes r ON t.route_id = r.id
        LEFT JOIN units u ON t.unit_id = u.id
-       ${isTransportUser ? 'WHERE t.created_by = $1' : ''}
+       WHERE t.status != 'DRAFT' ${isTransportUser ? 'AND t.created_by = $1' : ''}
        ORDER BY t.created_at DESC LIMIT 10`,
       isTransportUser ? [userId] : []
     ),
@@ -140,12 +141,12 @@ export const getMobileDashboard = asyncHandler(async (req: AuthRequest, res: Res
        WHERE manager_id = $1`,
       [userId]
     ),
-    // Total advances finalized/used from developed settlement statements by this manager
+    // Total advances given to trucks/drivers by this manager
     query(
-      `SELECT COALESCE(SUM(s.advance_paid), 0) as total_used
-       FROM settlements s
-       JOIN trips t ON s.trip_id = t.id
-       WHERE t.created_by = $1`,
+      `SELECT (
+         COALESCE((SELECT SUM(amount) FROM truck_advances WHERE manager_id = $1), 0) +
+         COALESCE((SELECT SUM(amount) FROM driver_advances WHERE manager_id = $1), 0)
+       ) as total_used`,
       [userId]
     ),
     // Per-owner breakdown of advances received by this manager

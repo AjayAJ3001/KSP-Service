@@ -23,6 +23,9 @@ import {
   Percent,
   ShieldAlert,
   AlertTriangle,
+  Banknote,
+  BookOpen,
+  Wallet,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { LicenseExpiryAlertModal } from '../Common/LicenseExpiryAlertModal';
@@ -80,6 +83,15 @@ export const AdminLayout: React.FC = () => {
           </NavLink>
           <NavLink to="/owner-advances" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
             <HandCoins /> Owner Advances
+          </NavLink>
+          <NavLink to="/manager-ledger" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
+            <BookOpen /> Manager Advances
+          </NavLink>
+          <NavLink to="/truck-advances" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
+            <Banknote /> Truck Advances
+          </NavLink>
+          <NavLink to="/driver-advances" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
+            <Wallet /> Driver Advances
           </NavLink>
           <NavLink to="/settlements" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
             <FileCheck /> Settlements

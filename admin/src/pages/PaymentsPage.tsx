@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { CreditCard, History, Trash2, Download, Printer, Calendar, RefreshCw, Clock } from 'lucide-react';
+import { CreditCard, History, Trash2, Download, Printer, Calendar, RefreshCw, Clock, FileSpreadsheet, Loader2 } from 'lucide-react';
+import * as XLSX from 'xlsx';
 import { tripService, paymentService, partyService, vehicleService, routeService } from '../services/adminService';
 import { Trip, TripPayment, Party, Vehicle, Route } from '../types';
 import { DataTable, Column } from '../components/Common/DataTable';
@@ -54,6 +55,8 @@ export const PaymentsPage: React.FC = () => {
 
   const [isLoading, setIsLoading] = useState(false);
   const [isDownloading, setIsDownloading] = useState(false);
+  const [isExportingExcel, setIsExportingExcel] = useState(false);
+  const [isPrinting, setIsPrinting] = useState(false);
 
   // Overdue payment alert
   const [isOverdueAlertOpen, setIsOverdueAlertOpen] = useState(false);
@@ -227,7 +230,7 @@ export const PaymentsPage: React.FC = () => {
       setIsDownloading(true);
       const res = await tripService.getTrips({
         page: 1,
-        limit: 10000,
+        limit: Math.max(total, 5000),
         status: statusFilter || undefined,
         party_id: partyFilter || undefined,
         vehicle_id: vehicleFilter || undefined,
@@ -236,6 +239,32 @@ export const PaymentsPage: React.FC = () => {
         to_date: toDate || undefined,
       });
       const items = res.data.items || [];
+      const sumFreight = items.reduce((acc: number, t: Trip) => acc + (parseFloat(String(t.total_freight)) || 0), 0);
+      const sumReceived = items.reduce((acc: number, t: Trip) => acc + (parseFloat(String(t.total_received || 0)) || 0), 0);
+      const sumBalanceDue = items.reduce((acc: number, t: Trip) => acc + (parseFloat(String(t.balance_due ?? t.total_freight)) || 0), 0);
+
+      const rows: (string | number)[][] = items.map((t, idx) => [
+        idx + 1,
+        `#${t.id}`,
+        formatDateDMY(t.trip_date),
+        t.party_name || '',
+        t.to_location || t.from_location || '',
+        t.lorry_number || '',
+        (parseFloat(String(t.total_freight)) || 0).toFixed(2),
+        (parseFloat(String(t.total_received || 0)) || 0).toFixed(2),
+        (parseFloat(String(t.balance_due ?? t.total_freight)) || 0).toFixed(2),
+        Number(t.balance_due ?? t.total_freight) <= 0
+          ? 'Fully Paid'
+          : Number(t.total_received) > 0
+          ? 'Partially Paid'
+          : 'Pending',
+        t.status || '',
+      ]);
+
+      // Blank separator and TOTAL row
+      rows.push(['', '', '', '', '', '', '', '', '', '', '']);
+      rows.push(['TOTAL', `Total: ${items.length} Trips`, '', '', '', '', sumFreight.toFixed(2), sumReceived.toFixed(2), sumBalanceDue.toFixed(2), '', '']);
+
       const dateTag = fromDate && toDate ? `${fromDate}_to_${toDate}` : 'All';
       downloadCSV(
         `Party_Payments_${dateTag}.csv`,
@@ -252,29 +281,296 @@ export const PaymentsPage: React.FC = () => {
           'Payment Status',
           'Trip Status',
         ],
-        items.map((t, idx) => [
-          idx + 1,
-          `#${t.id}`,
-          formatDateDMY(t.trip_date),
-          t.party_name || '',
-          t.to_location || t.from_location || '',
-          t.lorry_number || '',
-          (parseFloat(String(t.total_freight)) || 0).toFixed(2),
-          (parseFloat(String(t.total_received || 0)) || 0).toFixed(2),
-          (parseFloat(String(t.balance_due ?? t.total_freight)) || 0).toFixed(2),
-          Number(t.balance_due ?? t.total_freight) <= 0
-            ? 'Fully Paid'
-            : Number(t.total_received) > 0
-            ? 'Partially Paid'
-            : 'Pending',
-          t.status || '',
-        ])
+        rows
       );
     } catch (err) {
       console.error('Failed to download payments CSV', err);
       alert('Failed to download CSV report.');
     } finally {
       setIsDownloading(false);
+    }
+  };
+
+  const handleExportExcel = async () => {
+    if (total === 0 && trips.length === 0) {
+      alert('No payment records found to export.');
+      return;
+    }
+
+    try {
+      setIsExportingExcel(true);
+      const res = await tripService.getTrips({
+        page: 1,
+        limit: Math.max(total, 5000),
+        status: statusFilter || undefined,
+        party_id: partyFilter || undefined,
+        vehicle_id: vehicleFilter || undefined,
+        route_id: routeFilter || undefined,
+        from_date: fromDate || undefined,
+        to_date: toDate || undefined,
+      });
+
+      const items = res.data.items || [];
+      if (items.length === 0) {
+        alert('No payment records match the selected filters.');
+        return;
+      }
+
+      const sumFreight = items.reduce((acc: number, t: Trip) => acc + (parseFloat(String(t.total_freight)) || 0), 0);
+      const sumReceived = items.reduce((acc: number, t: Trip) => acc + (parseFloat(String(t.total_received || 0)) || 0), 0);
+      const sumBalanceDue = items.reduce((acc: number, t: Trip) => acc + (parseFloat(String(t.balance_due ?? t.total_freight)) || 0), 0);
+
+      const exportRows: any[] = items.map((t: Trip, idx: number) => ({
+        'S.No': idx + 1,
+        'Trip ID': `#${t.id}`,
+        'Date': formatDateDMY(t.trip_date),
+        'Party Name': t.party_name || '',
+        'Unit / Destination': t.to_location || t.from_location || '',
+        'Lorry Number': t.lorry_number || '',
+        'Total Freight (₹)': parseFloat(String(t.total_freight)) || 0,
+        'Received Amount (₹)': parseFloat(String(t.total_received || 0)) || 0,
+        'Balance Due (₹)': parseFloat(String(t.balance_due ?? t.total_freight)) || 0,
+        'Payment Status': Number(t.balance_due ?? t.total_freight) <= 0
+          ? 'Fully Paid'
+          : Number(t.total_received) > 0
+          ? 'Partially Paid'
+          : 'Pending',
+        'Trip Status': t.status || '',
+      }));
+
+      // Blank separator row
+      exportRows.push({
+        'S.No': '' as any,
+        'Trip ID': '',
+        'Date': '',
+        'Party Name': '',
+        'Unit / Destination': '',
+        'Lorry Number': '',
+        'Total Freight (₹)': '' as any,
+        'Received Amount (₹)': '' as any,
+        'Balance Due (₹)': '' as any,
+        'Payment Status': '',
+        'Trip Status': '',
+      });
+
+      // TOTAL SUMMARY Row
+      exportRows.push({
+        'S.No': 'TOTAL' as any,
+        'Trip ID': `Total Count: ${items.length} Trips`,
+        'Date': '',
+        'Party Name': '',
+        'Unit / Destination': '',
+        'Lorry Number': '',
+        'Total Freight (₹)': sumFreight,
+        'Received Amount (₹)': sumReceived,
+        'Balance Due (₹)': sumBalanceDue,
+        'Payment Status': '',
+        'Trip Status': '',
+      });
+
+      const worksheet = XLSX.utils.json_to_sheet(exportRows);
+      worksheet['!cols'] = [
+        { wch: 8 },  // S.No
+        { wch: 12 }, // Trip ID
+        { wch: 14 }, // Date
+        { wch: 28 }, // Party Name
+        { wch: 22 }, // Unit / Destination
+        { wch: 16 }, // Lorry Number
+        { wch: 18 }, // Total Freight
+        { wch: 18 }, // Received Amount
+        { wch: 18 }, // Balance Due
+        { wch: 16 }, // Payment Status
+        { wch: 14 }, // Trip Status
+      ];
+
+      const workbook = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(workbook, worksheet, 'Party Payments');
+
+      // Secondary Summary Sheet
+      const selectedPartyName = partyFilter ? parties.find((p) => String(p.id) === String(partyFilter))?.name || 'Selected' : 'All Parties';
+      const selectedVehicleNo = vehicleFilter ? vehicles.find((v) => String(v.id) === String(vehicleFilter))?.lorry_number || 'Selected' : 'All Vehicles';
+      const summaryRows = [
+        { 'Summary Field': 'Report Name', 'Value': 'Party Payments Ledger Report' },
+        { 'Summary Field': 'Total Trips / Invoices', 'Value': items.length },
+        { 'Summary Field': 'Total Freight Amount (₹)', 'Value': sumFreight },
+        { 'Summary Field': 'Total Received Amount (₹)', 'Value': sumReceived },
+        { 'Summary Field': 'Total Balance Due (₹)', 'Value': sumBalanceDue },
+        { 'Summary Field': 'Party Filter', 'Value': selectedPartyName },
+        { 'Summary Field': 'Vehicle Filter', 'Value': selectedVehicleNo },
+        { 'Summary Field': 'Payment Status Filter', 'Value': statusFilter || 'All Statuses' },
+        { 'Summary Field': 'Date Range', 'Value': fromDate || toDate ? `${fromDate || 'Start'} to ${toDate || 'End'}` : 'All Dates' },
+        { 'Summary Field': 'Export Timestamp', 'Value': new Date().toLocaleString('en-IN') },
+      ];
+      const summarySheet = XLSX.utils.json_to_sheet(summaryRows);
+      summarySheet['!cols'] = [{ wch: 30 }, { wch: 35 }];
+      XLSX.utils.book_append_sheet(workbook, summarySheet, 'Summary');
+
+      const dateTag = fromDate && toDate ? `${fromDate}_to_${toDate}` : new Date().toISOString().slice(0, 10);
+      XLSX.writeFile(workbook, `KSP_Party_Payments_${dateTag}.xlsx`);
+    } catch (err: any) {
+      console.error('Failed to export payments to Excel', err);
+      alert(err.message || 'Failed to export payments to Excel.');
+    } finally {
+      setIsExportingExcel(false);
+    }
+  };
+
+  const handlePrintPayments = async () => {
+    if (total === 0 && trips.length === 0) {
+      alert('No payment records to print.');
+      return;
+    }
+
+    try {
+      setIsPrinting(true);
+      const res = await tripService.getTrips({
+        page: 1,
+        limit: Math.max(total, 5000),
+        status: statusFilter || undefined,
+        party_id: partyFilter || undefined,
+        vehicle_id: vehicleFilter || undefined,
+        route_id: routeFilter || undefined,
+        from_date: fromDate || undefined,
+        to_date: toDate || undefined,
+      });
+
+      const items = res.data.items || [];
+      if (items.length === 0) {
+        alert('No payment records match the selected filters to print.');
+        return;
+      }
+
+      const sumFreight = items.reduce((acc: number, t: Trip) => acc + (parseFloat(String(t.total_freight)) || 0), 0);
+      const sumReceived = items.reduce((acc: number, t: Trip) => acc + (parseFloat(String(t.total_received || 0)) || 0), 0);
+      const sumBalanceDue = items.reduce((acc: number, t: Trip) => acc + (parseFloat(String(t.balance_due ?? t.total_freight)) || 0), 0);
+
+      const printHtml = `
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>KSP Logistics - Party Payments Ledger</title>
+  <style>
+    * { box-sizing: border-box; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif; margin: 0; padding: 20px; color: #1e293b; background: #fff; font-size: 11.5px; }
+    @page { size: landscape; margin: 10mm; }
+    .header-bar { display: flex; justify-content: space-between; align-items: flex-start; padding-bottom: 12px; border-bottom: 2px solid #0f172a; margin-bottom: 14px; }
+    .company-title { font-size: 20px; font-weight: 800; color: #0f172a; letter-spacing: 0.5px; margin: 0 0 4px 0; }
+    .report-subtitle { font-size: 13px; font-weight: 700; color: #2563eb; margin: 0; text-transform: uppercase; letter-spacing: 0.5px; }
+    .meta-text { font-size: 11px; color: #64748b; margin: 0; }
+    .kpi-highlight .kpi-value { color: #1d4ed8; }
+    table { width: 100%; border-collapse: collapse; font-size: 11px; margin-top: 10px; }
+    th { background: #0f172a; color: #ffffff; font-weight: 700; text-align: left; padding: 7px 8px; font-size: 10.5px; }
+    th.num, td.num { text-align: right; }
+    th.center, td.center { text-align: center; }
+    td { padding: 6px 8px; border-bottom: 1px solid #e2e8f0; vertical-align: middle; }
+    tr:nth-child(even) td { background: #fbfcfe; }
+    .footer-row td { background: #f1f5f9 !important; font-weight: 800; border-top: 2px solid #0f172a; border-bottom: 2px solid #0f172a; color: #0f172a; }
+    .badge { display: inline-block; padding: 2px 6px; border-radius: 4px; font-size: 9.5px; font-weight: 700; text-align: center; }
+    .badge-paid { background: #dcfce7; color: #166534; }
+    .badge-pending { background: #fef9c3; color: #854d0e; }
+    .badge-partial { background: #e0e7ff; color: #3730a3; }
+    .badge-danger { background: #fee2e2; color: #991b1b; }
+    .print-btn-bar { display: flex; justify-content: flex-end; gap: 10px; margin-bottom: 16px; }
+    .print-btn { background: #2563eb; color: #fff; border: none; padding: 8px 16px; border-radius: 6px; font-weight: 600; cursor: pointer; font-size: 12px; }
+    @media print {
+      .print-btn-bar { display: none !important; }
+      body { padding: 0; }
+    }
+  </style>
+</head>
+<body>
+  <div class="print-btn-bar">
+    <button class="print-btn" onclick="window.print()">Print Ledger / Save as PDF</button>
+    <button class="print-btn" style="background:#64748b" onclick="window.close()">Close</button>
+  </div>
+
+  <div class="header-bar">
+    <div>
+      <h1 class="company-title">KSP TRANSPORT &amp; LOGISTICS</h1>
+      <div class="report-subtitle">PARTY FREIGHT PAYMENTS &amp; BALANCE LEDGER REPORT</div>
+    </div>
+    <div style="text-align: right;">
+      <div style="font-weight: 800; font-size: 13px; color: #0f172a;">Total Records: ${items.length}</div>
+      <p class="meta-text" style="margin-top: 4px;">Generated on: ${new Date().toLocaleString('en-IN')}</p>
+    </div>
+  </div>
+  <table>
+    <thead>
+      <tr>
+        <th class="center" style="width: 35px;">S.No</th>
+        <th style="width: 65px;">Trip ID</th>
+        <th style="width: 80px;">Date</th>
+        <th>Party Name</th>
+        <th>Unit / Destination</th>
+        <th style="width: 90px;">Lorry No</th>
+        <th class="num" style="width: 95px;">Freight (₹)</th>
+        <th class="num" style="width: 95px;">Received (₹)</th>
+        <th class="num" style="width: 95px;">Balance (₹)</th>
+        <th class="center" style="width: 90px;">Payment Status</th>
+      </tr>
+    </thead>
+    <tbody>
+      ${items.map((t: Trip, idx: number) => {
+        const bal = parseFloat(String(t.balance_due ?? t.total_freight)) || 0;
+        const rec = parseFloat(String(t.total_received || 0)) || 0;
+        let badgeClass = 'badge-pending';
+        let statusText = 'Pending';
+        if (bal <= 0) {
+          badgeClass = 'badge-paid';
+          statusText = 'Fully Paid';
+        } else if (rec > 0) {
+          badgeClass = 'badge-partial';
+          statusText = 'Partially Paid';
+        }
+
+        return `
+        <tr>
+          <td class="center">${idx + 1}</td>
+          <td><strong>#${t.id}</strong></td>
+          <td>${formatDateDMY(t.trip_date)}</td>
+          <td><strong>${t.party_name || '-'}</strong></td>
+          <td>${t.to_location || t.from_location || '-'}</td>
+          <td><strong>${t.lorry_number || '-'}</strong></td>
+          <td class="num">₹${(parseFloat(String(t.total_freight)) || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td>
+          <td class="num" style="color:#15803d; font-weight:600;">₹${rec.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td>
+          <td class="num" style="color:${bal > 0 ? '#b91c1c' : '#15803d'}; font-weight:700;">₹${bal.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td>
+          <td class="center"><span class="badge ${badgeClass}">${statusText}</span></td>
+        </tr>
+        `;
+      }).join('')}
+      <tr class="footer-row">
+        <td class="center">TOTAL</td>
+        <td colspan="5"><strong>Total Count: ${items.length} Trips</strong></td>
+        <td class="num"><strong>₹${sumFreight.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</strong></td>
+        <td class="num" style="color:#15803d;"><strong>₹${sumReceived.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</strong></td>
+        <td class="num" style="color:${sumBalanceDue > 0 ? '#b91c1c' : '#15803d'};"><strong>₹${sumBalanceDue.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</strong></td>
+        <td class="center"><strong>${items.length} Trips</strong></td>
+      </tr>
+    </tbody>
+  </table>
+
+  <div style="margin-top: 24px; display: flex; justify-content: space-between; font-size: 10px; color: #94a3b8; border-top: 1px solid #e2e8f0; padding-top: 8px;">
+    <span>KSP Service Management ERP</span>
+    <span>Party Freight Payments Ledger Record</span>
+  </div>
+</body>
+</html>
+      `;
+
+      const printWin = window.open('', '_blank', 'width=1100,height=850');
+      if (!printWin) {
+        alert('Please allow popups to print report.');
+        return;
+      }
+      printWin.document.open();
+      printWin.document.write(printHtml);
+      printWin.document.close();
+    } catch (err: any) {
+      console.error('Failed to print party payments', err);
+      alert('Failed to generate print document.');
+    } finally {
+      setIsPrinting(false);
     }
   };
 
@@ -376,12 +672,27 @@ export const PaymentsPage: React.FC = () => {
       {/* ── Executive Header ────────────────────────────────────────────── */}
       <div className="card-header" style={{ marginBottom: '20px' }}>
         <div>
-          <h2 style={{ fontSize: '22px', fontWeight: 800, margin: 0 }}>Party Payments</h2>
-          <p style={{ color: 'var(--text-muted)', fontSize: '13.5px', marginTop: '4px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+            <h2 style={{ fontSize: '22px', fontWeight: 800, margin: 0 }}>Party Payments</h2>
+            <span
+              style={{
+                fontSize: '13px',
+                fontWeight: 700,
+                color: '#1d4ed8',
+                background: '#eff6ff',
+                padding: '3px 10px',
+                borderRadius: '12px',
+                border: '1px solid #bfdbfe',
+              }}
+            >
+              Total: {total} Records
+            </span>
+          </div>
+          <p style={{ color: 'var(--text-muted)', fontSize: '13.5px', marginTop: '4px', marginBottom: 0 }}>
             Record customer freight payments, view balance dues &amp; transaction ledger
           </p>
         </div>
-        <div style={{ display: 'flex', gap: '10px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
           <button
             onClick={() => setIsOverdueAlertOpen(true)}
             className="btn btn-outline"
@@ -389,21 +700,6 @@ export const PaymentsPage: React.FC = () => {
             title="View overdue payments (pending 30+ days)"
           >
             <Clock size={16} /> Overdue Alerts
-          </button>
-          <button
-            onClick={() => window.print()}
-            className="btn btn-outline"
-            style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
-          >
-            <Printer size={16} /> Print
-          </button>
-          <button
-            onClick={handleDownloadFiltered}
-            disabled={isDownloading}
-            className="btn btn-primary"
-            style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
-          >
-            <Download size={16} /> {isDownloading ? 'Exporting...' : 'Download CSV'}
           </button>
         </div>
       </div>
@@ -571,20 +867,108 @@ export const PaymentsPage: React.FC = () => {
           >
             <RefreshCw size={14} /> Reset
           </button>
+
+          {/* Print & Download Options Toolbar */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <button
+              onClick={handlePrintPayments}
+              disabled={isPrinting}
+              className="btn btn-outline"
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '5px',
+                borderColor: '#3b82f6',
+                color: '#1d4ed8',
+                background: '#eff6ff',
+                fontWeight: 600,
+                height: '38px',
+                padding: '0 12px',
+                fontSize: '12.5px',
+              }}
+              title="Direct print party payments audit report"
+            >
+              {isPrinting ? <Loader2 size={14} className="animate-spin" /> : <Printer size={14} />}
+              {isPrinting ? 'Preparing...' : 'Print'}
+            </button>
+            <button
+              onClick={handleExportExcel}
+              disabled={isExportingExcel}
+              className="btn btn-outline"
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '5px',
+                borderColor: '#10b981',
+                color: '#059669',
+                background: '#ecfdf5',
+                fontWeight: 600,
+                height: '38px',
+                padding: '0 12px',
+                fontSize: '12.5px',
+              }}
+              title="Download party payments as an Excel spreadsheet with total summary"
+            >
+              {isExportingExcel ? <Loader2 size={14} className="animate-spin" /> : <FileSpreadsheet size={14} />}
+              {isExportingExcel ? 'Exporting...' : 'Excel'}
+            </button>
+            <button
+              onClick={handleDownloadFiltered}
+              disabled={isDownloading}
+              className="btn btn-outline"
+              style={{ display: 'flex', alignItems: 'center', gap: '5px', height: '38px', padding: '0 10px', fontSize: '12.5px' }}
+              title="Download party payments as CSV"
+            >
+              {isDownloading ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
+              CSV
+            </button>
+          </div>
         </div>
       </div>
 
-      <div className="card">
-        <DataTable
-          columns={columns}
-          data={trips}
-          isLoading={isLoading}
-          total={total}
-          page={page}
-          limit={10}
-          onPageChange={setPage}
-        />
-      </div>
+      {(() => {
+        const pageTotalFreight = trips.reduce((acc, t) => acc + (parseFloat(String(t.total_freight)) || 0), 0);
+        const pageTotalReceived = trips.reduce((acc, t) => acc + (parseFloat(String(t.total_received || 0)) || 0), 0);
+        const pageTotalBalance = trips.reduce((acc, t) => acc + (parseFloat(String(t.balance_due ?? t.total_freight)) || 0), 0);
+
+        return (
+          <div className="card">
+            <DataTable
+              columns={columns}
+              data={trips}
+              isLoading={isLoading}
+              total={total}
+              page={page}
+              limit={10}
+              onPageChange={setPage}
+              footer={
+                trips.length > 0 ? (
+                  <tr style={{ background: '#f8fafc', fontWeight: 800, borderTop: '2px solid var(--border-medium, #cbd5e1)' }}>
+                    <td style={{ textAlign: 'center', fontWeight: 800 }}>TOTAL</td>
+                    <td style={{ fontWeight: 700 }}>Total: {total} Trips</td>
+                    <td colSpan={3}></td>
+                    <td style={{ fontWeight: 800, color: 'var(--accent-hover, #2563eb)' }}>
+                      {formatCurrency(pageTotalFreight)}
+                    </td>
+                    <td style={{ color: 'var(--success-700, #15803d)', fontWeight: 800 }}>
+                      {formatCurrency(pageTotalReceived)}
+                    </td>
+                    <td style={{ fontWeight: 800, color: pageTotalBalance > 0 ? 'var(--danger-700, #b91c1c)' : 'var(--success-700, #15803d)' }}>
+                      {formatCurrency(pageTotalBalance)}
+                    </td>
+                    <td style={{ textAlign: 'center' }}>
+                      <span style={{ fontSize: '11px', fontWeight: 700, color: '#475569' }}>
+                        {total} Records
+                      </span>
+                    </td>
+                    <td></td>
+                  </tr>
+                ) : undefined
+              }
+            />
+          </div>
+        );
+      })()}
 
       {/* Record Payment Modal */}
       <Modal

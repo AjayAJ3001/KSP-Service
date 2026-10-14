@@ -2,6 +2,7 @@ import api from './api';
 import {
   User, Driver, Vehicle, Party, Owner, OwnerAdvance, Unit, Route, FreightRate, ExpenseRate, CleaningExpenseRate, UnloadingRate, DriverBataRate, OtherExpenseLimit,
   Trip, TripPayment, DriverExpense, Settlement, DriverSettlementPayment, AuditLog, DashboardData,
+  DriverAdvance, DriverAdvanceSummary,
   ApiResponse, PaginatedData
 } from '../types';
 
@@ -450,6 +451,7 @@ export const ownerAdvanceService = {
     limit?: number;
     owner_id?: number;
     manager_id?: number;
+    payment_mode?: string;
     from_date?: string;
     to_date?: string;
     search?: string;
@@ -544,4 +546,98 @@ export const otherExpenseLimitService = {
 
 
 
+
+// Truck Advance Service
+export const truckAdvanceService = {
+  getTruckAdvances: async (params?: {
+    page?: number; limit?: number; vehicle_id?: string; driver_id?: string;
+    manager_id?: string; party_id?: string; from_date?: string; to_date?: string; search?: string;
+  }): Promise<ApiResponse<{ items: any[]; total: number; totalAmount: number; page: number; limit: number; totalPages: number }>> => {
+    const res = await api.get('/truck-advances', { params });
+    return res.data;
+  },
+  getManagerSummary: async (params?: { manager_id?: string }): Promise<ApiResponse<{ managers: any[]; grand_totals: any }>> => {
+    const res = await api.get('/truck-advances/manager-summary', { params });
+    return res.data;
+  },
+  createTruckAdvance: async (data: {
+    vehicle_id: number; driver_id?: number; manager_id?: number;
+    amount: number; advance_date?: string; notes?: string; trip_id?: number;
+  }): Promise<ApiResponse<any>> => {
+    const res = await api.post('/truck-advances', data);
+    return res.data;
+  },
+  deleteTruckAdvance: async (id: number): Promise<ApiResponse> => {
+    const res = await api.delete(`/truck-advances/${id}`);
+    return res.data;
+  },
+};
+
+// Driver Balance Service (reads from settlements)
+export const driverBalanceService = {
+  getDriverBalanceSummary: async (params?: { driver_id?: string; from_date?: string; to_date?: string }): Promise<ApiResponse<any>> => {
+    const res = await api.get('/settlements', { params: { ...params, limit: 5000 } });
+    return res.data;
+  },
+};
+
+// Driver Advance Service
+export const driverAdvanceService = {
+  getDriverAdvances: async (params?: {
+    page?: number;
+    limit?: number;
+    driver_id?: string;
+    manager_id?: string;
+    vehicle_id?: string;
+    payment_mode?: string;
+    from_date?: string;
+    to_date?: string;
+    search?: string;
+  }): Promise<ApiResponse<{ items: DriverAdvance[]; total: number; totalAmount: number; page: number; limit: number; totalPages: number }>> => {
+    const res = await api.get('/driver-advances', { params });
+    return res.data;
+  },
+  getDriverSummary: async (params?: {
+    driver_id?: string;
+    search?: string;
+  }): Promise<ApiResponse<{ drivers: DriverAdvanceSummary[]; grand_totals: any }>> => {
+    const res = await api.get('/driver-advances/summary', { params });
+    return res.data;
+  },
+  getDriverAdvanceById: async (id: number): Promise<ApiResponse<DriverAdvance>> => {
+    const res = await api.get(`/driver-advances/${id}`);
+    return res.data;
+  },
+  createDriverAdvance: async (data: {
+    driver_id: number;
+    manager_id?: number;
+    vehicle_id?: number;
+    amount: number;
+    advance_date?: string;
+    payment_mode?: string;
+    notes?: string;
+  }): Promise<ApiResponse<DriverAdvance>> => {
+    const res = await api.post('/driver-advances', data);
+    return res.data;
+  },
+  updateDriverAdvance: async (
+    id: number,
+    data: Partial<{
+      driver_id: number;
+      manager_id: number;
+      vehicle_id: number;
+      amount: number;
+      advance_date: string;
+      payment_mode: string;
+      notes: string;
+    }>
+  ): Promise<ApiResponse<DriverAdvance>> => {
+    const res = await api.put(`/driver-advances/${id}`, data);
+    return res.data;
+  },
+  deleteDriverAdvance: async (id: number): Promise<ApiResponse> => {
+    const res = await api.delete(`/driver-advances/${id}`);
+    return res.data;
+  },
+};
 

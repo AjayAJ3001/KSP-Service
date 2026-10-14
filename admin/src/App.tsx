@@ -22,6 +22,9 @@ import { OwnerAdvancesPage } from './pages/OwnerAdvancesPage';
 import { UnloadingRatesPage } from './pages/UnloadingRatesPage';
 import { DriverBataPage } from './pages/DriverBataPage';
 import { OtherExpenseLimitPage } from './pages/OtherExpenseLimitPage';
+import { TruckAdvancesPage } from './pages/TruckAdvancesPage';
+import { ManagerAdvanceLedgerPage } from './pages/ManagerAdvanceLedgerPage';
+import { DriverAdvancesPage } from './pages/DriverAdvancesPage';
 
 // Protected Route Component
 const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -76,6 +79,10 @@ export function App() {
             <Route path="unloading-rates" element={<UnloadingRatesPage />} />
             <Route path="driver-bata" element={<DriverBataPage />} />
             <Route path="other-expense-limit" element={<OtherExpenseLimitPage />} />
+            <Route path="truck-advances" element={<TruckAdvancesPage />} />
+            <Route path="driver-advances" element={<DriverAdvancesPage />} />
+            <Route path="manager-ledger" element={<ManagerAdvanceLedgerPage />} />
+            <Route path="manager-advances" element={<ManagerAdvanceLedgerPage />} />
             <Route path="reports" element={<ReportsPage />} />
             <Route path="audit-logs" element={<AuditLogsPage />} />
             <Route path="profile" element={<ProfilePage />} />

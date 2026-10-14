@@ -104,8 +104,13 @@ export const mobileTripService = {
     goods_weight: number;
     advance_paid?: number;
     trip_date: string;
+    cancel_draft_trip_id?: number;
   }): Promise<ApiResponse<Trip>> => {
     const res = await api.post('/trips', data);
+    return res.data;
+  },
+  deleteDraftTrip: async (tripId: number): Promise<ApiResponse<void>> => {
+    const res = await api.delete(`/trips/draft/${tripId}`);
     return res.data;
   },
 };
@@ -145,9 +150,10 @@ export const mobileOwnerAdvanceService = {
 };
 
 export const mobileTruckAdvanceService = {
-  // Manager gives advance to a specific truck/vehicle
+  // Manager gives advance to a specific truck/vehicle (optionally with driver)
   giveAdvance: async (data: {
     vehicle_id: number;
+    driver_id?: number;
     amount: number;
     advance_date?: string;
     notes?: string;
