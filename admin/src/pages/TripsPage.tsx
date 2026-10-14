@@ -784,9 +784,9 @@ export const TripsPage: React.FC = () => {
 
   return (
     <div>
-      <div className="card-header" style={{ marginBottom: '24px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '14px' }}>
+      <div className="card-header" style={{ marginBottom: '24px' }}>
         <div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
             <h2 style={{ fontSize: '22px', fontWeight: 800, margin: 0 }}>Trip Management</h2>
             <span
               style={{
@@ -801,6 +801,50 @@ export const TripsPage: React.FC = () => {
             >
               Total: {total} Trips
             </span>
+            <button
+              type="button"
+              onClick={handlePrint}
+              disabled={isPrinting}
+              className="btn btn-outline"
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+                borderColor: '#3b82f6',
+                color: '#1d4ed8',
+                background: '#eff6ff',
+                fontWeight: 600,
+                height: '32px',
+                padding: '0 12px',
+                fontSize: '13px',
+              }}
+              title="Print Trips Master dispatch list"
+            >
+              {isPrinting ? <Loader2 size={14} className="animate-spin" /> : <Printer size={14} />}
+              {isPrinting ? 'Preparing...' : 'Print'}
+            </button>
+            <button
+              type="button"
+              onClick={handleExportExcel}
+              disabled={isExportingExcel}
+              className="btn btn-outline"
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+                borderColor: '#10b981',
+                color: '#059669',
+                background: '#ecfdf5',
+                fontWeight: 600,
+                height: '32px',
+                padding: '0 12px',
+                fontSize: '13px',
+              }}
+              title="Download trips as an Excel spreadsheet with total count"
+            >
+              {isExportingExcel ? <Loader2 size={14} className="animate-spin" /> : <FileSpreadsheet size={14} />}
+              {isExportingExcel ? 'Exporting...' : 'Download'}
+            </button>
           </div>
           <p style={{ color: 'var(--text-muted)', fontSize: '13.5px', marginTop: '4px' }}>
             Create and track freight dispatch trips, lorry allocations & delivery status
@@ -809,12 +853,23 @@ export const TripsPage: React.FC = () => {
       </div>
 
       <div className="card">
-        {/* Filters */}
-        <div className="search-filter-bar" style={{ marginBottom: '16px' }}>
-          <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', alignItems: 'center' }}>
+        <div
+          style={{
+            display: 'flex',
+            gap: '12px',
+            flexWrap: 'wrap',
+            alignItems: 'flex-end',
+            marginBottom: '16px',
+            width: '100%',
+          }}
+        >
+          <div style={{ flex: '1 1 160px', minWidth: '140px' }}>
+            <label style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-muted)', display: 'block', marginBottom: '4px' }}>
+              Status
+            </label>
             <select
               className="form-control form-select"
-              style={{ width: '180px' }}
+              style={{ width: '100%' }}
               value={statusFilter}
               onChange={(e) => {
                 setStatusFilter(e.target.value);
@@ -827,10 +882,15 @@ export const TripsPage: React.FC = () => {
               <option value="SETTLED">SETTLED</option>
               <option value="CANCELLED">CANCELLED</option>
             </select>
+          </div>
 
+          <div style={{ flex: '1 1 180px', minWidth: '160px' }}>
+            <label style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-muted)', display: 'block', marginBottom: '4px' }}>
+              Party
+            </label>
             <select
               className="form-control form-select"
-              style={{ width: '200px' }}
+              style={{ width: '100%' }}
               value={partyFilter}
               onChange={(e) => {
                 setPartyFilter(e.target.value);
@@ -844,91 +904,53 @@ export const TripsPage: React.FC = () => {
                 </option>
               ))}
             </select>
-
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>From:</span>
-              <DateField
-                style={{ width: '155px' }}
-                value={fromDate}
-                onChange={(e) => {
-                  setFromDate(e.target.value);
-                  setPage(1);
-                }}
-              />
-            </div>
-
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>To:</span>
-              <DateField
-                style={{ width: '155px' }}
-                value={toDate}
-                onChange={(e) => {
-                  setToDate(e.target.value);
-                  setPage(1);
-                }}
-              />
-            </div>
-
-            {(statusFilter || partyFilter || fromDate || toDate) && (
-              <button
-                type="button"
-                onClick={resetFilters}
-                className="btn btn-outline"
-                style={{ fontSize: '13px', display: 'flex', alignItems: 'center', gap: '6px' }}
-                title="Reset all filters"
-              >
-                <RefreshCw size={14} /> Reset
-              </button>
-            )}
-
-            {/* Print & Download Options directly near filters */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <button
-                type="button"
-                onClick={handlePrint}
-                disabled={isPrinting}
-                className="btn btn-outline"
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '6px',
-                  borderColor: '#3b82f6',
-                  color: '#1d4ed8',
-                  background: '#eff6ff',
-                  fontWeight: 600,
-                  height: '38px',
-                  padding: '0 12px',
-                  fontSize: '12.5px',
-                }}
-                title="Print Trips Master dispatch list"
-              >
-                {isPrinting ? <Loader2 size={14} className="animate-spin" /> : <Printer size={14} />}
-                {isPrinting ? 'Preparing...' : 'Print'}
-              </button>
-              <button
-                type="button"
-                onClick={handleExportExcel}
-                disabled={isExportingExcel}
-                className="btn btn-outline"
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '6px',
-                  borderColor: '#10b981',
-                  color: '#059669',
-                  background: '#ecfdf5',
-                  fontWeight: 600,
-                  height: '38px',
-                  padding: '0 12px',
-                  fontSize: '12.5px',
-                }}
-                title="Download trips as an Excel spreadsheet with total count"
-              >
-                {isExportingExcel ? <Loader2 size={14} className="animate-spin" /> : <FileSpreadsheet size={14} />}
-                {isExportingExcel ? 'Exporting...' : 'Excel'}
-              </button>
-            </div>
           </div>
+
+          <div style={{ flex: '1 1 150px', minWidth: '140px' }}>
+            <label style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-muted)', display: 'block', marginBottom: '4px' }}>
+              From Date
+            </label>
+            <DateField
+              style={{ width: '100%' }}
+              value={fromDate}
+              onChange={(e) => {
+                setFromDate(e.target.value);
+                setPage(1);
+              }}
+            />
+          </div>
+
+          <div style={{ flex: '1 1 150px', minWidth: '140px' }}>
+            <label style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-muted)', display: 'block', marginBottom: '4px' }}>
+              To Date
+            </label>
+            <DateField
+              style={{ width: '100%' }}
+              value={toDate}
+              onChange={(e) => {
+                setToDate(e.target.value);
+                setPage(1);
+              }}
+            />
+          </div>
+
+          <button
+            type="button"
+            onClick={resetFilters}
+            disabled={!statusFilter && !partyFilter && !fromDate && !toDate}
+            className="btn btn-outline"
+            style={{
+              fontSize: '13px',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              height: '38px',
+              flexShrink: 0,
+            }}
+            title="Clear all filters"
+          >
+            <RefreshCw size={14} /> Clear Filters
+          </button>
         </div>
 
         <DataTable

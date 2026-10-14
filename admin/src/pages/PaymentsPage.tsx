@@ -54,7 +54,6 @@ export const PaymentsPage: React.FC = () => {
   const [routeFilter, setRouteFilter] = useState('');
 
   const [isLoading, setIsLoading] = useState(false);
-  const [isDownloading, setIsDownloading] = useState(false);
   const [isExportingExcel, setIsExportingExcel] = useState(false);
   const [isPrinting, setIsPrinting] = useState(false);
 
@@ -222,73 +221,6 @@ export const PaymentsPage: React.FC = () => {
     const currentBalance = parseFloat(String(selectedTrip.balance_due ?? selectedTrip.total_freight));
     const paid = parseFloat(receivedAmount) || 0;
     return Math.max(0, currentBalance - paid);
-  };
-
-  // Full CSV Export of all matching records
-  const handleDownloadFiltered = async () => {
-    try {
-      setIsDownloading(true);
-      const res = await tripService.getTrips({
-        page: 1,
-        limit: Math.max(total, 5000),
-        status: statusFilter || undefined,
-        party_id: partyFilter || undefined,
-        vehicle_id: vehicleFilter || undefined,
-        route_id: routeFilter || undefined,
-        from_date: fromDate || undefined,
-        to_date: toDate || undefined,
-      });
-      const items = res.data.items || [];
-      const sumFreight = items.reduce((acc: number, t: Trip) => acc + (parseFloat(String(t.total_freight)) || 0), 0);
-      const sumReceived = items.reduce((acc: number, t: Trip) => acc + (parseFloat(String(t.total_received || 0)) || 0), 0);
-      const sumBalanceDue = items.reduce((acc: number, t: Trip) => acc + (parseFloat(String(t.balance_due ?? t.total_freight)) || 0), 0);
-
-      const rows: (string | number)[][] = items.map((t, idx) => [
-        idx + 1,
-        `#${t.id}`,
-        formatDateDMY(t.trip_date),
-        t.party_name || '',
-        t.to_location || t.from_location || '',
-        t.lorry_number || '',
-        (parseFloat(String(t.total_freight)) || 0).toFixed(2),
-        (parseFloat(String(t.total_received || 0)) || 0).toFixed(2),
-        (parseFloat(String(t.balance_due ?? t.total_freight)) || 0).toFixed(2),
-        Number(t.balance_due ?? t.total_freight) <= 0
-          ? 'Fully Paid'
-          : Number(t.total_received) > 0
-          ? 'Partially Paid'
-          : 'Pending',
-        t.status || '',
-      ]);
-
-      // Blank separator and TOTAL row
-      rows.push(['', '', '', '', '', '', '', '', '', '', '']);
-      rows.push(['TOTAL', `Total: ${items.length} Trips`, '', '', '', '', sumFreight.toFixed(2), sumReceived.toFixed(2), sumBalanceDue.toFixed(2), '', '']);
-
-      const dateTag = fromDate && toDate ? `${fromDate}_to_${toDate}` : 'All';
-      downloadCSV(
-        `Party_Payments_${dateTag}.csv`,
-        [
-          'S.No',
-          'Trip ID',
-          'Date',
-          'Party Name',
-          'Unit / Destination',
-          'Lorry Number',
-          'Total Freight (INR)',
-          'Received Amount (INR)',
-          'Balance Due (INR)',
-          'Payment Status',
-          'Trip Status',
-        ],
-        rows
-      );
-    } catch (err) {
-      console.error('Failed to download payments CSV', err);
-      alert('Failed to download CSV report.');
-    } finally {
-      setIsDownloading(false);
-    }
   };
 
   const handleExportExcel = async () => {
@@ -672,7 +604,7 @@ export const PaymentsPage: React.FC = () => {
       {/* ── Executive Header ────────────────────────────────────────────── */}
       <div className="card-header" style={{ marginBottom: '20px' }}>
         <div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
             <h2 style={{ fontSize: '22px', fontWeight: 800, margin: 0 }}>Party Payments</h2>
             <span
               style={{
@@ -687,6 +619,50 @@ export const PaymentsPage: React.FC = () => {
             >
               Total: {total} Records
             </span>
+            <button
+              type="button"
+              onClick={handlePrintPayments}
+              disabled={isPrinting}
+              className="btn btn-outline"
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+                borderColor: '#3b82f6',
+                color: '#1d4ed8',
+                background: '#eff6ff',
+                fontWeight: 600,
+                height: '32px',
+                padding: '0 12px',
+                fontSize: '13px',
+              }}
+              title="Print party payments ledger"
+            >
+              {isPrinting ? <Loader2 size={14} className="animate-spin" /> : <Printer size={14} />}
+              {isPrinting ? 'Preparing...' : 'Print'}
+            </button>
+            <button
+              type="button"
+              onClick={handleExportExcel}
+              disabled={isExportingExcel}
+              className="btn btn-outline"
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+                borderColor: '#10b981',
+                color: '#059669',
+                background: '#ecfdf5',
+                fontWeight: 600,
+                height: '32px',
+                padding: '0 12px',
+                fontSize: '13px',
+              }}
+              title="Download party payments as an Excel spreadsheet with total summary"
+            >
+              {isExportingExcel ? <Loader2 size={14} className="animate-spin" /> : <FileSpreadsheet size={14} />}
+              {isExportingExcel ? 'Exporting...' : 'Download'}
+            </button>
           </div>
           <p style={{ color: 'var(--text-muted)', fontSize: '13.5px', marginTop: '4px', marginBottom: 0 }}>
             Record customer freight payments, view balance dues &amp; transaction ledger
@@ -867,62 +843,6 @@ export const PaymentsPage: React.FC = () => {
           >
             <RefreshCw size={14} /> Reset
           </button>
-
-          {/* Print & Download Options Toolbar */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <button
-              onClick={handlePrintPayments}
-              disabled={isPrinting}
-              className="btn btn-outline"
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: '5px',
-                borderColor: '#3b82f6',
-                color: '#1d4ed8',
-                background: '#eff6ff',
-                fontWeight: 600,
-                height: '38px',
-                padding: '0 12px',
-                fontSize: '12.5px',
-              }}
-              title="Direct print party payments audit report"
-            >
-              {isPrinting ? <Loader2 size={14} className="animate-spin" /> : <Printer size={14} />}
-              {isPrinting ? 'Preparing...' : 'Print'}
-            </button>
-            <button
-              onClick={handleExportExcel}
-              disabled={isExportingExcel}
-              className="btn btn-outline"
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: '5px',
-                borderColor: '#10b981',
-                color: '#059669',
-                background: '#ecfdf5',
-                fontWeight: 600,
-                height: '38px',
-                padding: '0 12px',
-                fontSize: '12.5px',
-              }}
-              title="Download party payments as an Excel spreadsheet with total summary"
-            >
-              {isExportingExcel ? <Loader2 size={14} className="animate-spin" /> : <FileSpreadsheet size={14} />}
-              {isExportingExcel ? 'Exporting...' : 'Excel'}
-            </button>
-            <button
-              onClick={handleDownloadFiltered}
-              disabled={isDownloading}
-              className="btn btn-outline"
-              style={{ display: 'flex', alignItems: 'center', gap: '5px', height: '38px', padding: '0 10px', fontSize: '12.5px' }}
-              title="Download party payments as CSV"
-            >
-              {isDownloading ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
-              CSV
-            </button>
-          </div>
         </div>
       </div>
 

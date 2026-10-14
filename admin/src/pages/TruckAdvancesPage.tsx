@@ -102,7 +102,6 @@ export const TruckAdvancesPage: React.FC = () => {
 
   const [isLoading, setIsLoading] = useState(false);
   const [isExportingExcel, setIsExportingExcel] = useState(false);
-  const [isExportingCSV, setIsExportingCSV] = useState(false);
   const [isPrinting, setIsPrinting] = useState(false);
 
   // Create Modal
@@ -405,54 +404,6 @@ export const TruckAdvancesPage: React.FC = () => {
     } catch (err: any) {
       alert(err.message || 'Failed to print advance voucher.');
     }
-  };
-
-  // ── Export CSV ──────────────────────────────────────────────────
-  const handleExportCSV = async () => {
-    try {
-      setIsExportingCSV(true);
-      const res = await truckAdvanceService.getTruckAdvances({
-        page: 1, limit: 5000,
-        search: search || undefined, vehicle_id: vehicleFilter || undefined,
-        driver_id: driverFilter || undefined, party_id: partyFilter || undefined,
-        manager_id: managerFilter || undefined,
-        from_date: fromDate || undefined, to_date: toDate || undefined,
-      });
-      const items: TruckAdvance[] = res.data.items || [];
-      const headers = [
-        'S.No', 'Date & Time', 'Lorry Number', 'Trip ID', 'Party Name',
-        'Goods Weight', 'Total Freight (INR)', 'Advance Paid (INR)', 'Driver Expenses (INR)',
-        'Driver', 'Driver Mobile', 'Manager', 'Notes'
-      ];
-      const rows = items.map((a, i) => [
-        i + 1,
-        formatAdvanceDateTime(a.advance_date, a.created_at),
-        a.lorry_number,
-        a.trip_id ? `#${a.trip_id}` : '-',
-        a.party_name || '-',
-        a.goods_weight ? `${a.goods_weight} ${a.unit_abbreviation || 'MT'}` : '-',
-        a.total_freight ? parseFloat(String(a.total_freight)).toFixed(2) : '0.00',
-        parseFloat(String(a.amount)).toFixed(2),
-        a.driver_expenses ? parseFloat(String(a.driver_expenses)).toFixed(2) : '0.00',
-        a.driver_name || '-',
-        a.driver_mobile || '-',
-        a.manager_name,
-        a.notes || '',
-      ]);
-      const totalAdv = items.reduce((s, a) => s + (parseFloat(String(a.amount)) || 0), 0);
-      const totalFr = items.reduce((s, a) => s + (parseFloat(String(a.total_freight)) || 0), 0);
-      const totalExp = items.reduce((s, a) => s + (parseFloat(String(a.driver_expenses)) || 0), 0);
-      rows.push([]);
-      rows.push(['TOTAL', `${items.length} Advances`, '', '', '', '', totalFr.toFixed(2), totalAdv.toFixed(2), totalExp.toFixed(2), '', '', '', '']);
-      const escape = (v: any) => `"${String(v ?? '').replace(/"/g, '""')}"`;
-      const csv = [headers.map(escape).join(','), ...rows.map(r => r.map(escape).join(','))].join('\r\n');
-      const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url; a.download = `KSP_Truck_Advances_${new Date().toISOString().slice(0, 10)}.csv`; a.click();
-      URL.revokeObjectURL(url);
-    } catch (err) { alert('Failed to export CSV.'); }
-    finally { setIsExportingCSV(false); }
   };
 
   // ── Export Excel ─────────────────────────────────────────────────
@@ -768,58 +719,190 @@ export const TruckAdvancesPage: React.FC = () => {
 
       {/* Filter Bar */}
       <div className="card" style={{ padding: '16px 20px', marginBottom: '20px', borderRadius: '10px' }}>
-        <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '12px' }}>
-          <div style={{ position: 'relative', flex: '1 1 200px', minWidth: '180px' }}>
-            <Search size={14} style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', color: '#94a3b8' }} />
-            <input type="text" value={search} onChange={(e) => { setSearch(e.target.value); setPage(1); }}
-              className="form-control" placeholder="Search lorry, driver, party, manager..." style={{ paddingLeft: '32px', height: '38px' }} />
+        <div
+          style={{
+            display: 'flex',
+            flexWrap: 'wrap',
+            alignItems: 'flex-end',
+            gap: '12px',
+            width: '100%',
+          }}
+        >
+          <div style={{ flex: '1 1 200px', minWidth: '180px' }}>
+            <label style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-muted)', display: 'block', marginBottom: '4px' }}>
+              Search
+            </label>
+            <div style={{ position: 'relative' }}>
+              <Search size={14} style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', color: '#94a3b8' }} />
+              <input
+                type="text"
+                value={search}
+                onChange={(e) => { setSearch(e.target.value); setPage(1); }}
+                className="form-control"
+                placeholder="Search lorry, driver, party, manager..."
+                style={{ paddingLeft: '32px', height: '38px', width: '100%' }}
+              />
+            </div>
           </div>
 
-          <select value={vehicleFilter} onChange={(e) => { setVehicleFilter(e.target.value); setPage(1); }} className="form-control" style={{ height: '38px', width: '160px' }}>
-            <option value="">All Vehicles</option>
-            {vehicles.map(v => <option key={v.id} value={v.id}>{v.lorry_number}</option>)}
-          </select>
+          <div style={{ flex: '1 1 150px', minWidth: '140px' }}>
+            <label style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-muted)', display: 'block', marginBottom: '4px' }}>
+              Vehicle
+            </label>
+            <select
+              value={vehicleFilter}
+              onChange={(e) => { setVehicleFilter(e.target.value); setPage(1); }}
+              className="form-control form-select"
+              style={{ height: '38px', width: '100%' }}
+            >
+              <option value="">All Vehicles</option>
+              {vehicles.map((v) => (
+                <option key={v.id} value={v.id}>{v.lorry_number}</option>
+              ))}
+            </select>
+          </div>
 
-          <select value={driverFilter} onChange={(e) => { setDriverFilter(e.target.value); setPage(1); }} className="form-control" style={{ height: '38px', width: '160px' }}>
-            <option value="">All Drivers</option>
-            {drivers.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
-          </select>
+          <div style={{ flex: '1 1 150px', minWidth: '140px' }}>
+            <label style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-muted)', display: 'block', marginBottom: '4px' }}>
+              Driver
+            </label>
+            <select
+              value={driverFilter}
+              onChange={(e) => { setDriverFilter(e.target.value); setPage(1); }}
+              className="form-control form-select"
+              style={{ height: '38px', width: '100%' }}
+            >
+              <option value="">All Drivers</option>
+              {drivers.map((d) => (
+                <option key={d.id} value={d.id}>{d.name}</option>
+              ))}
+            </select>
+          </div>
 
-          <select value={partyFilter} onChange={(e) => { setPartyFilter(e.target.value); setPage(1); }} className="form-control" style={{ height: '38px', width: '170px' }}>
-            <option value="">All Parties</option>
-            {parties.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-          </select>
+          <div style={{ flex: '1 1 160px', minWidth: '140px' }}>
+            <label style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-muted)', display: 'block', marginBottom: '4px' }}>
+              Party
+            </label>
+            <select
+              value={partyFilter}
+              onChange={(e) => { setPartyFilter(e.target.value); setPage(1); }}
+              className="form-control form-select"
+              style={{ height: '38px', width: '100%' }}
+            >
+              <option value="">All Parties</option>
+              {parties.map((p) => (
+                <option key={p.id} value={p.id}>{p.name}</option>
+              ))}
+            </select>
+          </div>
 
-          <select value={managerFilter} onChange={(e) => { setManagerFilter(e.target.value); setPage(1); }} className="form-control" style={{ height: '38px', width: '150px' }}>
-            <option value="">All Managers</option>
-            {managers.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
-          </select>
+          <div style={{ flex: '1 1 150px', minWidth: '140px' }}>
+            <label style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-muted)', display: 'block', marginBottom: '4px' }}>
+              Manager
+            </label>
+            <select
+              value={managerFilter}
+              onChange={(e) => { setManagerFilter(e.target.value); setPage(1); }}
+              className="form-control form-select"
+              style={{ height: '38px', width: '100%' }}
+            >
+              <option value="">All Managers</option>
+              {managers.map((m) => (
+                <option key={m.id} value={m.id}>{m.name}</option>
+              ))}
+            </select>
+          </div>
 
-          <DateField style={{ width: '140px', height: '38px' }} value={fromDate} onChange={(e) => { setFromDate(e.target.value); setPage(1); }} placeholder="From Date" />
-          <DateField style={{ width: '140px', height: '38px' }} value={toDate} onChange={(e) => { setToDate(e.target.value); setPage(1); }} placeholder="To Date" />
+          <div style={{ flex: '1 1 140px', minWidth: '130px' }}>
+            <label style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-muted)', display: 'block', marginBottom: '4px' }}>
+              From Date
+            </label>
+            <DateField
+              style={{ width: '100%', height: '38px' }}
+              value={fromDate}
+              onChange={(e) => { setFromDate(e.target.value); setPage(1); }}
+              placeholder="From Date"
+            />
+          </div>
 
-          <button onClick={resetFilters} className="btn btn-outline" style={{ height: '38px', display: 'flex', alignItems: 'center', gap: '6px' }}>
-            <RefreshCw size={14} /> Reset
+          <div style={{ flex: '1 1 140px', minWidth: '130px' }}>
+            <label style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-muted)', display: 'block', marginBottom: '4px' }}>
+              To Date
+            </label>
+            <DateField
+              style={{ width: '100%', height: '38px' }}
+              value={toDate}
+              onChange={(e) => { setToDate(e.target.value); setPage(1); }}
+              placeholder="To Date"
+            />
+          </div>
+        </div>
+
+        <div
+          style={{
+            display: 'flex',
+            flexWrap: 'wrap',
+            alignItems: 'center',
+            gap: '8px',
+            marginTop: '14px',
+          }}
+        >
+          <button
+            type="button"
+            onClick={resetFilters}
+            disabled={!search && !vehicleFilter && !driverFilter && !partyFilter && !managerFilter && !fromDate && !toDate}
+            className="btn btn-outline"
+            style={{ height: '38px', display: 'flex', alignItems: 'center', gap: '6px', flexShrink: 0 }}
+            title="Clear all filters"
+          >
+            <RefreshCw size={14} /> Clear Filters
           </button>
-
-          {/* Print & Download Options Toolbar */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <button onClick={handlePrint} disabled={isPrinting} className="btn btn-outline"
-              style={{ display: 'flex', alignItems: 'center', gap: '5px', borderColor: '#3b82f6', color: '#1d4ed8', background: '#eff6ff', fontWeight: 600, height: '38px', padding: '0 12px', fontSize: '12.5px' }}>
-              {isPrinting ? <Loader2 size={14} className="animate-spin" /> : <Printer size={14} />}
-              {isPrinting ? 'Preparing...' : 'Print'}
-            </button>
-            <button onClick={handleExportExcel} disabled={isExportingExcel} className="btn btn-outline"
-              style={{ display: 'flex', alignItems: 'center', gap: '5px', borderColor: '#10b981', color: '#059669', background: '#ecfdf5', fontWeight: 600, height: '38px', padding: '0 12px', fontSize: '12.5px' }}>
-              {isExportingExcel ? <Loader2 size={14} className="animate-spin" /> : <FileSpreadsheet size={14} />}
-              {isExportingExcel ? 'Exporting...' : 'Excel'}
-            </button>
-            <button onClick={handleExportCSV} disabled={isExportingCSV} className="btn btn-outline"
-              style={{ display: 'flex', alignItems: 'center', gap: '5px', height: '38px', padding: '0 10px', fontSize: '12.5px' }}>
-              {isExportingCSV ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
-              CSV
-            </button>
-          </div>
+          <button
+            type="button"
+            onClick={handlePrint}
+            disabled={isPrinting}
+            className="btn btn-outline"
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              borderColor: '#3b82f6',
+              color: '#1d4ed8',
+              background: '#eff6ff',
+              fontWeight: 600,
+              height: '38px',
+              padding: '0 14px',
+              fontSize: '13px',
+              flexShrink: 0,
+            }}
+            title="Print truck advances report"
+          >
+            {isPrinting ? <Loader2 size={14} className="animate-spin" /> : <Printer size={14} />}
+            {isPrinting ? 'Preparing...' : 'Print'}
+          </button>
+          <button
+            type="button"
+            onClick={handleExportExcel}
+            disabled={isExportingExcel}
+            className="btn btn-outline"
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              borderColor: '#10b981',
+              color: '#059669',
+              background: '#ecfdf5',
+              fontWeight: 600,
+              height: '38px',
+              padding: '0 14px',
+              fontSize: '13px',
+              flexShrink: 0,
+            }}
+            title="Download truck advances as Excel"
+          >
+            {isExportingExcel ? <Loader2 size={14} className="animate-spin" /> : <FileSpreadsheet size={14} />}
+            {isExportingExcel ? 'Exporting...' : 'Download'}
+          </button>
         </div>
       </div>
 
