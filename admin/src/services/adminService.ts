@@ -600,6 +600,8 @@ export const driverAdvanceService = {
   getDriverSummary: async (params?: {
     driver_id?: string;
     search?: string;
+    from_date?: string;
+    to_date?: string;
   }): Promise<ApiResponse<{ drivers: DriverAdvanceSummary[]; grand_totals: any }>> => {
     const res = await api.get('/driver-advances/summary', { params });
     return res.data;

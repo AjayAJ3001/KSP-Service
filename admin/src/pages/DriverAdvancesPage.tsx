@@ -8,6 +8,7 @@ import {
   Search,
   Download,
   FileSpreadsheet,
+  FileText,
   Printer,
   Loader2,
   RefreshCw,
@@ -159,6 +160,8 @@ export const DriverAdvancesPage: React.FC = () => {
   const [isPrinting, setIsPrinting] = useState(false);
   const [printingDriverId, setPrintingDriverId] = useState<number | null>(null);
   const [downloadingDriverId, setDownloadingDriverId] = useState<number | null>(null);
+  const [downloadingPdfTripId, setDownloadingPdfTripId] = useState<number | null>(null);
+  const [downloadingExcelTripId, setDownloadingExcelTripId] = useState<number | null>(null);
 
   // Create / Edit Modal
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -201,7 +204,7 @@ export const DriverAdvancesPage: React.FC = () => {
       window.removeEventListener('focus', onFocus);
       clearInterval(timer);
     };
-  }, [activeView, driverFilter, search]);
+  }, [activeView, driverFilter, search, fromDate, toDate]);
 
   const loadLookups = async () => {
     try {
@@ -248,6 +251,8 @@ export const DriverAdvancesPage: React.FC = () => {
       const res = await driverAdvanceService.getDriverSummary({
         driver_id: driverFilter || undefined,
         search: search || undefined,
+        from_date: fromDate || undefined,
+        to_date: toDate || undefined,
       });
       setDriverSummaries(res.data.drivers || []);
       setLedgerGrandTotals(
@@ -682,6 +687,119 @@ export const DriverAdvancesPage: React.FC = () => {
     }
   };
 
+  // ── Tab-Aware: Download Advances Only Excel ────────────────────────
+  const handleDownloadDriverAdvancesExcel = async (d: DriverAdvanceSummary) => {
+    try {
+      setDownloadingDriverId(d.driver_id);
+      const { advances } = await getOrFetchDriverDetails(d.driver_id);
+      const wb = XLSX.utils.book_new();
+      const advRows: any[] = advances.map((a, i) => ({
+        'S.No': i + 1,
+        'Advance ID': `#ADV-${a.id}`,
+        'Date & Time (IST)': formatAdvanceDateTime(a.advance_date, a.created_at),
+        'Driver Name': d.driver_name,
+        'Disbursed By (Manager)': a.manager_name,
+        'Vehicle / Lorry': a.lorry_number || '—',
+        'Payment Mode': a.payment_mode || 'CASH',
+        'Amount (₹)': parseFloat(String(a.amount || 0)),
+        'Notes / Remarks': a.notes || '—',
+      }));
+      advRows.push({});
+      advRows.push({
+        'S.No': 'TOTAL',
+        'Advance ID': `${advances.length} Disbursements`,
+        'Date & Time (IST)': '', 'Driver Name': '', 'Disbursed By (Manager)': '',
+        'Vehicle / Lorry': '', 'Payment Mode': '',
+        'Amount (₹)': advances.reduce((s, a) => s + (parseFloat(String(a.amount || 0)) || 0), 0),
+        'Notes / Remarks': '',
+      });
+      const ws = XLSX.utils.json_to_sheet(advRows);
+      ws['!cols'] = [{ wch: 6 }, { wch: 14 }, { wch: 22 }, { wch: 20 }, { wch: 22 }, { wch: 16 }, { wch: 14 }, { wch: 16 }, { wch: 28 }];
+      XLSX.utils.book_append_sheet(wb, ws, 'Advances Received');
+      const safeDriver = d.driver_name.replace(/[^\w\s-]/g, '').trim().replace(/\s+/g, '_');
+      XLSX.writeFile(wb, `KSP_Advances_${safeDriver}_${new Date().toISOString().slice(0, 10)}.xlsx`);
+    } catch (err: any) {
+      alert(err.message || 'Failed to download advances Excel.');
+    } finally {
+      setDownloadingDriverId(null);
+    }
+  };
+
+  // ── Tab-Aware: Download Trips Only Excel ───────────────────────────
+  const handleDownloadDriverTripsExcel = async (d: DriverAdvanceSummary) => {
+    try {
+      setDownloadingDriverId(d.driver_id);
+      const { advances, trips } = await getOrFetchDriverDetails(d.driver_id);
+      const sortedTrips = [...trips].sort((a, b) => {
+        const dateA = new Date(a.trip_date || 0).getTime();
+        const dateB = new Date(b.trip_date || 0).getTime();
+        if (dateA !== dateB) return dateA - dateB;
+        return (a.id || 0) - (b.id || 0);
+      });
+      const directAdv = (advances || []).filter(a => !a.trip_id).reduce((s, a) => s + (parseFloat(String(a.amount)) || 0), 0);
+      let rb = directAdv;
+      const balMap = new Map<number, number>();
+      const balBeforeMap = new Map<number, number>();
+      const needToPayMap = new Map<number, number>();
+      sortedTrips.forEach(t => {
+        const adv = parseFloat(String(t.advance_paid || 0));
+        const exp = parseFloat(String(t.total_expenses ?? 0)) || 0;
+        const balBefore = Math.max(0, rb);
+        balBeforeMap.set(t.id, balBefore);
+        const rawAfter = Math.round((rb + adv - exp) * 100) / 100;
+        balMap.set(t.id, Math.max(0, rawAfter));
+        needToPayMap.set(t.id, rawAfter < 0 ? Math.abs(rawAfter) : 0);
+        rb = Math.max(0, rawAfter);
+      });
+      const tripRows: any[] = trips.map((t, i) => {
+        const balBefore = balBeforeMap.get(t.id) ?? 0;
+        const balAfter = balMap.get(t.id) ?? 0;
+        const needToPay = needToPayMap.get(t.id) ?? 0;
+        const adv = parseFloat(String(t.advance_paid || 0));
+        const exp = parseFloat(String(t.total_expenses || 0));
+        const taken = balBefore > 0 ? Math.min(balBefore, Math.max(0, exp - adv)) : 0;
+        const isSettled = (t as any).settlement_status === 'SETTLED';
+        return {
+          'S.No': i + 1,
+          'Trip ID': `TRIP-${t.id}`,
+          'Trip Date': formatISTDate(t.trip_date),
+          'Driver Name': d.driver_name,
+          'Vehicle / Lorry': t.lorry_number || '—',
+          'Party': t.party_name || '—',
+          'Route': t.from_location && t.to_location ? `${t.from_location} → ${t.to_location}` : '—',
+          'Goods Weight': t.goods_weight ? `${t.goods_weight} ${t.unit_abbreviation || 'MT'}` : '—',
+          'Total Freight (₹)': parseFloat(String(t.total_freight || 0)),
+          'Prior In Hand (₹)': balBefore,
+          'Advance Paid (₹)': adv,
+          'Trip Expenses (₹)': exp,
+          'Already in Hand Taken (₹)': taken,
+          'Driver Balance (₹)': needToPay > 0 ? (isSettled ? `Paid: ₹${needToPay.toFixed(2)}` : `Need to Pay: ₹${needToPay.toFixed(2)}`) : `In Hand: ₹${balAfter.toFixed(2)}`,
+          'Status': isSettled ? 'Settled' : (t as any).settlement_status === 'PENDING' ? 'Settlement Pending' : (t as any).settlement_status === 'VERIFIED' ? 'Verified (Pending)' : (balAfter > 0 ? 'Cash in Hand' : 'Settled'),
+        };
+      });
+      tripRows.push({});
+      tripRows.push({
+        'S.No': 'TOTAL', 'Trip ID': `${trips.length} Trips`, 'Trip Date': '', 'Driver Name': '',
+        'Vehicle / Lorry': '', 'Party': '', 'Route': '', 'Goods Weight': '',
+        'Total Freight (₹)': trips.reduce((s, t) => s + (parseFloat(String(t.total_freight || 0)) || 0), 0),
+        'Advance Paid (₹)': trips.reduce((s, t) => s + (parseFloat(String(t.advance_paid || 0)) || 0), 0),
+        'Trip Expenses (₹)': trips.reduce((s, t) => s + (parseFloat(String(t.total_expenses || 0)) || 0), 0),
+        'Driver Balance (₹)': sortedTrips.length > 0 ? (balMap.get(sortedTrips[sortedTrips.length - 1]?.id) ?? 0) : 0,
+        'Status': '',
+      });
+      const ws = XLSX.utils.json_to_sheet(tripRows);
+      ws['!cols'] = [{ wch: 6 }, { wch: 12 }, { wch: 14 }, { wch: 20 }, { wch: 16 }, { wch: 22 }, { wch: 24 }, { wch: 16 }, { wch: 18 }, { wch: 16 }, { wch: 18 }, { wch: 16 }, { wch: 16 }];
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, 'Trips & Settlements');
+      const safeDriver = d.driver_name.replace(/[^\w\s-]/g, '').trim().replace(/\s+/g, '_');
+      XLSX.writeFile(wb, `KSP_Trips_${safeDriver}_${new Date().toISOString().slice(0, 10)}.xlsx`);
+    } catch (err: any) {
+      alert(err.message || 'Failed to download trips Excel.');
+    } finally {
+      setDownloadingDriverId(null);
+    }
+  };
+
   // ── Single Driver Statement: Print / Save as PDF ───────────────────
   const handlePrintSingleDriverStatement = async (d: DriverAdvanceSummary) => {
     try {
@@ -919,6 +1037,226 @@ export const DriverAdvancesPage: React.FC = () => {
     }
   };
 
+  // ── Tab-Aware: Print Advances Only ─────────────────────────────────
+  const handlePrintDriverAdvancesOnly = async (d: DriverAdvanceSummary) => {
+    try {
+      setPrintingDriverId(d.driver_id);
+      const { advances } = await getOrFetchDriverDetails(d.driver_id);
+      const totalAdv = advances.reduce((s, a) => s + (parseFloat(String(a.amount || 0)) || 0), 0);
+      const html = `<!DOCTYPE html><html><head><meta charset="utf-8"/>
+      <title>KSP Advance Statement - ${d.driver_name}</title>
+      <style>
+        *{box-sizing:border-box;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+        body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;margin:0;padding:24px;color:#1e293b;background:#fff;font-size:11.5px}
+        @page{size:portrait;margin:10mm}
+        .box{border:2px solid #0f172a;border-radius:8px;padding:20px;max-width:850px;margin:0 auto}
+        .hdr{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:2px solid #0f172a;padding-bottom:12px;margin-bottom:14px}
+        .t1{font-size:22px;font-weight:800;color:#0f172a;margin:0 0 2px}
+        .t2{font-size:12px;font-weight:700;color:#2563eb;text-transform:uppercase}
+        .tag-v{background:#eff6ff;color:#1d4ed8;padding:4px 10px;border-radius:6px;font-weight:800;font-size:13px;border:1px solid #bfdbfe}
+        table{width:100%;border-collapse:collapse;font-size:11px;margin-top:6px;margin-bottom:12px}
+        th,td{padding:6px 8px;border:1px solid #cbd5e1}
+        th{background:#0f172a;color:#fff;font-weight:700;text-align:left}
+        .num{text-align:right} .center{text-align:center}
+        .pbar{display:flex;justify-content:flex-end;gap:10px;max-width:850px;margin:0 auto 14px auto}
+        .btn-p{background:#2563eb;color:#fff;border:none;padding:8px 16px;border-radius:6px;font-weight:600;cursor:pointer;font-size:12px}
+        @media print{.pbar{display:none!important};body{padding:0}}
+      </style></head><body>
+      <div class="pbar">
+        <button class="btn-p" onclick="window.print()">Print / Save as PDF</button>
+        <button class="btn-p" style="background:#64748b" onclick="window.close()">Close</button>
+      </div>
+      <div class="box">
+        <div class="hdr">
+          <div>
+            <h1 class="t1">KSP TRANSPORT &amp; LOGISTICS</h1>
+            <div class="t2">Driver Advance Received Statement</div>
+            <div style="font-size:11px;color:#64748b;margin-top:3px">Driver: <strong>${d.driver_name}</strong> &bull; Lorry: ${d.lorry_number || '—'}</div>
+          </div>
+          <div style="text-align:right">
+            <div class="tag-v">DRIVER #${d.driver_id}</div>
+            <div style="margin-top:4px;font-weight:700;color:#4338ca;font-size:12px">Generated: ${formatIST(new Date())}</div>
+          </div>
+        </div>
+        <div style="font-size:12px;font-weight:800;color:#0f172a;text-transform:uppercase;margin-bottom:6px;padding-bottom:4px;border-bottom:1px solid #cbd5e1">Itemized Advance Disbursements (Manager → Driver)</div>
+        ${advances.length === 0 ? `<div style="padding:10px;text-align:center;color:#94a3b8;border:1px dashed #cbd5e1;border-radius:4px">No advance records found.</div>` : `
+          <table>
+            <thead><tr>
+              <th class="center" style="width:30px">#</th>
+              <th>Date &amp; Time (IST)</th>
+              <th>Disbursed By (Manager)</th>
+              <th>Vehicle / Lorry</th>
+              <th class="center">Mode</th>
+              <th class="num" style="width:110px">Amount (₹)</th>
+              <th>Notes / Remarks</th>
+            </tr></thead>
+            <tbody>
+              ${advances.map((a, i) => `
+                <tr>
+                  <td class="center">${i + 1}</td>
+                  <td>${formatAdvanceDateTime(a.advance_date, a.created_at)}</td>
+                  <td><strong>${a.manager_name}</strong></td>
+                  <td>${a.lorry_number || '—'}</td>
+                  <td class="center">${a.payment_mode || 'CASH'}</td>
+                  <td class="num" style="font-weight:700;color:#15803d">₹${parseFloat(String(a.amount || 0)).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td>
+                  <td>${a.notes || '—'}</td>
+                </tr>`).join('')}
+              <tr style="background:#f1f5f9;font-weight:800;border-top:2px solid #0f172a">
+                <td colspan="5" class="num">TOTAL ADVANCE GIVEN TO ${d.driver_name}:</td>
+                <td class="num" style="color:#15803d;font-size:12px">₹${totalAdv.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td>
+                <td></td>
+              </tr>
+            </tbody>
+          </table>`}
+        <div style="display:flex;justify-content:space-between;margin-top:40px;padding-top:10px">
+          <div style="text-align:center;width:170px"><div style="height:32px"></div><div style="border-top:1px solid #64748b;padding-top:4px;font-size:10.5px;font-weight:700;color:#475569">Driver (${d.driver_name})</div></div>
+          <div style="text-align:center;width:170px"><div style="height:32px"></div><div style="border-top:1px solid #64748b;padding-top:4px;font-size:10.5px;font-weight:700;color:#475569">Disbursing Manager</div></div>
+          <div style="text-align:center;width:170px"><div style="height:32px"></div><div style="border-top:1px solid #64748b;padding-top:4px;font-size:10.5px;font-weight:700;color:#475569">Authorized Signatory</div></div>
+        </div>
+      </div>
+      </body></html>`;
+      const win = window.open('', '_blank', 'width=900,height=800');
+      if (!win) { alert('Allow popups to print.'); return; }
+      win.document.open(); win.document.write(html); win.document.close();
+    } catch (err: any) {
+      alert(err.message || 'Failed to print advances.');
+    } finally {
+      setPrintingDriverId(null);
+    }
+  };
+
+  // ── Tab-Aware: Print Trips Only ────────────────────────────────────
+  const handlePrintDriverTripsOnly = async (d: DriverAdvanceSummary) => {
+    try {
+      setPrintingDriverId(d.driver_id);
+      const { advances, trips } = await getOrFetchDriverDetails(d.driver_id);
+      const sortedTrips = [...trips].sort((a, b) => {
+        const dateA = new Date(a.trip_date || 0).getTime();
+        const dateB = new Date(b.trip_date || 0).getTime();
+        if (dateA !== dateB) return dateA - dateB;
+        return (a.id || 0) - (b.id || 0);
+      });
+      const directAdv = (advances || []).filter(a => !a.trip_id).reduce((s, a) => s + (parseFloat(String(a.amount)) || 0), 0);
+      let rb = directAdv;
+      const balMap = new Map<number, number>();
+      const balBeforeMap = new Map<number, number>();
+      const needToPayMap = new Map<number, number>();
+      sortedTrips.forEach(t => {
+        const adv = parseFloat(String(t.advance_paid || 0));
+        const exp = parseFloat(String(t.total_expenses ?? 0)) || 0;
+        const balBefore = Math.max(0, rb);
+        balBeforeMap.set(t.id, balBefore);
+        const rawAfter = Math.round((rb + adv - exp) * 100) / 100;
+        balMap.set(t.id, Math.max(0, rawAfter));
+        needToPayMap.set(t.id, rawAfter < 0 ? Math.abs(rawAfter) : 0);
+        rb = Math.max(0, rawAfter);
+      });
+      const totalExp = trips.reduce((s, t) => s + (parseFloat(String(t.total_expenses || 0)) || 0), 0);
+      const html = `<!DOCTYPE html><html><head><meta charset="utf-8"/>
+      <title>KSP Trips Statement - ${d.driver_name}</title>
+      <style>
+        *{box-sizing:border-box;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+        body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;margin:0;padding:24px;color:#1e293b;background:#fff;font-size:11.5px}
+        @page{size:landscape;margin:8mm}
+        .box{border:2px solid #0f172a;border-radius:8px;padding:20px;max-width:1100px;margin:0 auto}
+        .hdr{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:2px solid #0f172a;padding-bottom:12px;margin-bottom:14px}
+        .t1{font-size:22px;font-weight:800;color:#0f172a;margin:0 0 2px}
+        .t2{font-size:12px;font-weight:700;color:#2563eb;text-transform:uppercase}
+        .tag-v{background:#fef3c7;color:#92400e;padding:4px 10px;border-radius:6px;font-weight:800;font-size:13px;border:1px solid #fcd34d}
+        table{width:100%;border-collapse:collapse;font-size:10.5px;margin-top:6px;margin-bottom:12px}
+        th,td{padding:5px 7px;border:1px solid #cbd5e1}
+        th{background:#0f172a;color:#fff;font-weight:700;text-align:left}
+        .num{text-align:right} .center{text-align:center}
+        .pbar{display:flex;justify-content:flex-end;gap:10px;max-width:1100px;margin:0 auto 14px auto}
+        .btn-p{background:#2563eb;color:#fff;border:none;padding:8px 16px;border-radius:6px;font-weight:600;cursor:pointer;font-size:12px}
+        @media print{.pbar{display:none!important};body{padding:0}}
+      </style></head><body>
+      <div class="pbar">
+        <button class="btn-p" onclick="window.print()">Print / Save as PDF</button>
+        <button class="btn-p" style="background:#64748b" onclick="window.close()">Close</button>
+      </div>
+      <div class="box">
+        <div class="hdr">
+          <div>
+            <h1 class="t1">KSP TRANSPORT &amp; LOGISTICS</h1>
+            <div class="t2">Trips &amp; Settlements Statement</div>
+            <div style="font-size:11px;color:#64748b;margin-top:3px">Driver: <strong>${d.driver_name}</strong> &bull; Lorry: ${d.lorry_number || '—'}</div>
+          </div>
+          <div style="text-align:right">
+            <div class="tag-v">DRIVER #${d.driver_id}</div>
+            <div style="margin-top:4px;font-weight:700;color:#4338ca;font-size:12px">Generated: ${formatIST(new Date())}</div>
+          </div>
+        </div>
+        <div style="font-size:12px;font-weight:800;color:#0f172a;text-transform:uppercase;margin-bottom:6px;padding-bottom:4px;border-bottom:1px solid #cbd5e1">Trip History &amp; Driver Expense Settlements</div>
+        ${trips.length === 0 ? `<div style="padding:10px;text-align:center;color:#94a3b8;border:1px dashed #cbd5e1;border-radius:4px">No trip records found.</div>` : `
+          <table>
+            <thead><tr>
+              <th class="center" style="width:28px">#</th>
+              <th>Trip ID</th>
+              <th>Trip Date</th>
+              <th>Vehicle</th>
+              <th>Party &amp; Route</th>
+              <th class="num">Freight (₹)</th>
+              <th class="num">Adv. Paid (₹)</th>
+              <th class="num">Expenses (₹)</th>
+              <th class="num">Bal. (₹)</th>
+              <th class="center">Status</th>
+            </tr></thead>
+            <tbody>
+              ${trips.map((t, i) => {
+                const trBal = balMap.get(t.id) ?? 0;
+                return `<tr>
+                  <td class="center">${i + 1}</td>
+                  <td><strong>TRIP-${t.id}</strong></td>
+                  <td>${formatISTDate(t.trip_date)}</td>
+                  <td>${t.lorry_number || '—'}</td>
+                  <td>${t.party_name || '—'}${t.to_location ? ` (${t.to_location})` : ''}</td>
+                  <td class="num">₹${parseFloat(String(t.total_freight || 0)).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td>
+                  <td class="num">
+                    ₹${parseFloat(String(t.advance_paid || 0)).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                    ${(balBeforeMap.get(t.id) ?? 0) > 0 ? `<div style="font-size:9px;color:#1d4ed8">+In Hand: ₹${(balBeforeMap.get(t.id) ?? 0).toLocaleString('en-IN')}</div>` : ''}
+                  </td>
+                  <td class="num" style="font-weight:700;color:#b45309">
+                    ₹${parseFloat(String(t.total_expenses || 0)).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                    ${(balBeforeMap.get(t.id) ?? 0) > 0 ? `<div style="font-size:9px;color:#475569">Taken: ₹${Math.min(balBeforeMap.get(t.id) ?? 0, Math.max(0, parseFloat(String(t.total_expenses || 0)) - parseFloat(String(t.advance_paid || 0)))).toLocaleString('en-IN')}</div>` : ''}
+                  </td>
+                  <td class="num" style="font-weight:700;color:${(needToPayMap.get(t.id) ?? 0) > 0 ? '#dc2626' : (trBal > 0 ? '#1d4ed8' : '#16a34a')}">
+                    ${(needToPayMap.get(t.id) ?? 0) > 0 ? `<div>₹${(needToPayMap.get(t.id) ?? 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</div><div style="font-size:8.5px;color:#b91c1c">${(t as any).settlement_status === 'SETTLED' ? 'Paid' : 'Need to Pay'}</div>` : `<div>₹${trBal.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</div><div style="font-size:8.5px;color:#1d4ed8">In Hand</div>`}
+                  </td>
+                  <td class="center"><span style="font-size:9.5px;font-weight:700;padding:2px 6px;border-radius:4px;background:${
+                    (t as any).settlement_status === 'PENDING' ? '#fef3c7' : (t as any).settlement_status === 'VERIFIED' ? '#ede9fe' : (t as any).settlement_status === 'SETTLED' ? '#dcfce7' : trBal > 0 ? '#eff6ff' : '#dcfce7'
+                  };color:${
+                    (t as any).settlement_status === 'PENDING' ? '#b45309' : (t as any).settlement_status === 'VERIFIED' ? '#6d28d9' : (t as any).settlement_status === 'SETTLED' ? '#166534' : trBal > 0 ? '#1d4ed8' : '#166534'
+                  }">${
+                    (t as any).settlement_status === 'PENDING' ? 'Pending' : (t as any).settlement_status === 'VERIFIED' ? 'Verified' : (t as any).settlement_status === 'SETTLED' ? '✓ Settled' : trBal > 0 ? 'Cash in Hand' : 'Settled'
+                  }</span></td>
+                </tr>`;
+              }).join('')}
+              <tr style="background:#f1f5f9;font-weight:800;border-top:2px solid #0f172a">
+                <td colspan="7" class="num">TOTAL TRIP EXPENSES:</td>
+                <td class="num" style="color:#b45309;font-size:12px">₹${totalExp.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td>
+                <td class="num" style="color:#1d4ed8;font-size:12px">₹${(sortedTrips.length > 0 ? (balMap.get(sortedTrips[sortedTrips.length - 1]?.id) ?? 0) : 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td>
+                <td></td>
+              </tr>
+            </tbody>
+          </table>`}
+        <div style="display:flex;justify-content:space-between;margin-top:30px;padding-top:10px">
+          <div style="text-align:center;width:170px"><div style="height:32px"></div><div style="border-top:1px solid #64748b;padding-top:4px;font-size:10.5px;font-weight:700;color:#475569">Driver (${d.driver_name})</div></div>
+          <div style="text-align:center;width:170px"><div style="height:32px"></div><div style="border-top:1px solid #64748b;padding-top:4px;font-size:10.5px;font-weight:700;color:#475569">Trip Manager</div></div>
+          <div style="text-align:center;width:170px"><div style="height:32px"></div><div style="border-top:1px solid #64748b;padding-top:4px;font-size:10.5px;font-weight:700;color:#475569">Authorized Signatory</div></div>
+        </div>
+      </div>
+      </body></html>`;
+      const win = window.open('', '_blank', 'width=1100,height=820');
+      if (!win) { alert('Allow popups to print.'); return; }
+      win.document.open(); win.document.write(html); win.document.close();
+    } catch (err: any) {
+      alert(err.message || 'Failed to print trips.');
+    } finally {
+      setPrintingDriverId(null);
+    }
+  };
+
   // ── Single Advance Disbursement Voucher: Download Excel ───────────
   const handleDownloadSingleAdvanceExcel = (a: DriverAdvance) => {
     try {
@@ -1078,6 +1416,252 @@ export const DriverAdvancesPage: React.FC = () => {
       win.document.open(); win.document.write(singleHtml); win.document.close();
     } catch (err: any) {
       alert(err.message || 'Failed to print advance voucher.');
+    }
+  };
+
+  // ── Single Trip Excel Download (from Trips & Settlements sub-tab) ─
+  const handleDownloadSingleTripExcel = (t: Trip, driverName: string) => {
+    try {
+      setDownloadingExcelTripId(t.id);
+      const freight = parseFloat(String(t.total_freight)) || 0;
+      const advance = parseFloat(String(t.advance_paid)) || 0;
+      const expenses = parseFloat(String(t.total_expenses ?? 0)) || 0;
+      const prevInHand = parseFloat(String(t.previous_driver_balance || 0));
+      const totalAvail = prevInHand + advance;
+      const diff = totalAvail - expenses;
+      const takenFromHand = prevInHand > 0 ? Math.min(prevInHand, Math.max(0, expenses - advance)) : 0;
+      const isSettled = (t as any).settlement_status === 'SETTLED';
+
+      const rows: any[] = [
+        { Detail: 'TRIP ID',                    Value: `TRIP-${t.id}` },
+        { Detail: 'TRIP DATE',                  Value: formatISTDate(t.trip_date) },
+        { Detail: 'DRIVER NAME',                Value: driverName },
+        { Detail: 'LORRY NUMBER',               Value: t.lorry_number || '—' },
+        { Detail: 'PARTY NAME',                 Value: t.party_name || '—' },
+        { Detail: 'ROUTE (FROM)',               Value: t.from_location || '—' },
+        { Detail: 'ROUTE (TO)',                 Value: t.to_location || '—' },
+        { Detail: 'GOODS WEIGHT',               Value: t.goods_weight ? `${t.goods_weight} ${t.unit_abbreviation || 'MT'}` : '—' },
+        { Detail: 'FREIGHT RATE (₹)',           Value: parseFloat(String(t.freight_rate || 0)) },
+        { Detail: 'TOTAL FREIGHT (₹)',          Value: freight },
+        { Detail: 'PRIOR ADVANCE IN HAND (₹)',  Value: prevInHand },
+        { Detail: 'TRIP ADVANCE PAID (₹)',      Value: advance },
+        { Detail: 'TOTAL ADVANCE AVAILABLE (₹)',Value: totalAvail },
+        { Detail: 'TRIP EXPENSES (₹)',          Value: expenses },
+        { Detail: 'ALREADY IN HAND TAKEN (₹)',  Value: takenFromHand },
+        { Detail: diff < 0 ? (isSettled ? 'PAID TO DRIVER (₹)' : 'BALANCE NEED TO PAY (₹)') : 'BALANCE IN DRIVER HAND (₹)', Value: Math.abs(diff) },
+        { Detail: 'SETTLEMENT STATUS',          Value: (t as any).settlement_status || t.status || '—' },
+      ];
+      const ws = XLSX.utils.json_to_sheet(rows);
+      ws['!cols'] = [{ wch: 36 }, { wch: 40 }];
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, `Trip_${t.id}`);
+      const safeDriver = driverName.replace(/[^\w\s-]/g, '').trim().replace(/\s+/g, '_');
+      XLSX.writeFile(wb, `KSP_Trip_${t.id}_${safeDriver}.xlsx`);
+    } catch (err: any) {
+      alert(err.message || 'Failed to download trip Excel.');
+    } finally {
+      setDownloadingExcelTripId(null);
+    }
+  };
+
+  // ── Single Trip PDF Download (from Trips & Settlements sub-tab) ───
+  const handleDownloadSingleTripPdf = async (t: Trip, driverName: string) => {
+    try {
+      setDownloadingPdfTripId(t.id);
+      const { jsPDF } = await import('jspdf');
+      const html2canvas = (await import('html2canvas')).default;
+
+      const freight = parseFloat(String(t.total_freight)) || 0;
+      const advance = parseFloat(String(t.advance_paid)) || 0;
+      const expenses = parseFloat(String(t.total_expenses ?? 0)) || 0;
+      const prevInHand = parseFloat(String(t.previous_driver_balance || 0));
+      const totalAvail = prevInHand + advance;
+      const diff = totalAvail - expenses;
+      const takenFromHand = prevInHand > 0 ? Math.min(prevInHand, Math.max(0, expenses - advance)) : 0;
+      const driverBal = Math.max(0, diff);
+      const isSettledTrip = (t as any).settlement_status === 'SETTLED';
+      const freightRate = parseFloat(String(t.freight_rate || 0));
+      const settlementStatus: string = (t as any).settlement_status || t.status || 'PENDING';
+      const tripDateStr = formatISTDate(t.trip_date);
+      const todayStr = formatISTDate(new Date().toISOString());
+
+      let statusStyle = 'background:#fef3c7;color:#b45309;border:1px solid #fcd34d;';
+      let statusText = 'SETTLEMENT PENDING';
+      if (settlementStatus === 'SETTLED') {
+        statusStyle = 'background:#dcfce7;color:#15803d;border:1px solid #86efac;';
+        statusText = 'SETTLED';
+      } else if (settlementStatus === 'VERIFIED') {
+        statusStyle = 'background:#ede9fe;color:#6d28d9;border:1px solid #c4b5fd;';
+        statusText = 'VERIFIED (PENDING)';
+      } else if (settlementStatus === 'CANCELLED' || t.status === 'CANCELLED') {
+        statusStyle = 'background:#f1f5f9;color:#64748b;border:1px solid #cbd5e1;';
+        statusText = 'CANCELLED';
+      }
+
+      const voucherHtml = `
+        <div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#0f172a;background:#fff;width:730px;margin:0 auto;box-sizing:border-box;">
+          <div style="border:2px solid #1e3a8a;border-radius:8px;padding:20px 22px;background:#fff;box-sizing:border-box;">
+
+            <!-- Top bar -->
+            <table style="width:100%;border-bottom:2.5px solid #1e3a8a;padding-bottom:12px;margin-bottom:14px;border-collapse:collapse;">
+              <tr>
+                <td style="width:58%;vertical-align:top;">
+                  <div style="font-size:22px;font-weight:900;color:#1e3a8a;">K.S.P. TRANSPORT</div>
+                  <div style="font-size:10.5px;font-weight:700;color:#b45309;text-transform:uppercase;margin-top:3px;">Professional Heavy Freight &amp; Logistics Services</div>
+                  <div style="font-size:10px;color:#475569;margin-top:4px;line-height:1.45;">
+                    Head Office: Namakkal / Salem Highway, Tamil Nadu<br/>
+                    Registered Transport Carrier &bull; Phone: +91 98765 43210
+                  </div>
+                </td>
+                <td style="width:42%;vertical-align:top;text-align:right;">
+                  <div style="font-size:15px;font-weight:900;color:#1e3a8a;text-transform:uppercase;">DRIVER TRIP SETTLEMENT</div>
+                  <div style="font-size:10px;color:#64748b;margin-top:3px;font-weight:600;">Trip Advance &amp; Expense Summary Record</div>
+                </td>
+              </tr>
+            </table>
+
+            <!-- Reference table -->
+            <table style="width:100%;border-collapse:collapse;margin-bottom:16px;border:1.5px solid #1e3a8a;font-size:11px;">
+              <tbody>
+                <tr>
+                  <td style="width:18%;background:#eff6ff;font-weight:700;color:#1e3a8a;padding:7px 10px;border:1px solid #bfdbfe;">TRIP ID</td>
+                  <td style="width:32%;font-weight:900;color:#0f172a;padding:7px 10px;border:1px solid #bfdbfe;font-size:13px;">TRIP-${t.id}</td>
+                  <td style="width:18%;background:#eff6ff;font-weight:700;color:#1e3a8a;padding:7px 10px;border:1px solid #bfdbfe;">TRIP DATE</td>
+                  <td style="width:32%;font-weight:900;color:#1d4ed8;padding:7px 10px;border:1px solid #bfdbfe;font-size:13px;">${tripDateStr}</td>
+                </tr>
+                <tr>
+                  <td style="background:#f8fafc;font-weight:700;color:#475569;padding:7px 10px;border:1px solid #cbd5e1;">DRIVER NAME</td>
+                  <td style="font-weight:800;color:#0f172a;padding:7px 10px;border:1px solid #cbd5e1;">${driverName}</td>
+                  <td style="background:#f8fafc;font-weight:700;color:#475569;padding:7px 10px;border:1px solid #cbd5e1;">SETTLEMENT STATUS</td>
+                  <td style="padding:7px 10px;border:1px solid #cbd5e1;">
+                    <span style="display:inline-block;font-size:10.5px;font-weight:800;padding:2px 10px;border-radius:3px;text-transform:uppercase;${statusStyle}">${statusText}</span>
+                  </td>
+                </tr>
+                <tr>
+                  <td style="background:#f8fafc;font-weight:700;color:#475569;padding:6px 10px;border:1px solid #cbd5e1;">ISSUE DATE</td>
+                  <td style="font-weight:600;color:#334155;padding:6px 10px;border:1px solid #cbd5e1;">${todayStr}</td>
+                  <td style="background:#f8fafc;font-weight:700;color:#475569;padding:6px 10px;border:1px solid #cbd5e1;">LORRY NUMBER</td>
+                  <td style="padding:6px 10px;border:1px solid #cbd5e1;">
+                    <span style="background:#f1f5f9;border:1px solid #94a3b8;padding:2px 6px;border-radius:3px;font-family:monospace;font-weight:800;font-size:11px;">${t.lorry_number || '—'}</span>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+
+            <!-- Trip Details -->
+            <div style="font-size:11.5px;font-weight:800;color:#1e3a8a;text-transform:uppercase;margin-bottom:6px;">1. Trip &amp; Party Details</div>
+            <table style="width:100%;border-collapse:collapse;margin-bottom:16px;border:1px solid #cbd5e1;font-size:10.5px;">
+              <tbody>
+                <tr>
+                  <td style="width:20%;background:#f8fafc;font-weight:700;color:#475569;padding:6px 9px;border:1px solid #cbd5e1;">PARTY NAME</td>
+                  <td style="width:30%;font-weight:800;color:#0f172a;padding:6px 9px;border:1px solid #cbd5e1;">${t.party_name || '—'}</td>
+                  <td style="width:20%;background:#f8fafc;font-weight:700;color:#475569;padding:6px 9px;border:1px solid #cbd5e1;">ROUTE</td>
+                  <td style="width:30%;font-weight:600;color:#0f172a;padding:6px 9px;border:1px solid #cbd5e1;">${t.from_location || '—'} ➔ ${t.to_location || '—'}</td>
+                </tr>
+                <tr>
+                  <td style="background:#f8fafc;font-weight:700;color:#475569;padding:6px 9px;border:1px solid #cbd5e1;">GOODS / WEIGHT</td>
+                  <td style="font-weight:600;color:#0f172a;padding:6px 9px;border:1px solid #cbd5e1;">${t.goods_weight ? `${t.goods_weight} ${t.unit_abbreviation || 'MT'}` : '—'}</td>
+                  <td style="background:#f8fafc;font-weight:700;color:#475569;padding:6px 9px;border:1px solid #cbd5e1;">FREIGHT RATE</td>
+                  <td style="font-weight:600;color:#0f172a;padding:6px 9px;border:1px solid #cbd5e1;">₹${freightRate.toFixed(2)} / unit</td>
+                </tr>
+              </tbody>
+            </table>
+
+            <!-- Financial Summary -->
+            <div style="font-size:11.5px;font-weight:800;color:#1e3a8a;text-transform:uppercase;margin-bottom:6px;">2. Financial Summary</div>
+            <table style="width:100%;border-collapse:separate;border-spacing:10px 0;margin-bottom:16px;margin-left:-10px;">
+              <tr>
+                <td style="width:25%;border:1px solid #cbd5e1;border-top:3px solid #1e3a8a;border-radius:4px;padding:8px 12px;background:#f8fafc;vertical-align:top;">
+                  <div style="font-size:9.5px;font-weight:700;color:#64748b;text-transform:uppercase;">Total Freight</div>
+                  <div style="font-size:16px;font-weight:900;color:#1e3a8a;margin-top:2px;">₹${freight.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</div>
+                  <div style="font-size:9px;color:#64748b;margin-top:2px;">Gross trip freight</div>
+                </td>
+                <td style="width:25%;border:1px solid #fde68a;border-top:3px solid #d97706;border-radius:4px;padding:8px 12px;background:#fffbeb;vertical-align:top;">
+                  <div style="font-size:9.5px;font-weight:700;color:#b45309;text-transform:uppercase;">Advance Available</div>
+                  <div style="font-size:16px;font-weight:900;color:#d97706;margin-top:2px;">₹${totalAvail.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</div>
+                  <div style="font-size:9px;color:#b45309;margin-top:2px;">${prevInHand > 0 ? `Trip: ₹${advance.toFixed(0)} + In Hand: ₹${prevInHand.toFixed(0)}` : 'Given for trip'}</div>
+                </td>
+                <td style="width:25%;border:1px solid #fecaca;border-top:3px solid #dc2626;border-radius:4px;padding:8px 12px;background:#fef2f2;vertical-align:top;">
+                  <div style="font-size:9.5px;font-weight:700;color:#b91c1c;text-transform:uppercase;">Trip Expenses</div>
+                  <div style="font-size:16px;font-weight:900;color:#dc2626;margin-top:2px;">₹${expenses.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</div>
+                  <div style="font-size:9px;color:#b91c1c;margin-top:2px;">${takenFromHand > 0 ? `In-hand taken: ₹${takenFromHand.toFixed(0)}` : 'Loading, toll, misc.'}</div>
+                </td>
+                <td style="width:25%;border:1px solid ${diff < 0 ? '#fca5a5' : driverBal > 0 ? '#bfdbfe' : '#bbf7d0'};border-top:3px solid ${diff < 0 ? '#dc2626' : driverBal > 0 ? '#1d4ed8' : '#16a34a'};border-radius:4px;padding:8px 12px;background:${diff < 0 ? '#fef2f2' : driverBal > 0 ? '#eff6ff' : '#f0fdf4'};vertical-align:top;">
+                  <div style="font-size:9.5px;font-weight:700;color:${diff < 0 ? '#dc2626' : driverBal > 0 ? '#1d4ed8' : '#15803d'};text-transform:uppercase;">Driver Balance</div>
+                  <div style="font-size:16px;font-weight:900;color:${diff < 0 ? '#dc2626' : driverBal > 0 ? '#1d4ed8' : '#15803d'};margin-top:2px;">₹${Math.abs(diff).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</div>
+                  <div style="font-size:9px;font-weight:700;color:${diff < 0 ? '#dc2626' : driverBal > 0 ? '#1d4ed8' : '#15803d'};margin-top:2px;">${diff < 0 ? (isSettledTrip ? 'Paid to Driver' : 'Balance Need to Pay') : (driverBal > 0 ? 'Remaining Cash in Hand' : 'Fully Settled')}</div>
+                </td>
+              </tr>
+            </table>
+
+            <!-- Signatures -->
+            <table style="width:100%;margin-top:22px;border-top:1px dashed #cbd5e1;padding-top:18px;">
+              <tr>
+                <td style="width:50%;vertical-align:top;">
+                  <div style="font-size:10.5px;font-weight:700;color:#334155;margin-bottom:40px;">Driver Signature:</div>
+                  <div style="border-top:1px solid #64748b;width:180px;padding-top:3px;font-size:9.5px;color:#64748b;">Driver: ${driverName}</div>
+                </td>
+                <td style="width:50%;vertical-align:top;text-align:right;">
+                  <div style="font-size:10.5px;font-weight:700;color:#334155;margin-bottom:40px;">For K.S.P. TRANSPORT:</div>
+                  <div style="border-top:1px solid #64748b;width:180px;margin-left:auto;padding-top:3px;font-size:9.5px;color:#64748b;text-align:center;">Authorized Signatory</div>
+                </td>
+              </tr>
+            </table>
+
+            <!-- Footer -->
+            <div style="margin-top:16px;padding-top:6px;border-top:1px solid #e2e8f0;display:flex;justify-content:space-between;font-size:9px;color:#94a3b8;">
+              <span>Generated by KSP Service Management ERP &bull; Official Document</span>
+              <span>Printed on ${new Date().toLocaleString('en-IN')}</span>
+            </div>
+          </div>
+        </div>
+      `;
+
+      const RENDER_WIDTH = 794;
+      const container = document.createElement('div');
+      container.style.cssText = `position:fixed;left:-9999px;top:0;width:${RENDER_WIDTH}px;background:#fff;padding:24px 28px;box-sizing:border-box;z-index:-9999;`;
+      container.innerHTML = voucherHtml;
+      document.body.appendChild(container);
+
+      if (document.fonts && document.fonts.ready) await document.fonts.ready;
+      await new Promise(r => setTimeout(r, 150));
+
+      const canvas = await html2canvas(container, {
+        scale: 2, useCORS: true, allowTaint: true, backgroundColor: '#ffffff',
+        logging: false, windowWidth: RENDER_WIDTH,
+      });
+
+      const pdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+      const pageW = pdf.internal.pageSize.getWidth();
+      const pageH = pdf.internal.pageSize.getHeight();
+      const margin = 10;
+      const imgW = pageW - margin * 2;
+      const imgH = (canvas.height * imgW) / canvas.width;
+
+      if (imgH <= pageH - margin * 2) {
+        pdf.addImage(canvas.toDataURL('image/png'), 'PNG', margin, margin, imgW, imgH);
+      } else {
+        let heightLeft = imgH;
+        let position = margin;
+        const maxPageH = pageH - margin * 2;
+        pdf.addImage(canvas.toDataURL('image/png'), 'PNG', margin, position, imgW, imgH);
+        heightLeft -= maxPageH;
+        while (heightLeft > 0) {
+          position = heightLeft - imgH + margin;
+          pdf.addPage();
+          pdf.addImage(canvas.toDataURL('image/png'), 'PNG', margin, position, imgW, imgH);
+          heightLeft -= maxPageH;
+        }
+      }
+
+      const safeDriver = driverName.replace(/[^a-zA-Z0-9]/g, '_');
+      pdf.save(`KSP_Trip_${t.id}_${safeDriver}.pdf`);
+      if (container.parentNode) container.parentNode.removeChild(container);
+    } catch (err: any) {
+      console.error('Failed to generate trip PDF', err);
+      alert('Failed to generate PDF. Please try again.');
+    } finally {
+      setDownloadingPdfTripId(null);
     }
   };
 
@@ -1757,13 +2341,7 @@ export const DriverAdvancesPage: React.FC = () => {
           >
             <HandCoins size={14} /> Owner Advances
           </Link>
-          <button
-            onClick={() => handleOpenCreate()}
-            className="btn btn-primary"
-            style={{ display: 'flex', alignItems: 'center', gap: '6px', height: '36px', fontSize: '12.5px' }}
-          >
-            <Plus size={16} /> Give Advance to Driver
-          </button>
+
         </div>
       </div>
 
@@ -1821,141 +2399,148 @@ export const DriverAdvancesPage: React.FC = () => {
 
       {/* Filter Bar */}
       <div className="card" style={{ padding: '12px 18px', marginBottom: '14px', borderRadius: '8px' }}>
-        <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
+        {/* Row 1: Search + Dropdown Filters */}
+        <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '8px', marginBottom: '10px' }}>
           <div style={{ position: 'relative', width: '210px' }}>
-              <Search size={14} style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', color: '#94a3b8' }} />
-              <input
-                type="text"
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                className="form-control"
-                placeholder="Search driver, mobile..."
-                style={{ paddingLeft: '32px', height: '36px', fontSize: '12.5px' }}
-              />
-            </div>
-
-            <select
-              value={driverFilter}
-              onChange={(e) => setDriverFilter(e.target.value)}
+            <Search size={14} style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', color: '#94a3b8' }} />
+            <input
+              type="text"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
               className="form-control"
-              style={{ height: '36px', width: '160px', fontSize: '12.5px' }}
-            >
-              <option value="">All Drivers</option>
-              {drivers.map((d) => (
-                <option key={d.id} value={d.id}>
-                  {d.name} {d.mobile_number ? `(${d.mobile_number})` : ''}
-                </option>
-              ))}
-            </select>
-
-            <select
-              value={vehicleFilter}
-              onChange={(e) => setVehicleFilter(e.target.value)}
-              className="form-control"
-              style={{ height: '36px', width: '150px', fontSize: '12.5px' }}
-            >
-              <option value="">All Lorries</option>
-              {vehicles.map((v) => (
-                <option key={v.id} value={v.id}>
-                  {v.lorry_number}
-                </option>
-              ))}
-            </select>
-
-            {activeView === 'ledger' && (
-              <select
-                value={statusFilter}
-                onChange={(e) => setStatusFilter(e.target.value)}
-                className="form-control"
-                style={{ height: '36px', width: '175px', fontSize: '12.5px' }}
-              >
-                <option value="">All Status</option>
-                <option value="SETTLED">✓ Settled Only</option>
-                <option value="PENDING">⏳ Settlement Pending Only</option>
-                <option value="CASH_IN_HAND">💵 Cash in Hand Only</option>
-              </select>
-            )}
-
-            {activeView === 'transactions' && (
-              <>
-                <select
-                  value={managerFilter}
-                  onChange={(e) => setManagerFilter(e.target.value)}
-                  className="form-control"
-                  style={{ height: '36px', width: '150px', fontSize: '12.5px' }}
-                >
-                  <option value="">All Managers</option>
-                  {managers.map((m) => (
-                    <option key={m.id} value={m.id}>
-                      {m.name}
-                    </option>
-                  ))}
-                </select>
-
-                <select
-                  value={paymentModeFilter}
-                  onChange={(e) => setPaymentModeFilter(e.target.value)}
-                  className="form-control"
-                  style={{ height: '36px', width: '130px', fontSize: '12.5px' }}
-                >
-                  <option value="">All Modes</option>
-                  <option value="CASH">Cash</option>
-                  <option value="UPI">UPI</option>
-                  <option value="BANK_TRANSFER">Bank Transfer</option>
-                </select>
-
-                <DateField
-                  style={{ width: '130px', height: '36px', fontSize: '12px' }}
-                  value={fromDate}
-                  onChange={(e) => setFromDate(e.target.value)}
-                  placeholder="From Date"
-                />
-                <DateField
-                  style={{ width: '130px', height: '36px', fontSize: '12px' }}
-                  value={toDate}
-                  onChange={(e) => setToDate(e.target.value)}
-                  placeholder="To Date"
-                />
-              </>
-            )}
-
-            <button onClick={resetFilters} className="btn btn-outline" style={{ height: '36px', display: 'flex', alignItems: 'center', gap: '5px', fontSize: '12.5px' }}>
-              <RefreshCw size={13} /> Reset
-            </button>
-
-            {/* Quick Print & Download buttons right in toolbar */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <button
-              onClick={handlePrint}
-              disabled={isPrinting}
-              className="btn btn-outline"
-              title="Print Ledger Report"
-              style={{ height: '36px', display: 'flex', alignItems: 'center', gap: '5px', fontSize: '12.5px', color: '#1d4ed8', borderColor: '#bfdbfe', background: '#eff6ff', fontWeight: 600 }}
-            >
-              {isPrinting ? <Loader2 size={13} className="animate-spin" /> : <Printer size={13} />}
-              Print
-            </button>
-            <button
-              onClick={handleExportExcel}
-              disabled={isExportingExcel}
-              className="btn btn-outline"
-              title="Download Excel Workbook"
-              style={{ height: '36px', display: 'flex', alignItems: 'center', gap: '5px', fontSize: '12.5px', color: '#059669', borderColor: '#a7f3d0', background: '#ecfdf5', fontWeight: 600, padding: '0 12px' }}
-            >
-              {isExportingExcel ? <Loader2 size={13} className="animate-spin" /> : <FileSpreadsheet size={13} />}
-              Excel
-            </button>
-            <button
-              onClick={handleExportCSV}
-              disabled={isExportingCSV}
-              className="btn btn-outline"
-              title="Download CSV"
-              style={{ height: '36px', display: 'flex', alignItems: 'center', gap: '5px', fontSize: '12.5px', padding: '0 10px' }}
-            >
-              {isExportingCSV ? <Loader2 size={13} className="animate-spin" /> : <Download size={13} />}
-              CSV
-            </button>
+              placeholder="Search driver, mobile..."
+              style={{ paddingLeft: '32px', height: '36px', fontSize: '12.5px' }}
+            />
           </div>
+
+          <select
+            value={driverFilter}
+            onChange={(e) => setDriverFilter(e.target.value)}
+            className="form-control"
+            style={{ height: '36px', width: '160px', fontSize: '12.5px' }}
+          >
+            <option value="">All Drivers</option>
+            {drivers.map((d) => (
+              <option key={d.id} value={d.id}>
+                {d.name} {d.mobile_number ? `(${d.mobile_number})` : ''}
+              </option>
+            ))}
+          </select>
+
+          <select
+            value={vehicleFilter}
+            onChange={(e) => setVehicleFilter(e.target.value)}
+            className="form-control"
+            style={{ height: '36px', width: '150px', fontSize: '12.5px' }}
+          >
+            <option value="">All Lorries</option>
+            {vehicles.map((v) => (
+              <option key={v.id} value={v.id}>
+                {v.lorry_number}
+              </option>
+            ))}
+          </select>
+
+          {activeView === 'ledger' && (
+            <select
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value)}
+              className="form-control"
+              style={{ height: '36px', width: '175px', fontSize: '12.5px' }}
+            >
+              <option value="">All Status</option>
+              <option value="SETTLED">✓ Settled Only</option>
+              <option value="PENDING">⏳ Settlement Pending Only</option>
+              <option value="CASH_IN_HAND">💵 Cash in Hand Only</option>
+            </select>
+          )}
+
+          {activeView === 'transactions' && (
+            <>
+              <select
+                value={managerFilter}
+                onChange={(e) => setManagerFilter(e.target.value)}
+                className="form-control"
+                style={{ height: '36px', width: '150px', fontSize: '12.5px' }}
+              >
+                <option value="">All Managers</option>
+                {managers.map((m) => (
+                  <option key={m.id} value={m.id}>
+                    {m.name}
+                  </option>
+                ))}
+              </select>
+
+              <select
+                value={paymentModeFilter}
+                onChange={(e) => setPaymentModeFilter(e.target.value)}
+                className="form-control"
+                style={{ height: '36px', width: '130px', fontSize: '12.5px' }}
+              >
+                <option value="">All Modes</option>
+                <option value="CASH">Cash</option>
+                <option value="UPI">UPI</option>
+                <option value="BANK_TRANSFER">Bank Transfer</option>
+              </select>
+            </>
+          )}
+        </div>
+
+        {/* Row 2: From Date, To Date, Clear Filters, Print, Excel, CSV */}
+        <div style={{ display: 'flex', alignItems: 'flex-end', flexWrap: 'wrap', gap: '8px' }}>
+          <div>
+            <label style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-muted)', display: 'block', marginBottom: '4px' }}>From Date</label>
+            <DateField
+              style={{ width: '140px', height: '36px', fontSize: '12px' }}
+              value={fromDate}
+              onChange={(e) => { setFromDate(e.target.value); setPage(1); }}
+              placeholder="From Date"
+            />
+          </div>
+          <div>
+            <label style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-muted)', display: 'block', marginBottom: '4px' }}>To Date</label>
+            <DateField
+              style={{ width: '140px', height: '36px', fontSize: '12px' }}
+              value={toDate}
+              onChange={(e) => { setToDate(e.target.value); setPage(1); }}
+              placeholder="To Date"
+            />
+          </div>
+
+          <button onClick={resetFilters} className="btn btn-outline" style={{ height: '36px', display: 'flex', alignItems: 'center', gap: '5px', fontSize: '12.5px' }}>
+            <RefreshCw size={13} /> Clear Filters
+          </button>
+
+          <button
+            onClick={handlePrint}
+            disabled={isPrinting}
+            className="btn btn-outline"
+            title="Print Ledger Report"
+            style={{ height: '36px', display: 'flex', alignItems: 'center', gap: '5px', fontSize: '12.5px', color: '#1d4ed8', borderColor: '#bfdbfe', background: '#eff6ff', fontWeight: 600 }}
+          >
+            {isPrinting ? <Loader2 size={13} className="animate-spin" /> : <Printer size={13} />}
+            Print
+          </button>
+          <button
+            onClick={handleExportExcel}
+            disabled={isExportingExcel}
+            className="btn btn-outline"
+            title="Download Excel Workbook"
+            style={{ height: '36px', display: 'flex', alignItems: 'center', gap: '5px', fontSize: '12.5px', color: '#059669', borderColor: '#a7f3d0', background: '#ecfdf5', fontWeight: 600, padding: '0 12px' }}
+          >
+            {isExportingExcel ? <Loader2 size={13} className="animate-spin" /> : <FileSpreadsheet size={13} />}
+            Excel
+          </button>
+          <button
+            onClick={handleExportCSV}
+            disabled={isExportingCSV}
+            className="btn btn-outline"
+            title="Download CSV"
+            style={{ height: '36px', display: 'flex', alignItems: 'center', gap: '5px', fontSize: '12.5px', padding: '0 10px' }}
+          >
+            {isExportingCSV ? <Loader2 size={13} className="animate-spin" /> : <Download size={13} />}
+            CSV
+          </button>
         </div>
       </div>
 
@@ -1997,6 +2582,8 @@ export const DriverAdvancesPage: React.FC = () => {
                 <tbody>
                   {filteredSummaries.map((d, idx) => {
                     const bal = Math.max(0, parseFloat(String(d.balance_in_hand ?? 0)));
+                    const needToPay = parseFloat(String(d.need_to_pay ?? 0));
+                    const prevInHand = parseFloat(String(d.previous_balance_in_hand ?? 0));
                     const isExpanded = expandedDriverId === d.driver_id;
                     const details = expandedDetails[d.driver_id];
                     const activeSubTab = expandedTab[d.driver_id] || 'advances';
@@ -2099,16 +2686,41 @@ export const DriverAdvancesPage: React.FC = () => {
                               padding: '7px 10px',
                               textAlign: 'right',
                               fontWeight: 800,
-                              fontSize: '12.5px',
-                              color: bal > 0 ? '#1d4ed8' : '#16a34a',
-                              background: bal > 0 ? '#f0f9ff' : '#f0fdf4',
-                              borderLeft: `2px solid ${bal > 0 ? '#3b82f6' : '#22c55e'}`,
+                              fontSize: '12px',
+                              color: needToPay > 0 && d.settlement_status !== 'SETTLED' ? '#dc2626' : (bal > 0 ? '#1d4ed8' : '#16a34a'),
+                              background: needToPay > 0 && d.settlement_status !== 'SETTLED' ? '#fef2f2' : (bal > 0 ? '#f0f9ff' : '#f0fdf4'),
+                              borderLeft: `2px solid ${needToPay > 0 && d.settlement_status !== 'SETTLED' ? '#ef4444' : (bal > 0 ? '#3b82f6' : '#22c55e')}`,
                             }}
                           >
-                            <div>{formatCurrency(bal)}</div>
-                            <div style={{ fontSize: '9.5px', fontWeight: 600, color: bal > 0 ? '#1d4ed8' : (d.settlement_status === 'PENDING' ? '#b45309' : '#16a34a'), marginTop: '1px' }}>
-                              {bal > 0 ? 'Cash in Hand' : (d.settlement_status === 'PENDING' ? 'Settlement Pending' : 'Fully Settled')}
-                            </div>
+                            {needToPay > 0 && d.settlement_status !== 'SETTLED' ? (
+                              <>
+                                {prevInHand > 0 && (
+                                  <div style={{ fontSize: '9.5px', color: '#475569', fontWeight: 600 }}>
+                                    Taken: {formatCurrency(prevInHand)}
+                                  </div>
+                                )}
+                                <div style={{ color: '#dc2626', fontWeight: 800, fontSize: '12.5px' }}>
+                                  {formatCurrency(needToPay)}
+                                </div>
+                                <div style={{ fontSize: '9.5px', fontWeight: 700, color: '#b91c1c', marginTop: '1px' }}>
+                                  Balance Need to Pay
+                                </div>
+                              </>
+                            ) : bal > 0 ? (
+                              <>
+                                <div>{formatCurrency(bal)}</div>
+                                <div style={{ fontSize: '9.5px', fontWeight: 600, color: '#1d4ed8', marginTop: '1px' }}>
+                                  Cash in Hand
+                                </div>
+                              </>
+                            ) : (
+                              <>
+                                <div>₹0.00</div>
+                                <div style={{ fontSize: '9.5px', fontWeight: 600, color: '#16a34a', marginTop: '1px' }}>
+                                  Fully Settled
+                                </div>
+                              </>
+                            )}
                           </td>
                           <td style={{ padding: '7px 10px', textAlign: 'center' }}>
                             {renderDriverStatusBadge(d)}
@@ -2320,33 +2932,41 @@ export const DriverAdvancesPage: React.FC = () => {
                                   </button>
                                 </div>
 
-                                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                                  <button
-                                    type="button"
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      handlePrintSingleDriverStatement(d);
-                                    }}
-                                    disabled={printingDriverId === d.driver_id}
-                                    className="btn btn-sm btn-outline"
-                                    style={{ borderColor: '#3b82f6', color: '#1d4ed8', background: '#eff6ff', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '5px' }}
-                                  >
-                                    {printingDriverId === d.driver_id ? <Loader2 size={13} className="animate-spin" /> : <Printer size={13} />}
-                                    Print Statement
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      handleDownloadSingleDriverExcel(d);
-                                    }}
-                                    disabled={downloadingDriverId === d.driver_id}
-                                    className="btn btn-sm btn-outline"
-                                    style={{ borderColor: '#10b981', color: '#047857', background: '#ecfdf5', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '5px' }}
-                                  >
-                                    {downloadingDriverId === d.driver_id ? <Loader2 size={13} className="animate-spin" /> : <FileSpreadsheet size={13} />}
-                                    Download Excel
-                                  </button>
+                                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                   <button
+                                     type="button"
+                                     onClick={(e) => {
+                                       e.stopPropagation();
+                                       if (activeSubTab === 'trips') {
+                                         handlePrintDriverTripsOnly(d);
+                                       } else {
+                                         handlePrintDriverAdvancesOnly(d);
+                                       }
+                                     }}
+                                     disabled={printingDriverId === d.driver_id}
+                                     className="btn btn-sm btn-outline"
+                                     style={{ borderColor: '#3b82f6', color: '#1d4ed8', background: '#eff6ff', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '5px' }}
+                                   >
+                                     {printingDriverId === d.driver_id ? <Loader2 size={13} className="animate-spin" /> : <Printer size={13} />}
+                                     {activeSubTab === 'trips' ? 'Print Trips' : 'Print Advances'}
+                                   </button>
+                                   <button
+                                     type="button"
+                                     onClick={(e) => {
+                                       e.stopPropagation();
+                                       if (activeSubTab === 'trips') {
+                                         handleDownloadDriverTripsExcel(d);
+                                       } else {
+                                         handleDownloadDriverAdvancesExcel(d);
+                                       }
+                                     }}
+                                     disabled={downloadingDriverId === d.driver_id}
+                                     className="btn btn-sm btn-outline"
+                                     style={{ borderColor: '#10b981', color: '#047857', background: '#ecfdf5', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '5px' }}
+                                   >
+                                     {downloadingDriverId === d.driver_id ? <Loader2 size={13} className="animate-spin" /> : <FileSpreadsheet size={13} />}
+                                     {activeSubTab === 'trips' ? 'Download Trips Excel' : 'Download Advances Excel'}
+                                   </button>
                                   <button
                                     type="button"
                                     onClick={(e) => {
@@ -2470,6 +3090,7 @@ export const DriverAdvancesPage: React.FC = () => {
                                             <th style={{ padding: '8px 12px', textAlign: 'right', width: '120px' }}>Trip Expenses (₹)</th>
                                             <th style={{ padding: '8px 12px', textAlign: 'right', width: '120px' }}>Driver Balance (₹)</th>
                                             <th style={{ padding: '8px 12px', textAlign: 'center', width: '90px' }}>Status</th>
+                                             <th style={{ padding: '8px 12px', textAlign: 'center', width: '80px' }}>Actions</th>
                                           </tr>
                                         </thead>
                                         <tbody>
@@ -2485,46 +3106,75 @@ export const DriverAdvancesPage: React.FC = () => {
                                                .filter((adv: DriverAdvance) => !adv.trip_id)
                                                .reduce((sum: number, adv: DriverAdvance) => sum + (parseFloat(String(adv.amount)) || 0), 0);
 
-                                             let runningBal = directAdvancesTotal;
-                                             const balanceById = new Map<number, number>();
-                                             sortedTrips.forEach((t: Trip) => {
-                                               const adv = parseFloat(String(t.advance_paid || 0));
-                                               const exp = parseFloat(String(t.total_expenses ?? 0)) || 0;
-                                               runningBal = Math.round((runningBal + adv - exp) * 100) / 100;
-                                               balanceById.set(t.id, Math.max(0, runningBal));
-                                               if (runningBal < 0) {
-                                                 runningBal = 0;
-                                               }
-                                             });
-                                             return details.trips.map((t: Trip, i: number) => {
-                                               const tripRunningBal = balanceById.get(t.id) ?? 0;
-                                               return (
-                                                 <tr key={t.id || i} style={{ borderBottom: '1px solid #f1f5f9' }}>
-                                                   <td style={{ padding: '8px 12px', textAlign: 'center', color: '#94a3b8' }}>{i + 1}</td>
-                                                   <td style={{ padding: '8px 12px', fontWeight: 700, color: '#0f172a' }}>TRIP-{t.id}</td>
-                                                   <td style={{ padding: '8px 12px', color: '#475569' }}>{formatISTDate(t.trip_date)}</td>
-                                                   <td style={{ padding: '8px 12px', fontWeight: 700, color: '#2563eb' }}>{t.lorry_number}</td>
-                                                   <td style={{ padding: '8px 12px', color: '#334155' }}>
-                                                     {t.party_name} ({t.from_location} → {t.to_location})
-                                                   </td>
-                                                   <td style={{ padding: '8px 12px', textAlign: 'right', color: '#047857', fontWeight: 700 }}>
-                                                       {t.goods_weight ? `${t.goods_weight} ${t.unit_abbreviation || 'MT'}` : '—'}
-                                                   </td>
-                                                   <td style={{ padding: '8px 12px', textAlign: 'right', fontWeight: 800, color: '#1d4ed8' }}>
-                                                     {formatCurrency(t.total_freight)}
-                                                   </td>
-                                                   <td style={{ padding: '8px 12px', textAlign: 'right', fontWeight: 700, color: '#b45309' }}>
-                                                     {formatCurrency(t.advance_paid)}
-                                                   </td>
-                                                   <td style={{ padding: '8px 12px', textAlign: 'right', fontWeight: 700, color: t.total_expenses ? '#dc2626' : '#94a3b8' }}>
-                                                     {t.total_expenses ? formatCurrency(t.total_expenses) : '—'}
-                                                   </td>
-                                                   <td style={{
-                                                     padding: '8px 12px', textAlign: 'right', fontWeight: 800,
-                                                     color: tripRunningBal > 0 ? '#1d4ed8' : '#16a34a',
-                                                   }}>
-                                                     {formatCurrency(tripRunningBal)}
-                                                   </td>
+                                              let runningBal = directAdvancesTotal;
+                                              const balanceById = new Map<number, number>();
+                                              const balBeforeById = new Map<number, number>();
+                                              const netToPayById = new Map<number, number>();
+                                              sortedTrips.forEach((t: Trip) => {
+                                                const adv = parseFloat(String(t.advance_paid || 0));
+                                                const exp = parseFloat(String(t.total_expenses ?? 0)) || 0;
+                                                const balBefore = Math.max(0, runningBal);
+                                                balBeforeById.set(t.id, balBefore);
+                                                const rawAfter = Math.round((runningBal + adv - exp) * 100) / 100;
+                                                balanceById.set(t.id, Math.max(0, rawAfter));
+                                                netToPayById.set(t.id, rawAfter < 0 ? Math.abs(rawAfter) : 0);
+                                                runningBal = Math.max(0, rawAfter);
+                                              });
+                                              return details.trips.map((t: Trip, i: number) => {
+                                                const tripRunningBal = balanceById.get(t.id) ?? 0;
+                                                const tripBalBefore = balBeforeById.get(t.id) ?? 0;
+                                                const tripNetToPay = netToPayById.get(t.id) ?? 0;
+                                                const sStatus = (t as any).settlement_status;
+                                                const isSettled = sStatus === 'SETTLED';
+                                                const adv = parseFloat(String(t.advance_paid || 0));
+                                                const exp = parseFloat(String(t.total_expenses ?? 0)) || 0;
+                                                const takenFromHand = tripBalBefore > 0 ? Math.min(tripBalBefore, Math.max(0, exp - adv)) : 0;
+                                                return (
+                                                  <tr key={t.id || i} style={{ borderBottom: '1px solid #f1f5f9' }}>
+                                                    <td style={{ padding: '8px 12px', textAlign: 'center', color: '#94a3b8' }}>{i + 1}</td>
+                                                    <td style={{ padding: '8px 12px', fontWeight: 700, color: '#0f172a' }}>TRIP-{t.id}</td>
+                                                    <td style={{ padding: '8px 12px', color: '#475569', whiteSpace: 'nowrap' }}>{formatISTDate(t.trip_date)}</td>
+                                                    <td style={{ padding: '8px 12px', fontWeight: 700, color: '#2563eb' }}>{t.lorry_number}</td>
+                                                    <td style={{ padding: '8px 12px', color: '#334155' }}>
+                                                      {t.party_name} ({t.from_location} → {t.to_location})
+                                                    </td>
+                                                    <td style={{ padding: '8px 12px', textAlign: 'right', color: '#047857', fontWeight: 700 }}>
+                                                      {t.goods_weight ? `${t.goods_weight} ${t.unit_abbreviation || 'MT'}` : '—'}
+                                                    </td>
+                                                    <td style={{ padding: '8px 12px', textAlign: 'right', fontWeight: 800, color: '#1d4ed8' }}>
+                                                      {formatCurrency(t.total_freight)}
+                                                    </td>
+                                                    <td style={{ padding: '8px 12px', textAlign: 'right', fontWeight: 700, color: '#b45309' }}>
+                                                      <div>{formatCurrency(t.advance_paid)}</div>
+                                                      {tripBalBefore > 0 && (
+                                                        <div style={{ fontSize: '10px', color: '#1d4ed8', fontWeight: 700, background: '#eff6ff', padding: '1px 5px', borderRadius: '3px', marginTop: '2px', display: 'inline-block', whiteSpace: 'nowrap' }}>
+                                                          In Hand: {formatCurrency(tripBalBefore)}
+                                                        </div>
+                                                      )}
+                                                    </td>
+                                                    <td style={{ padding: '8px 12px', textAlign: 'right', fontWeight: 700, color: t.total_expenses ? '#dc2626' : '#94a3b8' }}>
+                                                      {t.total_expenses ? formatCurrency(t.total_expenses) : '—'}
+                                                    </td>
+                                                    <td style={{ padding: '8px 12px', textAlign: 'right' }}>
+                                                      {tripBalBefore > 0 && (
+                                                        <div style={{ fontSize: '10.5px', color: '#475569', fontWeight: 600, whiteSpace: 'nowrap' }}>
+                                                          Already in hand taken: <strong style={{ color: '#1d4ed8' }}>{formatCurrency(takenFromHand > 0 ? takenFromHand : tripBalBefore)}</strong>
+                                                        </div>
+                                                      )}
+                                                      {tripNetToPay > 0 ? (
+                                                        <div style={{ marginTop: '2px', whiteSpace: 'nowrap' }}>
+                                                          <strong style={{ color: isSettled ? '#15803d' : '#dc2626', fontSize: '12px' }}>
+                                                            {isSettled ? 'Paid: ' : 'Balance: '}{formatCurrency(tripNetToPay)} {isSettled ? '(Settled)' : 'Need to Pay'}
+                                                          </strong>
+                                                        </div>
+                                                      ) : (
+                                                        <div style={{ marginTop: '2px', whiteSpace: 'nowrap' }}>
+                                                          <span style={{ color: '#1d4ed8', fontWeight: 800, fontSize: '12px' }}>
+                                                            Balance: {formatCurrency(tripRunningBal)} in Driver Hand
+                                                          </span>
+                                                        </div>
+                                                      )}
+                                                    </td>
                                                    <td style={{ padding: '8px 12px', textAlign: 'center' }}>
                                                       {(() => {
                                                         const sStatus = (t as any).settlement_status;
@@ -2623,6 +3273,28 @@ export const DriverAdvancesPage: React.FC = () => {
                                                         );
                                                       })()}
                                                     </td>
+                                                     <td style={{ padding: '6px 8px', textAlign: 'center' }}>
+                                                       <div style={{ display: 'inline-flex', gap: '4px' }}>
+                                                         <button
+                                                           type="button"
+                                                           title="Download Trip PDF"
+                                                           disabled={downloadingPdfTripId === t.id}
+                                                           onClick={(e) => { e.stopPropagation(); handleDownloadSingleTripPdf(t, d.driver_name); }}
+                                                           style={{ color: '#dc2626', borderColor: '#fca5a5', background: '#fef2f2', padding: '3px 6px', cursor: 'pointer', borderRadius: '4px', border: '1px solid #fca5a5', lineHeight: 1 }}
+                                                         >
+                                                           {downloadingPdfTripId === t.id ? <Loader2 size={11} className="animate-spin" /> : <FileText size={11} />}
+                                                         </button>
+                                                         <button
+                                                           type="button"
+                                                           title="Download Trip Excel"
+                                                           disabled={downloadingExcelTripId === t.id}
+                                                           onClick={(e) => { e.stopPropagation(); handleDownloadSingleTripExcel(t, d.driver_name); }}
+                                                           style={{ color: '#059669', borderColor: '#a7f3d0', background: '#ecfdf5', padding: '3px 6px', cursor: 'pointer', borderRadius: '4px', border: '1px solid #a7f3d0', lineHeight: 1 }}
+                                                         >
+                                                           {downloadingExcelTripId === t.id ? <Loader2 size={11} className="animate-spin" /> : <Download size={11} />}
+                                                         </button>
+                                                       </div>
+                                                     </td>
                                                  </tr>
                                                );
                                              });
@@ -2750,6 +3422,7 @@ export const DriverAdvancesPage: React.FC = () => {
                                                   );
                                                 })()}
                                               </td>
+                                               <td style={{ padding: '8px 12px', textAlign: 'center' }}></td>
                                            </tr>
                                          </tfoot>
                                       </table>

@@ -801,50 +801,6 @@ export const TripsPage: React.FC = () => {
             >
               Total: {total} Trips
             </span>
-            <button
-              type="button"
-              onClick={handlePrint}
-              disabled={isPrinting}
-              className="btn btn-outline"
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: '6px',
-                borderColor: '#3b82f6',
-                color: '#1d4ed8',
-                background: '#eff6ff',
-                fontWeight: 600,
-                height: '32px',
-                padding: '0 12px',
-                fontSize: '13px',
-              }}
-              title="Print Trips Master dispatch list"
-            >
-              {isPrinting ? <Loader2 size={14} className="animate-spin" /> : <Printer size={14} />}
-              {isPrinting ? 'Preparing...' : 'Print'}
-            </button>
-            <button
-              type="button"
-              onClick={handleExportExcel}
-              disabled={isExportingExcel}
-              className="btn btn-outline"
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: '6px',
-                borderColor: '#10b981',
-                color: '#059669',
-                background: '#ecfdf5',
-                fontWeight: 600,
-                height: '32px',
-                padding: '0 12px',
-                fontSize: '13px',
-              }}
-              title="Download trips as an Excel spreadsheet with total count"
-            >
-              {isExportingExcel ? <Loader2 size={14} className="animate-spin" /> : <FileSpreadsheet size={14} />}
-              {isExportingExcel ? 'Exporting...' : 'Download'}
-            </button>
           </div>
           <p style={{ color: 'var(--text-muted)', fontSize: '13.5px', marginTop: '4px' }}>
             Create and track freight dispatch trips, lorry allocations & delivery status
@@ -863,7 +819,7 @@ export const TripsPage: React.FC = () => {
             width: '100%',
           }}
         >
-          <div style={{ flex: '1 1 160px', minWidth: '140px' }}>
+          <div style={{ width: '200px', flexShrink: 0 }}>
             <label style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-muted)', display: 'block', marginBottom: '4px' }}>
               Status
             </label>
@@ -884,7 +840,7 @@ export const TripsPage: React.FC = () => {
             </select>
           </div>
 
-          <div style={{ flex: '1 1 180px', minWidth: '160px' }}>
+          <div style={{ width: '200px', flexShrink: 0 }}>
             <label style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-muted)', display: 'block', marginBottom: '4px' }}>
               Party
             </label>
@@ -905,13 +861,25 @@ export const TripsPage: React.FC = () => {
               ))}
             </select>
           </div>
+        </div>
 
-          <div style={{ flex: '1 1 150px', minWidth: '140px' }}>
+        {/* Second filter row: From Date, To Date, Clear Filters, Print, Download */}
+        <div
+          style={{
+            display: 'flex',
+            gap: '8px',
+            flexWrap: 'wrap',
+            alignItems: 'flex-end',
+            marginBottom: '16px',
+          }}
+        >
+          {/* From Date */}
+          <div style={{ minWidth: '140px' }}>
             <label style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-muted)', display: 'block', marginBottom: '4px' }}>
               From Date
             </label>
             <DateField
-              style={{ width: '100%' }}
+              style={{ width: '100%', height: '38px' }}
               value={fromDate}
               onChange={(e) => {
                 setFromDate(e.target.value);
@@ -920,12 +888,13 @@ export const TripsPage: React.FC = () => {
             />
           </div>
 
-          <div style={{ flex: '1 1 150px', minWidth: '140px' }}>
+          {/* To Date */}
+          <div style={{ minWidth: '140px' }}>
             <label style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-muted)', display: 'block', marginBottom: '4px' }}>
               To Date
             </label>
             <DateField
-              style={{ width: '100%' }}
+              style={{ width: '100%', height: '38px' }}
               value={toDate}
               onChange={(e) => {
                 setToDate(e.target.value);
@@ -934,6 +903,7 @@ export const TripsPage: React.FC = () => {
             />
           </div>
 
+          {/* Clear Filters */}
           <button
             type="button"
             onClick={resetFilters}
@@ -950,6 +920,56 @@ export const TripsPage: React.FC = () => {
             title="Clear all filters"
           >
             <RefreshCw size={14} /> Clear Filters
+          </button>
+
+          {/* Print */}
+          <button
+            type="button"
+            onClick={handlePrint}
+            disabled={isPrinting}
+            className="btn btn-outline"
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              borderColor: '#3b82f6',
+              color: '#1d4ed8',
+              background: '#eff6ff',
+              fontWeight: 600,
+              height: '38px',
+              padding: '0 14px',
+              fontSize: '13px',
+              flexShrink: 0,
+            }}
+            title="Print Trips Master dispatch list"
+          >
+            {isPrinting ? <Loader2 size={14} className="animate-spin" /> : <Printer size={14} />}
+            {isPrinting ? 'Preparing...' : 'Print'}
+          </button>
+
+          {/* Download */}
+          <button
+            type="button"
+            onClick={handleExportExcel}
+            disabled={isExportingExcel}
+            className="btn btn-outline"
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              borderColor: '#10b981',
+              color: '#059669',
+              background: '#ecfdf5',
+              fontWeight: 600,
+              height: '38px',
+              padding: '0 14px',
+              fontSize: '13px',
+              flexShrink: 0,
+            }}
+            title="Download trips as an Excel spreadsheet with total count"
+          >
+            {isExportingExcel ? <Loader2 size={14} className="animate-spin" /> : <FileSpreadsheet size={14} />}
+            {isExportingExcel ? 'Exporting...' : 'Download'}
           </button>
         </div>
 

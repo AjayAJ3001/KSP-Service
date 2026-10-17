@@ -1,11 +1,12 @@
 import React, { useState, useEffect } from 'react';
-import { Plus, Edit2, Key, CheckCircle, XCircle, UserPlus, Search, Trash2 } from 'lucide-react';
+import { Plus, Edit2, Key, CheckCircle, XCircle, UserPlus, Search, Trash2, Printer, Download, Loader2 } from 'lucide-react';
 import { userService, driverService } from '../services/adminService';
 import { User, Driver } from '../types';
 import { DataTable, Column } from '../components/Common/DataTable';
 import { Modal } from '../components/Common/Modal';
 import { StatusBadge } from '../components/Common/StatusBadge';
 import { formatIST } from '../utils/dateUtils';
+import * as XLSX from 'xlsx';
 
 export const UsersPage: React.FC = () => {
   const [users, setUsers] = useState<User[]>([]);
@@ -16,6 +17,8 @@ export const UsersPage: React.FC = () => {
   const [roleFilter, setRoleFilter] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [isPrinting, setIsPrinting] = useState(false);
+  const [isExporting, setIsExporting] = useState(false);
 
   // Modals
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
@@ -70,6 +73,240 @@ export const UsersPage: React.FC = () => {
       setDrivers(res.data.items);
     } catch (err) {
       console.error('Failed to load drivers', err);
+    }
+  };
+
+  const handlePrintUsers = async () => {
+    try {
+      setIsPrinting(true);
+      const res = await userService.getUsers({
+        limit: 10000,
+        search: search || undefined,
+        role: roleFilter || undefined,
+        status: statusFilter || undefined,
+      });
+      const items: User[] = res?.data?.items || [];
+      if (items.length === 0) {
+        alert('No user accounts found to print.');
+        setIsPrinting(false);
+        return;
+      }
+
+      const totalCount = items.length;
+      const activeCount = items.filter(u => u.status === 'ACTIVE').length;
+      const adminCount = items.filter(u => u.role === 'ADMIN').length;
+      const managerCount = items.filter(u => u.role === 'MANAGER').length;
+      const operatorCount = items.filter(u => u.role === 'TRANSPORT_USER').length;
+      const generatedAt = new Date().toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' });
+
+      const printHtml = `
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>KSP Transport - User Management Directory</title>
+  <style>
+    * { box-sizing: border-box; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif; margin: 0; padding: 20px; color: #1e293b; background: #fff; font-size: 12px; }
+    @page { size: portrait; margin: 12mm; }
+    .header-bar { display: flex; justify-content: space-between; align-items: flex-start; padding-bottom: 14px; border-bottom: 2px solid #0f172a; margin-bottom: 14px; }
+    .company-title { font-size: 20px; font-weight: 800; color: #0f172a; letter-spacing: 0.5px; margin: 0 0 4px 0; }
+    .report-subtitle { font-size: 13px; font-weight: 700; color: #2563eb; margin: 0 0 4px 0; text-transform: uppercase; letter-spacing: 0.5px; }
+    .meta-text { font-size: 11px; color: #64748b; margin: 0; }
+    .summary-cards { display: flex; gap: 12px; margin-bottom: 14px; flex-wrap: wrap; }
+    .card-box { padding: 8px 14px; border-radius: 6px; background: #f8fafc; border: 1px solid #e2e8f0; font-size: 11.5px; }
+    .card-box strong { font-size: 14px; color: #0f172a; }
+    table { width: 100%; border-collapse: collapse; font-size: 11.5px; margin-top: 6px; }
+    th { background: #0f172a; color: #ffffff; font-weight: 700; text-align: left; padding: 8px 10px; font-size: 11px; }
+    th.center, td.center { text-align: center; }
+    td { padding: 8px 10px; border-bottom: 1px solid #e2e8f0; vertical-align: middle; }
+    tr:nth-child(even) td { background: #fbfcfe; }
+    .badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 10px; font-weight: 700; text-align: center; }
+    .badge-admin { background: #e0e7ff; color: #3730a3; }
+    .badge-manager { background: #fef3c7; color: #92400e; }
+    .badge-operator { background: #e0f2fe; color: #0369a1; }
+    .badge-active { background: #dcfce7; color: #166534; }
+    .badge-inactive { background: #fee2e2; color: #991b1b; }
+    .footer-row td { background: #f1f5f9 !important; font-weight: 800; border-top: 2px solid #0f172a; border-bottom: 2px solid #0f172a; color: #0f172a; }
+    .print-btn-bar { display: flex; justify-content: flex-end; gap: 10px; margin-bottom: 14px; }
+    .print-btn { background: #2563eb; color: #fff; border: none; padding: 8px 16px; border-radius: 6px; font-weight: 600; cursor: pointer; font-size: 12px; }
+    @media print {
+      .print-btn-bar { display: none !important; }
+      body { padding: 0; }
+    }
+  </style>
+</head>
+<body>
+  <div class="print-btn-bar">
+    <button class="print-btn" onclick="window.print()">Print Report / Save as PDF</button>
+    <button class="print-btn" style="background:#64748b" onclick="window.close()">Close</button>
+  </div>
+
+  <div class="header-bar">
+    <div>
+      <h1 class="company-title">KSP TRANSPORT</h1>
+      <div class="report-subtitle">User Management Directory</div>
+      <p class="meta-text">System users, access roles, and credential status</p>
+    </div>
+    <div style="text-align: right;">
+      <p class="meta-text"><strong>Generated On:</strong> ${generatedAt}</p>
+      <p class="meta-text"><strong>Total Users:</strong> ${totalCount}</p>
+      ${roleFilter ? `<p class="meta-text"><strong>Role:</strong> ${roleFilter}</p>` : ''}
+      ${statusFilter ? `<p class="meta-text"><strong>Status:</strong> ${statusFilter}</p>` : ''}
+    </div>
+  </div>
+
+  <div class="summary-cards">
+    <div class="card-box">Total Users: <strong>${totalCount}</strong></div>
+    <div class="card-box">Admins: <strong style="color:#4338ca">${adminCount}</strong></div>
+    <div class="card-box">Managers: <strong style="color:#d97706">${managerCount}</strong></div>
+    <div class="card-box">Operators: <strong style="color:#0284c7">${operatorCount}</strong></div>
+    <div class="card-box">Active: <strong style="color:#16a34a">${activeCount}</strong></div>
+  </div>
+
+  <table>
+    <thead>
+      <tr>
+        <th style="width: 45px;" class="center">S.No</th>
+        <th>Username</th>
+        <th>Full Name</th>
+        <th class="center">Role</th>
+        <th>Mobile Number</th>
+        <th>Email</th>
+        <th class="center">Status</th>
+        <th>Last Login</th>
+      </tr>
+    </thead>
+    <tbody>
+      ${items.map((u, idx) => `
+        <tr>
+          <td class="center">${idx + 1}</td>
+          <td><strong style="color: #0f172a; font-family: monospace;">${u.username}</strong></td>
+          <td>${u.name || '—'}</td>
+          <td class="center">
+            <span class="badge ${u.role === 'ADMIN' ? 'badge-admin' : u.role === 'MANAGER' ? 'badge-manager' : 'badge-operator'}">
+              ${u.role}
+            </span>
+          </td>
+          <td>${u.mobile_number || '—'}</td>
+          <td>${u.email || '—'}</td>
+          <td class="center">
+            <span class="badge ${u.status === 'ACTIVE' ? 'badge-active' : 'badge-inactive'}">
+              ${u.status}
+            </span>
+          </td>
+          <td style="font-size: 11px; color: #64748b;">${u.last_login ? formatIST(u.last_login) : 'Never'}</td>
+        </tr>
+      `).join('')}
+      <tr class="footer-row">
+        <td class="center" colspan="2">TOTAL USERS</td>
+        <td colspan="5"><strong>${totalCount} Users (${activeCount} Active, ${totalCount - activeCount} Inactive)</strong></td>
+        <td class="center"><strong>${totalCount} Accounts</strong></td>
+      </tr>
+    </tbody>
+  </table>
+
+  <div style="margin-top: 24px; display: flex; justify-content: space-between; font-size: 10px; color: #94a3b8; border-top: 1px solid #e2e8f0; padding-top: 8px;">
+    <span>KSP Service Management ERP · User Management</span>
+    <span>Page 1 of 1</span>
+  </div>
+</body>
+</html>
+      `;
+
+      const printWin = window.open('', '_blank', 'width=1100,height=850');
+      if (!printWin) {
+        alert('Please allow pop-ups for this website to print.');
+        setIsPrinting(false);
+        return;
+      }
+      printWin.document.open();
+      printWin.document.write(printHtml);
+      printWin.document.close();
+      printWin.focus();
+      setTimeout(() => {
+        printWin.print();
+      }, 500);
+    } catch (err: any) {
+      console.error('Failed to print users', err);
+      alert(err.message || 'Failed to print users list.');
+    } finally {
+      setIsPrinting(false);
+    }
+  };
+
+  const handleExportExcel = async () => {
+    try {
+      setIsExporting(true);
+      const res = await userService.getUsers({
+        limit: 10000,
+        search: search || undefined,
+        role: roleFilter || undefined,
+        status: statusFilter || undefined,
+      });
+      const items: User[] = res?.data?.items || [];
+      if (items.length === 0) {
+        alert('No user records found to export.');
+        setIsExporting(false);
+        return;
+      }
+
+      const excelRows: any[] = items.map((u, idx) => ({
+        'S.No': idx + 1,
+        'Username': u.username,
+        'Full Name': u.name || '—',
+        'Role': u.role,
+        'Mobile Number': u.mobile_number || '—',
+        'Email': u.email || '—',
+        'Status': u.status,
+        'Last Login': u.last_login ? formatIST(u.last_login) : 'Never',
+      }));
+
+      // Blank separator
+      excelRows.push({
+        'S.No': '',
+        'Username': '',
+        'Full Name': '',
+        'Role': '',
+        'Mobile Number': '',
+        'Email': '',
+        'Status': '',
+        'Last Login': '',
+      });
+
+      // Total row
+      excelRows.push({
+        'S.No': '',
+        'Username': 'TOTAL USERS',
+        'Full Name': `Count: ${items.length}`,
+        'Role': `Admins: ${items.filter(u => u.role === 'ADMIN').length}, Managers: ${items.filter(u => u.role === 'MANAGER').length}`,
+        'Mobile Number': `Active: ${items.filter(u => u.status === 'ACTIVE').length}`,
+        'Email': '',
+        'Status': `Total: ${items.length}`,
+        'Last Login': '',
+      });
+
+      const worksheet = XLSX.utils.json_to_sheet(excelRows);
+      worksheet['!cols'] = [
+        { wch: 8 },  // S.No
+        { wch: 18 }, // Username
+        { wch: 24 }, // Full Name
+        { wch: 18 }, // Role
+        { wch: 18 }, // Mobile Number
+        { wch: 24 }, // Email
+        { wch: 12 }, // Status
+        { wch: 22 }, // Last Login
+      ];
+
+      const workbook = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(workbook, worksheet, 'Users');
+      const dateStr = new Date().toISOString().split('T')[0];
+      XLSX.writeFile(workbook, `KSP_Users_List_${dateStr}.xlsx`);
+    } catch (err: any) {
+      console.error('Failed to export users', err);
+      alert(err.message || 'Failed to export users.');
+    } finally {
+      setIsExporting(false);
     }
   };
 
@@ -325,7 +562,7 @@ export const UsersPage: React.FC = () => {
             />
           </div>
 
-          <div style={{ display: 'flex', gap: '12px' }}>
+          <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
             <select
               className="form-control form-select"
               style={{ width: '160px' }}
@@ -354,6 +591,71 @@ export const UsersPage: React.FC = () => {
               <option value="ACTIVE">ACTIVE</option>
               <option value="INACTIVE">INACTIVE</option>
             </select>
+
+            {(search || roleFilter || statusFilter) && (
+              <button
+                type="button"
+                onClick={() => {
+                  setSearch('');
+                  setRoleFilter('');
+                  setStatusFilter('');
+                  setPage(1);
+                }}
+                className="btn btn-outline"
+                style={{ height: '38px', padding: '0 14px', fontSize: '13px' }}
+                title="Reset filters"
+              >
+                Reset
+              </button>
+            )}
+          </div>
+
+          <div style={{ marginLeft: 'auto', display: 'flex', gap: '8px', alignItems: 'center' }}>
+            <button
+              type="button"
+              onClick={handlePrintUsers}
+              disabled={isPrinting}
+              className="btn btn-outline"
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+                borderColor: '#3b82f6',
+                color: '#1d4ed8',
+                background: '#eff6ff',
+                fontWeight: 600,
+                height: '38px',
+                padding: '0 14px',
+                fontSize: '13px',
+              }}
+              title="Print User Management Directory"
+            >
+              {isPrinting ? <Loader2 size={14} className="animate-spin" /> : <Printer size={14} />}
+              {isPrinting ? 'Preparing...' : 'Print'}
+            </button>
+
+            <button
+              type="button"
+              onClick={handleExportExcel}
+              disabled={isExporting}
+              className="btn btn-outline"
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+                borderColor: '#10b981',
+                color: '#059669',
+                background: '#ecfdf5',
+                fontWeight: 600,
+                height: '38px',
+                padding: '0 14px',
+                fontSize: '13px',
+              }}
+              title="Download Users List as Excel"
+            >
+              {isExporting ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
+              {isExporting ? 'Exporting...' : 'Download'}
+            </button>
           </div>
         </div>
 

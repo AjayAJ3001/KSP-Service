@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View,
   Text,
@@ -9,6 +9,9 @@ import {
   ActivityIndicator,
   Alert,
   Modal,
+  Animated,
+  Easing,
+  Pressable,
 } from 'react-native';
 import {
   ShieldAlert,
@@ -48,6 +51,52 @@ export const AdminDashboardScreen: React.FC<{ navigation: any }> = ({ navigation
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [selectedTrip, setSelectedTrip] = useState<Trip | null>(null);
+
+  // ── Animation values ───────────────────────────────────────
+  const bannerFade = useRef(new Animated.Value(0)).current;
+  const bannerSlide = useRef(new Animated.Value(-18)).current;
+  const kpiScale = useRef(new Animated.Value(0.88)).current;
+  const kpiFade = useRef(new Animated.Value(0)).current;
+  const financeFade = useRef(new Animated.Value(0)).current;
+  const financeSlide = useRef(new Animated.Value(20)).current;
+  const navFade = useRef(new Animated.Value(0)).current;
+  const navSlide = useRef(new Animated.Value(24)).current;
+  const crownPulse = useRef(new Animated.Value(1)).current;
+
+  // Nav tile spring scales
+  const navScales = useRef(Array.from({ length: 12 }, () => new Animated.Value(1))).current;
+
+  useEffect(() => {
+    // Entrance sequence
+    Animated.stagger(80, [
+      Animated.parallel([
+        Animated.timing(bannerFade, { toValue: 1, duration: 400, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
+        Animated.spring(bannerSlide, { toValue: 0, friction: 7, tension: 45, useNativeDriver: true }),
+      ]),
+      Animated.parallel([
+        Animated.timing(kpiFade, { toValue: 1, duration: 380, useNativeDriver: true }),
+        Animated.spring(kpiScale, { toValue: 1, friction: 6, tension: 50, useNativeDriver: true }),
+      ]),
+      Animated.parallel([
+        Animated.timing(financeFade, { toValue: 1, duration: 360, useNativeDriver: true }),
+        Animated.spring(financeSlide, { toValue: 0, friction: 7, tension: 45, useNativeDriver: true }),
+      ]),
+      Animated.parallel([
+        Animated.timing(navFade, { toValue: 1, duration: 360, useNativeDriver: true }),
+        Animated.spring(navSlide, { toValue: 0, friction: 7, tension: 45, useNativeDriver: true }),
+      ]),
+    ]).start();
+
+    // Pulsing crown glow
+    const crownLoop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(crownPulse, { toValue: 1.22, duration: 1400, easing: Easing.inOut(Easing.sin), useNativeDriver: true }),
+        Animated.timing(crownPulse, { toValue: 1.0, duration: 1400, easing: Easing.inOut(Easing.sin), useNativeDriver: true }),
+      ])
+    );
+    crownLoop.start();
+    return () => crownLoop.stop();
+  }, []);
 
   const loadDashboard = useCallback(async () => {
     try {
@@ -102,10 +151,12 @@ export const AdminDashboardScreen: React.FC<{ navigation: any }> = ({ navigation
         refreshControl={<RefreshControl refreshing={isRefreshing} onRefresh={onRefresh} colors={[COLORS.accent]} />}
         contentContainerStyle={styles.contentContainer}
       >
-      {/* Admin Badge Banner */}
-      <View style={styles.adminBanner}>
+      {/* ── Animated Admin Badge Banner ── */}
+      <Animated.View style={[styles.adminBanner, { opacity: bannerFade, transform: [{ translateY: bannerSlide }] }]}>
         <View style={styles.adminBannerLeft}>
-          <Crown size={22} color={COLORS.accent} />
+          <Animated.View style={{ transform: [{ scale: crownPulse }] }}>
+            <Crown size={22} color={COLORS.accent} />
+          </Animated.View>
           <View>
             <Text style={styles.adminBannerTitle}>KSP Administrator Portal</Text>
             <Text style={styles.adminBannerSubtitle}>Full access to operations, finances & masters</Text>
@@ -114,7 +165,7 @@ export const AdminDashboardScreen: React.FC<{ navigation: any }> = ({ navigation
         <TouchableOpacity style={styles.refreshBtn} onPress={onRefresh}>
           <RefreshCw size={16} color={COLORS.white} />
         </TouchableOpacity>
-      </View>
+      </Animated.View>
 
       {/* 30-Day Compliance Expiry Alerts Banner */}
       {alerts.length > 0 && (
@@ -178,8 +229,8 @@ export const AdminDashboardScreen: React.FC<{ navigation: any }> = ({ navigation
         </View>
       )}
 
-      {/* KPI Stats Grid */}
-      <View style={styles.kpiGrid}>
+      {/* ── Animated KPI Stats Grid ── */}
+      <Animated.View style={[styles.kpiGrid, { opacity: kpiFade, transform: [{ scale: kpiScale }] }]}>
         <View style={[styles.kpiCard, { borderLeftColor: '#f59e0b' }]}>
           <View style={styles.kpiHeader}>
             <Text style={styles.kpiLabel}>Today's Trips</Text>
@@ -215,18 +266,16 @@ export const AdminDashboardScreen: React.FC<{ navigation: any }> = ({ navigation
           <Text style={styles.kpiValue}>{stats?.pending_settlements || 0}</Text>
           <Text style={styles.kpiSub}>Driver slips pending</Text>
         </View>
-      </View>
+      </Animated.View>
 
-      {/* Financial Highlights (Dark Card) */}
-      <View style={styles.financeCard}>
+      {/* ── Animated Financial Card ── */}
+      <Animated.View style={[styles.financeCard, { opacity: financeFade, transform: [{ translateY: financeSlide }] }]}>
         <View style={styles.financeHeader}>
           <Text style={styles.financeTitle}>TOTAL FREIGHT BILLED</Text>
           <TrendingUp size={20} color={COLORS.accent} />
         </View>
         <Text style={styles.financeMainAmt}>{formatCurrency(financials?.total_freight || 0)}</Text>
-
         <View style={styles.financeDivider} />
-
         <View style={styles.financeRow}>
           <View>
             <Text style={styles.financeSubLabel}>Collected</Text>
@@ -237,49 +286,58 @@ export const AdminDashboardScreen: React.FC<{ navigation: any }> = ({ navigation
             <Text style={styles.financeBalance}>{formatCurrency(financials?.total_balance || 0)}</Text>
           </View>
         </View>
-      </View>
+      </Animated.View>
 
       {/* Operations Section */}
       <View style={styles.sectionHeadingRow}>
         <Text style={styles.sectionHeading}>Operations</Text>
       </View>
-      <View style={styles.navGrid}>
-        <TouchableOpacity
-          style={styles.navItem}
-          onPress={() => navigation.navigate('AdminTrips')}
-          activeOpacity={0.7}
-        >
-          <View style={[styles.navIconBox, { backgroundColor: '#eff6ff' }]}>
-            <Navigation size={20} color="#1d4ed8" />
-          </View>
-          <Text style={styles.navItemTitle}>Trips Operations</Text>
-          <Text style={styles.navItemSub}>Status & Dispatches</Text>
-        </TouchableOpacity>
+      <Animated.View style={[styles.navGrid, { opacity: navFade, transform: [{ translateY: navSlide }] }]}>
+        <Animated.View style={{ transform: [{ scale: navScales[0] }] }}>
+          <Pressable
+            style={styles.navItem}
+            onPressIn={() => Animated.spring(navScales[0], { toValue: 0.95, speed: 60, useNativeDriver: true }).start()}
+            onPressOut={() => Animated.spring(navScales[0], { toValue: 1, speed: 30, bounciness: 7, useNativeDriver: true }).start()}
+            onPress={() => navigation.navigate('AdminTrips')}
+          >
+            <View style={[styles.navIconBox, { backgroundColor: '#eff6ff' }]}>
+              <Navigation size={20} color="#1d4ed8" />
+            </View>
+            <Text style={styles.navItemTitle}>Trips Operations</Text>
+            <Text style={styles.navItemSub}>Status & Dispatches</Text>
+          </Pressable>
+        </Animated.View>
 
-        <TouchableOpacity
-          style={styles.navItem}
-          onPress={() => navigation.navigate('AdminOwnerAdvances')}
-          activeOpacity={0.7}
-        >
-          <View style={[styles.navIconBox, { backgroundColor: '#fef3c7' }]}>
-            <HandCoins size={20} color="#b45309" />
-          </View>
-          <Text style={styles.navItemTitle}>Advance to Manager</Text>
-          <Text style={styles.navItemSub}>Owner Advances</Text>
-        </TouchableOpacity>
+        <Animated.View style={{ transform: [{ scale: navScales[1] }] }}>
+          <Pressable
+            style={styles.navItem}
+            onPressIn={() => Animated.spring(navScales[1], { toValue: 0.95, speed: 60, useNativeDriver: true }).start()}
+            onPressOut={() => Animated.spring(navScales[1], { toValue: 1, speed: 30, bounciness: 7, useNativeDriver: true }).start()}
+            onPress={() => navigation.navigate('AdminOwnerAdvances')}
+          >
+            <View style={[styles.navIconBox, { backgroundColor: '#fef3c7' }]}>
+              <HandCoins size={20} color="#b45309" />
+            </View>
+            <Text style={styles.navItemTitle}>Advance to Manager</Text>
+            <Text style={styles.navItemSub}>Owner Advances</Text>
+          </Pressable>
+        </Animated.View>
 
-        <TouchableOpacity
-          style={styles.navItem}
-          onPress={() => navigation.navigate('AdminMasters')}
-          activeOpacity={0.7}
-        >
-          <View style={[styles.navIconBox, { backgroundColor: '#fef2f2' }]}>
-            <Sliders size={20} color="#b91c1c" />
-          </View>
-          <Text style={styles.navItemTitle}>Rates & Hub</Text>
-          <Text style={styles.navItemSub}>Full Master Settings</Text>
-        </TouchableOpacity>
-      </View>
+        <Animated.View style={{ transform: [{ scale: navScales[2] }] }}>
+          <Pressable
+            style={styles.navItem}
+            onPressIn={() => Animated.spring(navScales[2], { toValue: 0.95, speed: 60, useNativeDriver: true }).start()}
+            onPressOut={() => Animated.spring(navScales[2], { toValue: 1, speed: 30, bounciness: 7, useNativeDriver: true }).start()}
+            onPress={() => navigation.navigate('AdminMasters')}
+          >
+            <View style={[styles.navIconBox, { backgroundColor: '#fef2f2' }]}>
+              <Sliders size={20} color="#b91c1c" />
+            </View>
+            <Text style={styles.navItemTitle}>Rates & Hub</Text>
+            <Text style={styles.navItemSub}>Full Master Settings</Text>
+          </Pressable>
+        </Animated.View>
+      </Animated.View>
 
       {/* Master Data Section - Matching Admin Panel */}
       <View style={styles.sectionHeadingRow}>

@@ -25,6 +25,7 @@ import {
 
 import { formatDateDMY } from '../utils/dateUtils';
 import { DateField } from '../components/Common/DateField';
+import * as XLSX from 'xlsx';
 
 const readAsBase64 = (file: File): Promise<string> =>
   new Promise((res, rej) => {
@@ -46,6 +47,40 @@ const getDaysLeft = (d?: string | null): number | null => {
   return diff;
 };
 
+/**
+ * Road Tax and TDS always expire on March 31 (business rule).
+ * This normalises any stored date to YYYY-03-31 of the same year
+ * so that minor date offsets (e.g. saved as Mar 29 instead of Mar 31)
+ * are always displayed correctly as March 31.
+ * If date is null or empty, defaults to getNextMarch31st().
+ * Returns a YYYY-MM-DD string that the date utils can format.
+ */
+const snapToMarch31 = (d?: string | null): string => {
+  if (!d) return getNextMarch31st();
+  const clean = String(d).trim();
+  if (!clean) return getNextMarch31st();
+
+  // If timestamp with time/tz, extract IST year
+  if (clean.includes('T') || clean.includes(' ')) {
+    let parseable = clean;
+    if (!parseable.endsWith('Z') && !/[+-]\d{2}/.test(parseable)) {
+      parseable = parseable.replace(' ', 'T') + 'Z';
+    }
+    const utcMs = Date.parse(parseable);
+    if (!isNaN(utcMs)) {
+      const IST_MS = (5 * 60 + 30) * 60 * 1000;
+      const istDate = new Date(utcMs + IST_MS);
+      return `${istDate.getUTCFullYear()}-03-31`;
+    }
+  }
+
+  const yearMatch = clean.match(/^(\d{4})/);
+  if (yearMatch) {
+    return `${yearMatch[1]}-03-31`;
+  }
+  return getNextMarch31st();
+};
+
 const ExpiryBadge: React.FC<{ date?: string | null }> = ({ date }) => {
   if (!date) return null;
   const days = getDaysLeft(date);
@@ -57,9 +92,9 @@ const ExpiryBadge: React.FC<{ date?: string | null }> = ({ date }) => {
     <span style={{
       fontSize: '11px', fontWeight: 700, padding: '2px 8px',
       borderRadius: '10px', background: bg, color, display: 'inline-flex',
-      alignItems: 'center', gap: '4px',
+      alignItems: 'center', gap: '4px', whiteSpace: 'nowrap', width: 'fit-content',
     }}>
-      <Calendar size={10} />{label}
+      <Calendar size={10} style={{ flexShrink: 0 }} />{label}
     </span>
   );
 };
@@ -331,8 +366,8 @@ const VehicleDetailPanel: React.FC<VehicleDetailPanelProps> = ({ vehicle: v, onE
       { label:'Fitness Certificate (FC)', date: v.fc_expiry_date },
       { label:'Insurance', date: v.insurance_expiry_date },
       { label:'Road Permit', date: v.permit_expiry_date },
-      { label:'TDS Certificate', date: tdsExpiry },
-      { label:'Road Tax', date: v.tax_expiry_date },
+      { label:'TDS Certificate', date: snapToMarch31(tdsExpiry) },
+      { label:'Road Tax', date: snapToMarch31(v.tax_expiry_date) },
     ];
     const alerts = complianceDocs.filter(d => {
       const left = daysLeft(d.date);
@@ -683,8 +718,8 @@ const VehicleDetailPanel: React.FC<VehicleDetailPanelProps> = ({ vehicle: v, onE
       `FC Expiry: ${fmtForPrint(v.fc_expiry_date)}`,
       `Insurance Expiry: ${fmtForPrint(v.insurance_expiry_date)}`,
       `Permit Expiry: ${fmtForPrint(v.permit_expiry_date)}`,
-      `TDS Expiry: ${fmtForPrint(tdsExpiry) || '31 Mar (Yearly)'}`,
-      `Road Tax Expiry: ${fmtForPrint(v.tax_expiry_date) || '31 Mar (Yearly)'}`,
+      `TDS Expiry: ${fmtForPrint(snapToMarch31(tdsExpiry))}`,
+      `Road Tax Expiry: ${fmtForPrint(snapToMarch31(v.tax_expiry_date))}`,
       '',
       `PAN: ${v.pan_number || '—'}  |  A/c: ${v.account_number || '—'}  |  IFSC: ${v.ifsc_code || '—'}`,
     ].filter(Boolean).join('\n');
@@ -835,10 +870,10 @@ const VehicleDetailPanel: React.FC<VehicleDetailPanelProps> = ({ vehicle: v, onE
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '5px 0', borderBottom: '1px dashed #f1f5f9' }}>
             <span style={{ fontSize: '12px', color: '#64748b', fontWeight: 600 }}>TDS Expiry</span>
             <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-              <span style={{ fontSize: '13px', color: tdsExpiry ? '#0f172a' : '#94a3b8', fontWeight: 700 }}>
-                {fmtDate(tdsExpiry) || '31 Mar (Yearly)'}
+              <span style={{ fontSize: '13px', color: '#0f172a', fontWeight: 700 }}>
+                {fmtDate(snapToMarch31(tdsExpiry))}
               </span>
-              <ExpiryBadge date={tdsExpiry} />
+              <ExpiryBadge date={snapToMarch31(tdsExpiry)} />
             </div>
           </div>
           {tdsCertUrl && (
@@ -860,10 +895,10 @@ const VehicleDetailPanel: React.FC<VehicleDetailPanelProps> = ({ vehicle: v, onE
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '5px 0', borderBottom: '1px dashed #f1f5f9' }}>
             <span style={{ fontSize: '12px', color: '#64748b', fontWeight: 600 }}>Tax Expiry</span>
             <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-              <span style={{ fontSize: '13px', color: v.tax_expiry_date ? '#0f172a' : '#94a3b8', fontWeight: 700 }}>
-                {fmtDate(v.tax_expiry_date) || '31 Mar (Yearly)'}
+              <span style={{ fontSize: '13px', color: '#0f172a', fontWeight: 700 }}>
+                {fmtDate(snapToMarch31(v.tax_expiry_date))}
               </span>
-              <ExpiryBadge date={v.tax_expiry_date} />
+              <ExpiryBadge date={snapToMarch31(v.tax_expiry_date)} />
             </div>
           </div>
           {v.tax_photo_url && (
@@ -979,6 +1014,8 @@ export const VehiclesPage: React.FC = () => {
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
+  const [isPrintingList, setIsPrintingList] = useState(false);
+  const [isExportingList, setIsExportingList] = useState(false);
 
   // Expiring compliance count (for top alert banner)
   const [expiringCount, setExpiringCount] = useState<number>(0);
@@ -1077,6 +1114,265 @@ export const VehiclesPage: React.FC = () => {
     } catch { /* silent */ }
   };
 
+  const handlePrintVehicles = async () => {
+    try {
+      setIsPrintingList(true);
+      const res = await vehicleService.getVehicles({ limit: 10000, search: search || undefined, status: statusFilter || undefined });
+      const items: Vehicle[] = res?.data?.items || [];
+      if (items.length === 0) {
+        alert('No vehicle records found to print.');
+        setIsPrintingList(false);
+        return;
+      }
+
+      const totalCount = items.length;
+      const activeCount = items.filter(v => v.status === 'ACTIVE').length;
+      const inactiveCount = totalCount - activeCount;
+
+      const hasRC = (v: Vehicle) => Boolean(v.rc_number || v.rc_photo_url || v.rc_photo_back_url || v.rc_reg_date || v.rc_expiry_date);
+      const hasFC = (v: Vehicle) => Boolean(v.fc_number || v.fc_expiry_date || v.fc_photo_url);
+      const hasTax = (v: Vehicle) => Boolean(v.tax_expiry_date || v.tax_photo_url);
+      const hasTDS = (v: Vehicle) => Boolean(v.tds_number || v.tds_expiry_date || v.tds_certificate_url || v.dts_number || v.dts_expiry_date || v.dts_certificate_url || v.tds_certificate_url_2);
+      const hasIns = (v: Vehicle) => Boolean(v.insurance_policy_number || v.insurance_expiry_date || v.insurance_photo_url);
+      const hasPermit = (v: Vehicle) => Boolean(v.permit_number || v.permit_expiry_date || v.permit_photo_url);
+
+      const fullyCompliant = items.filter(v => hasRC(v) && hasFC(v) && hasTax(v) && hasTDS(v) && hasIns(v) && hasPermit(v)).length;
+      const generatedAt = new Date().toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' });
+
+      const printHtml = `
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>KSP Transport - Truck Master Compliance Directory</title>
+  <style>
+    * { box-sizing: border-box; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif; margin: 0; padding: 20px; color: #1e293b; background: #fff; font-size: 12px; }
+    @page { size: landscape; margin: 10mm; }
+    .header-bar { display: flex; justify-content: space-between; align-items: flex-start; padding-bottom: 14px; border-bottom: 2px solid #0f172a; margin-bottom: 14px; }
+    .company-title { font-size: 20px; font-weight: 800; color: #0f172a; letter-spacing: 0.5px; margin: 0 0 4px 0; }
+    .report-subtitle { font-size: 13px; font-weight: 700; color: #2563eb; margin: 0 0 4px 0; text-transform: uppercase; letter-spacing: 0.5px; }
+    .meta-text { font-size: 11px; color: #64748b; margin: 0; }
+    .summary-cards { display: flex; gap: 12px; margin-bottom: 14px; }
+    .card-box { padding: 8px 14px; border-radius: 6px; background: #f8fafc; border: 1px solid #e2e8f0; font-size: 11.5px; }
+    .card-box strong { font-size: 14px; color: #0f172a; }
+    table { width: 100%; border-collapse: collapse; font-size: 11px; margin-top: 6px; }
+    th { background: #0f172a; color: #ffffff; font-weight: 700; text-align: left; padding: 7px 8px; font-size: 11px; }
+    th.center, td.center { text-align: center; }
+    td { padding: 7px 8px; border-bottom: 1px solid #e2e8f0; vertical-align: middle; }
+    tr:nth-child(even) td { background: #fbfcfe; }
+    .badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 10px; font-weight: 800; text-align: center; letter-spacing: 0.5px; }
+    .badge-yes { background: #dcfce7; color: #15803d; border: 1px solid #86efac; }
+    .badge-no { background: #fee2e2; color: #b91c1c; border: 1px solid #fca5a5; }
+    .badge-active { background: #dcfce7; color: #166534; }
+    .badge-inactive { background: #fee2e2; color: #991b1b; }
+    .footer-row td { background: #f1f5f9 !important; font-weight: 800; border-top: 2px solid #0f172a; border-bottom: 2px solid #0f172a; color: #0f172a; }
+    .print-btn-bar { display: flex; justify-content: flex-end; gap: 10px; margin-bottom: 14px; }
+    .print-btn { background: #2563eb; color: #fff; border: none; padding: 8px 16px; border-radius: 6px; font-weight: 600; cursor: pointer; font-size: 12px; }
+    @media print {
+      .print-btn-bar { display: none !important; }
+      body { padding: 0; }
+    }
+  </style>
+</head>
+<body>
+  <div class="print-btn-bar">
+    <button class="print-btn" onclick="window.print()">Print Report / Save as PDF</button>
+    <button class="print-btn" style="background:#64748b" onclick="window.close()">Close</button>
+  </div>
+
+  <div class="header-bar">
+    <div>
+      <h1 class="company-title">KSP TRANSPORT</h1>
+      <div class="report-subtitle">Truck Master Compliance Directory</div>
+      <p class="meta-text">Vehicle fleet inventory with document compliance status (RC, FC, Tax, TDS, Insurance, Permit)</p>
+    </div>
+    <div style="text-align: right;">
+      <p class="meta-text"><strong>Generated On:</strong> ${generatedAt}</p>
+      <p class="meta-text"><strong>Total Trucks:</strong> ${totalCount}</p>
+      ${statusFilter ? `<p class="meta-text"><strong>Status:</strong> ${statusFilter}</p>` : ''}
+      ${search ? `<p class="meta-text"><strong>Filter:</strong> ${search}</p>` : ''}
+    </div>
+  </div>
+
+  <div class="summary-cards">
+    <div class="card-box">Total Trucks: <strong>${totalCount}</strong></div>
+    <div class="card-box">Active: <strong style="color:#16a34a">${activeCount}</strong></div>
+    <div class="card-box">Inactive: <strong style="color:#dc2626">${inactiveCount}</strong></div>
+    <div class="card-box">Fully Compliant (All Docs): <strong style="color:#2563eb">${fullyCompliant}</strong></div>
+  </div>
+
+  <table>
+    <thead>
+      <tr>
+        <th style="width: 45px;" class="center">S.No</th>
+        <th>Truck / Lorry Number</th>
+        <th>Type</th>
+        <th class="center">RC</th>
+        <th class="center">FC (Fitness)</th>
+        <th class="center">Road Tax</th>
+        <th class="center">TDS Certificate</th>
+        <th class="center">Insurance</th>
+        <th class="center">Permit</th>
+        <th class="center">Status</th>
+      </tr>
+    </thead>
+    <tbody>
+      ${items.map((v, idx) => `
+        <tr>
+          <td class="center">${idx + 1}</td>
+          <td><strong style="color: #1e40af; font-size: 12.5px;">${v.lorry_number}</strong></td>
+          <td>${v.vehicle_type || '—'}</td>
+          <td class="center">
+            <span class="badge ${hasRC(v) ? 'badge-yes' : 'badge-no'}">${hasRC(v) ? 'YES' : 'NO'}</span>
+          </td>
+          <td class="center">
+            <span class="badge ${hasFC(v) ? 'badge-yes' : 'badge-no'}">${hasFC(v) ? 'YES' : 'NO'}</span>
+          </td>
+          <td class="center">
+            <span class="badge ${hasTax(v) ? 'badge-yes' : 'badge-no'}">${hasTax(v) ? 'YES' : 'NO'}</span>
+          </td>
+          <td class="center">
+            <span class="badge ${hasTDS(v) ? 'badge-yes' : 'badge-no'}">${hasTDS(v) ? 'YES' : 'NO'}</span>
+          </td>
+          <td class="center">
+            <span class="badge ${hasIns(v) ? 'badge-yes' : 'badge-no'}">${hasIns(v) ? 'YES' : 'NO'}</span>
+          </td>
+          <td class="center">
+            <span class="badge ${hasPermit(v) ? 'badge-yes' : 'badge-no'}">${hasPermit(v) ? 'YES' : 'NO'}</span>
+          </td>
+          <td class="center">
+            <span class="badge ${v.status === 'ACTIVE' ? 'badge-active' : 'badge-inactive'}">${v.status || 'ACTIVE'}</span>
+          </td>
+        </tr>
+      `).join('')}
+      <tr class="footer-row">
+        <td class="center" colspan="2">TOTAL FLEET</td>
+        <td colspan="7"><strong>${totalCount} Trucks (${activeCount} Active, ${inactiveCount} Inactive, ${fullyCompliant} Fully Compliant)</strong></td>
+        <td class="center"><strong>${totalCount} Trucks</strong></td>
+      </tr>
+    </tbody>
+  </table>
+
+  <div style="margin-top: 24px; display: flex; justify-content: space-between; font-size: 10px; color: #94a3b8; border-top: 1px solid #e2e8f0; padding-top: 8px;">
+    <span>KSP Service Management ERP · Truck Master</span>
+    <span>Page 1 of 1</span>
+  </div>
+</body>
+</html>
+      `;
+
+      const printWin = window.open('', '_blank', 'width=1100,height=850');
+      if (!printWin) {
+        alert('Please allow pop-ups for this website to print.');
+        setIsPrintingList(false);
+        return;
+      }
+      printWin.document.open();
+      printWin.document.write(printHtml);
+      printWin.document.close();
+      printWin.focus();
+      setTimeout(() => {
+        printWin.print();
+      }, 500);
+    } catch (err: any) {
+      console.error('Failed to print vehicles', err);
+      alert(err.message || 'Failed to print vehicle compliance report.');
+    } finally {
+      setIsPrintingList(false);
+    }
+  };
+
+  const handleExportExcel = async () => {
+    try {
+      setIsExportingList(true);
+      const res = await vehicleService.getVehicles({ limit: 10000, search: search || undefined, status: statusFilter || undefined });
+      const items: Vehicle[] = res?.data?.items || [];
+      if (items.length === 0) {
+        alert('No vehicle records found to export.');
+        setIsExportingList(false);
+        return;
+      }
+
+      const hasRC = (v: Vehicle) => Boolean(v.rc_number || v.rc_photo_url || v.rc_photo_back_url || v.rc_reg_date || v.rc_expiry_date);
+      const hasFC = (v: Vehicle) => Boolean(v.fc_number || v.fc_expiry_date || v.fc_photo_url);
+      const hasTax = (v: Vehicle) => Boolean(v.tax_expiry_date || v.tax_photo_url);
+      const hasTDS = (v: Vehicle) => Boolean(v.tds_number || v.tds_expiry_date || v.tds_certificate_url || v.dts_number || v.dts_expiry_date || v.dts_certificate_url || v.tds_certificate_url_2);
+      const hasIns = (v: Vehicle) => Boolean(v.insurance_policy_number || v.insurance_expiry_date || v.insurance_photo_url);
+      const hasPermit = (v: Vehicle) => Boolean(v.permit_number || v.permit_expiry_date || v.permit_photo_url);
+
+      const excelRows: any[] = items.map((v, idx) => ({
+        'S.No': idx + 1,
+        'Truck / Lorry No': v.lorry_number,
+        'Vehicle Type': v.vehicle_type || '—',
+        'Capacity (Tons)': v.capacity_tons || '—',
+        'RC': hasRC(v) ? 'YES' : 'NO',
+        'FC': hasFC(v) ? 'YES' : 'NO',
+        'Road Tax': hasTax(v) ? 'YES' : 'NO',
+        'TDS': hasTDS(v) ? 'YES' : 'NO',
+        'Insurance': hasIns(v) ? 'YES' : 'NO',
+        'Permit': hasPermit(v) ? 'YES' : 'NO',
+        'Status': v.status || 'ACTIVE',
+      }));
+
+      // Blank separator
+      excelRows.push({
+        'S.No': '',
+        'Truck / Lorry No': '',
+        'Vehicle Type': '',
+        'Capacity (Tons)': '',
+        'RC': '',
+        'FC': '',
+        'Road Tax': '',
+        'TDS': '',
+        'Insurance': '',
+        'Permit': '',
+        'Status': '',
+      });
+
+      // Total row
+      excelRows.push({
+        'S.No': '',
+        'Truck / Lorry No': 'TOTAL TRUCKS',
+        'Vehicle Type': `Count: ${items.length}`,
+        'Capacity (Tons)': `Active: ${items.filter(v => v.status === 'ACTIVE').length}`,
+        'RC': '',
+        'FC': '',
+        'Road Tax': '',
+        'TDS': '',
+        'Insurance': '',
+        'Permit': '',
+        'Status': `Total: ${items.length}`,
+      });
+
+      const worksheet = XLSX.utils.json_to_sheet(excelRows);
+      worksheet['!cols'] = [
+        { wch: 8 },  // S.No
+        { wch: 22 }, // Lorry No
+        { wch: 18 }, // Type
+        { wch: 16 }, // Capacity
+        { wch: 10 }, // RC
+        { wch: 10 }, // FC
+        { wch: 12 }, // Road Tax
+        { wch: 10 }, // TDS
+        { wch: 12 }, // Insurance
+        { wch: 10 }, // Permit
+        { wch: 14 }, // Status
+      ];
+
+      const workbook = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(workbook, worksheet, 'Trucks');
+      const dateStr = new Date().toISOString().split('T')[0];
+      XLSX.writeFile(workbook, `KSP_Trucks_List_${dateStr}.xlsx`);
+    } catch (err: any) {
+      console.error('Failed to export vehicles', err);
+      alert(err.message || 'Failed to export vehicles.');
+    } finally {
+      setIsExportingList(false);
+    }
+  };
+
+
   const loadVehicles = async () => {
     try {
       setIsLoading(true);
@@ -1128,13 +1424,13 @@ export const VehiclesPage: React.FC = () => {
       permit_expiry_date: vehicle.permit_expiry_date ? vehicle.permit_expiry_date.split('T')[0] : '',
       permit_photo_url: vehicle.permit_photo_url || '',
       tds_number: vehicle.tds_number || vehicle.dts_number || '',
-      tds_expiry_date: vehicle.tds_expiry_date ? vehicle.tds_expiry_date.split('T')[0] : (vehicle.dts_expiry_date ? vehicle.dts_expiry_date.split('T')[0] : getNextMarch31st()),
+      tds_expiry_date: snapToMarch31(vehicle.tds_expiry_date || vehicle.dts_expiry_date),
       tds_certificate_url: vehicle.tds_certificate_url || vehicle.dts_certificate_url || '',
       tds_certificate_url_2: vehicle.tds_certificate_url_2 || '',
       dts_number: vehicle.tds_number || vehicle.dts_number || '',
-      dts_expiry_date: vehicle.tds_expiry_date ? vehicle.tds_expiry_date.split('T')[0] : (vehicle.dts_expiry_date ? vehicle.dts_expiry_date.split('T')[0] : getNextMarch31st()),
+      dts_expiry_date: snapToMarch31(vehicle.tds_expiry_date || vehicle.dts_expiry_date),
       dts_certificate_url: vehicle.tds_certificate_url || vehicle.dts_certificate_url || '',
-      tax_expiry_date: vehicle.tax_expiry_date ? vehicle.tax_expiry_date.split('T')[0] : getNextMarch31st(),
+      tax_expiry_date: snapToMarch31(vehicle.tax_expiry_date),
       tax_photo_url: vehicle.tax_photo_url || '',
       pan_number: vehicle.pan_number || '',
       pan_card_url: vehicle.pan_card_url || '',
@@ -1396,13 +1692,13 @@ export const VehiclesPage: React.FC = () => {
         permit_expiry_date: formData.permit_expiry_date || null,
         permit_photo_url: formData.permit_photo_url || null,
         tds_number: formData.tds_number || formData.dts_number || null,
-        tds_expiry_date: formData.tds_expiry_date || formData.dts_expiry_date || null,
+        tds_expiry_date: snapToMarch31(formData.tds_expiry_date || formData.dts_expiry_date),
         tds_certificate_url: formData.tds_certificate_url || formData.dts_certificate_url || null,
         tds_certificate_url_2: formData.tds_certificate_url_2 || null,
         dts_number: formData.tds_number || formData.dts_number || null,
-        dts_expiry_date: formData.tds_expiry_date || formData.dts_expiry_date || null,
+        dts_expiry_date: snapToMarch31(formData.tds_expiry_date || formData.dts_expiry_date),
         dts_certificate_url: formData.tds_certificate_url || formData.dts_certificate_url || null,
-        tax_expiry_date: formData.tax_expiry_date || null,
+        tax_expiry_date: snapToMarch31(formData.tax_expiry_date),
         tax_photo_url: formData.tax_photo_url || null,
         pan_number: formData.pan_number || null,
         pan_card_url: formData.pan_card_url || null,
@@ -1557,25 +1853,29 @@ export const VehiclesPage: React.FC = () => {
     },
     {
       header: 'Road Tax Expiry',
-      render: (v) => (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
-          <span style={{ fontSize: '13px', fontWeight: 700, color: '#334155' }}>
-            {fmtDate(v.tax_expiry_date) || '31 Mar (Yearly)'}
-          </span>
-          <ExpiryBadge date={v.tax_expiry_date} />
-        </div>
-      ),
+      render: (v) => {
+        const snapped = snapToMarch31(v.tax_expiry_date);
+        return (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '3px', whiteSpace: 'nowrap', minWidth: '115px' }}>
+            <span style={{ fontSize: '13px', fontWeight: 700, color: '#334155', whiteSpace: 'nowrap' }}>
+              {fmtDate(snapped)}
+            </span>
+            <ExpiryBadge date={snapped} />
+          </div>
+        );
+      },
     },
     {
       header: 'TDS Expiry',
       render: (v) => {
-        const d = v.tds_expiry_date || v.dts_expiry_date;
+        const raw = v.tds_expiry_date || v.dts_expiry_date;
+        const snapped = snapToMarch31(raw);
         return (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
-            <span style={{ fontSize: '13px', fontWeight: 700, color: '#334155' }}>
-              {fmtDate(d) || '31 Mar (Yearly)'}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '3px', whiteSpace: 'nowrap', minWidth: '115px' }}>
+            <span style={{ fontSize: '13px', fontWeight: 700, color: '#334155', whiteSpace: 'nowrap' }}>
+              {fmtDate(snapped)}
             </span>
-            <ExpiryBadge date={d} />
+            <ExpiryBadge date={snapped} />
           </div>
         );
       },
@@ -1691,11 +1991,11 @@ export const VehiclesPage: React.FC = () => {
 
       {/* ── Table Card ──────────────────────────────────────────────────── */}
       <div className="card">
-        <div className="search-filter-bar" style={{ marginBottom: '18px', display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
-          <div style={{ flex: '1 1 260px', minWidth: '220px', maxWidth: '380px' }}>
+        <div className="search-filter-bar" style={{ marginBottom: '18px', display: 'flex', justifyContent: 'flex-start', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
+          <div style={{ width: '200px', maxWidth: '100%' }}>
             <select
               className="form-control form-select"
-              style={{ width: '100%', height: '38px', fontWeight: 600 }}
+              style={{ width: '100%', height: '38px', fontWeight: 600, fontSize: '13px' }}
               value={search}
               onChange={(e) => {
                 setSearch(e.target.value);
@@ -1715,7 +2015,7 @@ export const VehiclesPage: React.FC = () => {
 
           <select
             className="form-control form-select"
-            style={{ width: '160px', height: '38px' }}
+            style={{ width: '125px', height: '38px', fontSize: '13px', flexShrink: 0 }}
             value={statusFilter}
             onChange={(e) => {
               setStatusFilter(e.target.value);
@@ -1727,6 +2027,54 @@ export const VehiclesPage: React.FC = () => {
             <option value="INACTIVE">Inactive Only</option>
           </select>
 
+          <button
+            type="button"
+            onClick={handlePrintVehicles}
+            disabled={isPrintingList}
+            className="btn btn-outline"
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              borderColor: '#3b82f6',
+              color: '#1d4ed8',
+              background: '#eff6ff',
+              fontWeight: 600,
+              height: '38px',
+              padding: '0 14px',
+              fontSize: '13px',
+              flexShrink: 0,
+            }}
+            title="Print Truck Master Compliance Directory"
+          >
+            {isPrintingList ? <Loader2 size={14} className="animate-spin" /> : <Printer size={14} />}
+            {isPrintingList ? 'Preparing...' : 'Print'}
+          </button>
+
+          <button
+            type="button"
+            onClick={handleExportExcel}
+            disabled={isExportingList}
+            className="btn btn-outline"
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              borderColor: '#10b981',
+              color: '#059669',
+              background: '#ecfdf5',
+              fontWeight: 600,
+              height: '38px',
+              padding: '0 14px',
+              fontSize: '13px',
+              flexShrink: 0,
+            }}
+            title="Download Truck Master Compliance List as Excel"
+          >
+            {isExportingList ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
+            {isExportingList ? 'Exporting...' : 'Download'}
+          </button>
+
           {(search || statusFilter) && (
             <button
               type="button"
@@ -1736,7 +2084,7 @@ export const VehiclesPage: React.FC = () => {
                 setPage(1);
               }}
               className="btn btn-outline"
-              style={{ height: '38px', padding: '0 14px', fontSize: '13px' }}
+              style={{ height: '38px', padding: '0 14px', fontSize: '13px', flexShrink: 0 }}
               title="Reset vehicle filters"
             >
               Reset

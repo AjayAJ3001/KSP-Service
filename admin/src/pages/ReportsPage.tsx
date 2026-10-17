@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import * as XLSX from 'xlsx';
 import {
-  Printer, Download, Calendar, RefreshCw, FileSpreadsheet, Loader2,
+  Printer, Download, RefreshCw, FileSpreadsheet, Loader2,
 } from 'lucide-react';
 import { reportService, partyService, driverService, vehicleService, unitService } from '../services/adminService';
 import { Party, Driver, Vehicle, Unit } from '../types';
@@ -30,21 +30,6 @@ function formatCurrency(val: number | string) {
   return `${String.fromCharCode(8377)}${num.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
-function getThisWeekRange() {
-  const today = new Date();
-  const day = today.getDay(); // 0 is Sun, 1 is Mon...
-  const diffToMonday = (day === 0 ? -6 : 1) - day;
-  const start = new Date(today);
-  start.setDate(today.getDate() + diffToMonday);
-  start.setHours(0, 0, 0, 0);
-  const end = new Date(start);
-  end.setDate(start.getDate() + 6);
-  end.setHours(23, 59, 59, 999);
-  const pad = (n: number) => String(n).padStart(2, '0');
-  const fmt = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
-  return { from: fmt(start), to: fmt(end) };
-}
-
 export const ReportsPage: React.FC = () => {
   const [fromDate, setFromDate] = useState('');
   const [toDate, setToDate] = useState('');
@@ -63,9 +48,6 @@ export const ReportsPage: React.FC = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [isExportingExcel, setIsExportingExcel] = useState(false);
   const [isPrinting, setIsPrinting] = useState(false);
-
-  const thisWeek = getThisWeekRange();
-  const isThisWeekActive = fromDate === thisWeek.from && toDate === thisWeek.to;
 
   useEffect(() => {
     loadLookups();
@@ -111,16 +93,6 @@ export const ReportsPage: React.FC = () => {
       setUnits(Array.isArray(u.data) ? u.data : (u.data as any)?.items || []);
     } catch (err) {
       console.error('Failed to load lookups', err);
-    }
-  };
-
-  const handleThisWeekClick = () => {
-    if (isThisWeekActive) {
-      setFromDate('');
-      setToDate('');
-    } else {
-      setFromDate(thisWeek.from);
-      setToDate(thisWeek.to);
     }
   };
 
@@ -286,7 +258,7 @@ export const ReportsPage: React.FC = () => {
 
   const handlePrintReport = () => {
     if (tripData.trips.length === 0) {
-      alert('No trip records matching current filters to print.');
+      alert('No trip records matching current filters to download/print.');
       return;
     }
 
@@ -436,6 +408,83 @@ export const ReportsPage: React.FC = () => {
     downloadCSV(filename, tripHeaders, [tripRow(t)]);
   };
 
+  const handlePrintSingleTrip = (trip: any) => {
+    const singleTripHtml = `
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Trip Voucher #${trip.id} - ${trip.lorry_number}</title>
+  <style>
+    * { box-sizing: border-box; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif; margin: 0; padding: 24px; color: #1e293b; background: #fff; font-size: 13px; }
+    @page { size: portrait; margin: 12mm; }
+    .card { border: 2px solid #0f172a; border-radius: 8px; padding: 20px; }
+    .header { text-align: center; border-bottom: 2px solid #0f172a; padding-bottom: 12px; margin-bottom: 16px; }
+    .title { font-size: 22px; font-weight: 800; color: #0f172a; margin: 0; }
+    .sub { font-size: 12px; color: #64748b; margin-top: 4px; text-transform: uppercase; font-weight: 700; letter-spacing: 0.5px; }
+    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 16px; }
+    .row-item { display: flex; justify-content: space-between; border-bottom: 1px dashed #cbd5e1; padding: 6px 0; }
+    .label { color: #64748b; font-weight: 600; }
+    .val { font-weight: 700; color: #0f172a; }
+    .totals-box { background: #f8fafc; border: 1px solid #cbd5e1; border-radius: 6px; padding: 12px 16px; margin: 16px 0; }
+    .totals-row { display: flex; justify-content: space-between; padding: 4px 0; font-size: 14px; }
+    .grand { font-size: 16px; font-weight: 800; color: #0f172a; border-top: 1px solid #94a3b8; padding-top: 8px; margin-top: 4px; }
+    .signatures { display: flex; justify-content: space-between; margin-top: 40px; padding-top: 20px; }
+    .sig-line { border-top: 1px solid #0f172a; width: 180px; text-align: center; font-size: 11px; padding-top: 6px; color: #475569; }
+    .print-btn-bar { display: flex; justify-content: flex-end; gap: 10px; margin-bottom: 16px; }
+    .btn { background: #2563eb; color: #fff; border: none; padding: 8px 16px; border-radius: 6px; font-weight: 600; cursor: pointer; }
+    @media print { .print-btn-bar { display: none !important; } }
+  </style>
+</head>
+<body>
+  <div class="print-btn-bar">
+    <button class="btn" onclick="window.print()">Print Voucher</button>
+    <button class="btn" style="background:#64748b" onclick="window.close()">Close</button>
+  </div>
+  <div class="card">
+    <div class="header">
+      <h1 class="title">KSP TRANSPORT &amp; LOGISTICS</h1>
+      <div class="sub">OFFICIAL FREIGHT DISPATCH VOUCHER / CHALLAN</div>
+      <div style="margin-top: 6px; font-size: 12px; font-weight: 700; color: #2563eb;">Trip Reference #TRIP-${trip.id}</div>
+    </div>
+    <div class="grid">
+      <div class="row-item"><span class="label">Trip Date:</span><span class="val">${formatDateDMY(trip.trip_date)}</span></div>
+      <div class="row-item"><span class="label">Lorry Number:</span><span class="val">${trip.lorry_number}</span></div>
+      <div class="row-item"><span class="label">Party Name:</span><span class="val">${trip.party_name}</span></div>
+      <div class="row-item"><span class="label">Driver Name:</span><span class="val">${trip.driver_name || '-'}</span></div>
+      <div class="row-item"><span class="label">Route / Destination:</span><span class="val">${trip.from_location || ''} &rarr; ${trip.to_location || ''}</span></div>
+      <div class="row-item"><span class="label">Status:</span><span class="val">${trip.status}</span></div>
+      <div class="row-item"><span class="label">Goods Weight:</span><span class="val">${trip.goods_weight || 0} ${trip.unit_name || 'Tons'}</span></div>
+      <div class="row-item"><span class="label">Freight Rate:</span><span class="val">₹${parseFloat(String(trip.freight_rate || 0)).toLocaleString('en-IN')}/${trip.unit_name || 'T'}</span></div>
+    </div>
+
+    <div class="totals-box">
+      <div class="totals-row"><span>Total Freight Billed:</span><strong>₹${parseFloat(String(trip.total_freight || 0)).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</strong></div>
+      <div class="totals-row"><span>Advance Paid to Driver:</span><strong>₹${parseFloat(String(trip.advance_paid || 0)).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</strong></div>
+      <div class="totals-row"><span>Amount Received:</span><strong style="color:#15803d">₹${parseFloat(String(trip.total_received || 0)).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</strong></div>
+      <div class="totals-row grand"><span>Balance Due from Party:</span><strong style="color:#b91c1c">₹${parseFloat(String(trip.balance_due || 0)).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</strong></div>
+    </div>
+
+    <div class="signatures">
+      <div class="sig-line">Driver's Signature</div>
+      <div class="sig-line">Prepared By (Manager)</div>
+      <div class="sig-line">Authorized Signatory</div>
+    </div>
+  </div>
+</body>
+</html>
+    `;
+
+    const printWin = window.open('', '_blank', 'width=800,height=900');
+    if (!printWin) return;
+    printWin.document.open();
+    printWin.document.write(singleTripHtml);
+    printWin.document.close();
+    printWin.focus();
+    setTimeout(() => { printWin.print(); }, 400);
+  };
+
   return (
     <div>
       {/* ── Executive Header ────────────────────────────────────────────── */}
@@ -465,13 +514,13 @@ export const ReportsPage: React.FC = () => {
 
       {/* ── Professional Unified Filter Toolbar ─────────────────────────── */}
       <div className="card" style={{ padding: '18px 22px', marginBottom: '22px', borderRadius: '10px' }}>
-        {/* Top Control Line: Date Range + This Week */}
+        {/* Top Control Line: Date Range + Action Buttons (Reset, Excel, Download, CSV) */}
         <div
           style={{
             display: 'flex',
             alignItems: 'center',
             flexWrap: 'wrap',
-            gap: '14px',
+            gap: '12px',
             paddingBottom: '14px',
             borderBottom: '1px solid var(--border-color, #e5e7eb)',
           }}
@@ -498,10 +547,12 @@ export const ReportsPage: React.FC = () => {
               onChange={e => setToDate(e.target.value)}
             />
           </div>
+
+          {/* Reset */}
           <button
             type="button"
-            onClick={handleThisWeekClick}
-            className={`btn btn-sm ${isThisWeekActive ? 'btn-primary' : 'btn-outline'}`}
+            onClick={resetFilters}
+            className="btn btn-outline"
             style={{
               height: '38px',
               padding: '0 14px',
@@ -510,17 +561,88 @@ export const ReportsPage: React.FC = () => {
               display: 'flex',
               alignItems: 'center',
               gap: '6px',
-              borderRadius: '6px',
               flexShrink: 0,
             }}
-            title="Filter by current week"
+            title="Reset all filters"
           >
-            <Calendar size={14} />
-            This Week
+            <RefreshCw size={14} /> Reset
+          </button>
+
+          {/* Excel */}
+          <button
+            type="button"
+            onClick={handleExportExcel}
+            disabled={isExportingExcel}
+            className="btn btn-outline"
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              borderColor: '#10b981',
+              color: '#059669',
+              background: '#ecfdf5',
+              fontWeight: 600,
+              height: '38px',
+              padding: '0 14px',
+              fontSize: '13px',
+              flexShrink: 0,
+            }}
+            title="Download report as an Excel spreadsheet with totals"
+          >
+            {isExportingExcel ? <Loader2 size={14} className="animate-spin" /> : <FileSpreadsheet size={14} />}
+            {isExportingExcel ? 'Exporting...' : 'Excel'}
+          </button>
+
+          {/* Print (Direct Print Option) */}
+          <button
+            type="button"
+            onClick={handlePrintReport}
+            disabled={isPrinting}
+            className="btn btn-outline"
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              borderColor: '#3b82f6',
+              color: '#1d4ed8',
+              background: '#eff6ff',
+              fontWeight: 600,
+              height: '38px',
+              padding: '0 14px',
+              fontSize: '13px',
+              flexShrink: 0,
+            }}
+            title="Direct print trip dispatch audit report"
+          >
+            {isPrinting ? <Loader2 size={14} className="animate-spin" /> : <Printer size={14} />}
+            {isPrinting ? 'Preparing...' : 'Print'}
+          </button>
+
+          {/* CSV */}
+          <button
+            type="button"
+            onClick={downloadFullReport}
+            className="btn btn-outline"
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              borderColor: '#64748b',
+              color: '#334155',
+              background: '#f8fafc',
+              fontWeight: 600,
+              height: '38px',
+              padding: '0 14px',
+              fontSize: '13px',
+              flexShrink: 0,
+            }}
+            title="Download report as CSV"
+          >
+            <Download size={14} /> CSV
           </button>
         </div>
 
-        {/* Bottom Control Line: Entity Filters (Party, Truck, Unit, Driver, Status, Reset) */}
+        {/* Bottom Control Line: Entity Filters (Party, Truck, Unit, Driver, Status) */}
         <div
           style={{
             display: 'flex',
@@ -597,71 +719,6 @@ export const ReportsPage: React.FC = () => {
               <option value="CANCELLED">Cancelled</option>
             </select>
           </div>
-
-          {/* Reset Filters */}
-          <button
-            type="button"
-            onClick={resetFilters}
-            className="btn btn-outline"
-            style={{ height: '38px', padding: '0 14px', fontSize: '13px', display: 'flex', alignItems: 'center', gap: '6px' }}
-            title="Reset all filters"
-          >
-            <RefreshCw size={14} /> Reset
-          </button>
-
-          {/* Print & Download Options Toolbar */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <button
-              onClick={handlePrintReport}
-              disabled={isPrinting}
-              className="btn btn-outline"
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: '5px',
-                borderColor: '#3b82f6',
-                color: '#1d4ed8',
-                background: '#eff6ff',
-                fontWeight: 600,
-                height: '38px',
-                padding: '0 12px',
-                fontSize: '12.5px',
-              }}
-              title="Direct print trip dispatch audit report"
-            >
-              {isPrinting ? <Loader2 size={14} className="animate-spin" /> : <Printer size={14} />}
-              {isPrinting ? 'Preparing...' : 'Print'}
-            </button>
-            <button
-              onClick={handleExportExcel}
-              disabled={isExportingExcel}
-              className="btn btn-outline"
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: '5px',
-                borderColor: '#10b981',
-                color: '#059669',
-                background: '#ecfdf5',
-                fontWeight: 600,
-                height: '38px',
-                padding: '0 12px',
-                fontSize: '12.5px',
-              }}
-              title="Download report as an Excel spreadsheet with totals"
-            >
-              {isExportingExcel ? <Loader2 size={14} className="animate-spin" /> : <FileSpreadsheet size={14} />}
-              {isExportingExcel ? 'Exporting...' : 'Excel'}
-            </button>
-            <button
-              onClick={downloadFullReport}
-              className="btn btn-outline"
-              style={{ display: 'flex', alignItems: 'center', gap: '5px', height: '38px', padding: '0 10px', fontSize: '12.5px' }}
-              title="Download report as CSV"
-            >
-              <Download size={14} /> CSV
-            </button>
-          </div>
         </div>
       </div>
 
@@ -680,7 +737,7 @@ export const ReportsPage: React.FC = () => {
                 <th style={{ textAlign: 'right' }}>Received</th>
                 <th style={{ textAlign: 'right' }}>Balance Due</th>
                 <th style={{ textAlign: 'center' }}>Status</th>
-                <th style={{ textAlign: 'center' }}>Download</th>
+                <th style={{ textAlign: 'center' }}>Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -711,16 +768,37 @@ export const ReportsPage: React.FC = () => {
                     </td>
                     <td style={{ textAlign: 'center' }}><StatusBadge status={t.status} /></td>
                     <td style={{ textAlign: 'center', whiteSpace: 'nowrap' }}>
-                      <button
-                        type="button"
-                        onClick={() => downloadSingleTripCSV(t)}
-                        className="btn btn-outline btn-sm"
-                        style={{ padding: '4px 8px', fontSize: '12px', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
-                        title="Download this trip (CSV)"
-                      >
-                        <Download size={13} />
-                        <span>CSV</span>
-                      </button>
+                      <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+                        <button
+                          type="button"
+                          onClick={() => handlePrintSingleTrip(t)}
+                          className="btn btn-outline btn-sm"
+                          style={{
+                            padding: '4px 8px',
+                            fontSize: '12px',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '4px',
+                            color: '#1d4ed8',
+                            borderColor: '#bfdbfe',
+                            background: '#eff6ff',
+                          }}
+                          title="Direct print trip voucher"
+                        >
+                          <Printer size={13} />
+                          <span>Print</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => downloadSingleTripCSV(t)}
+                          className="btn btn-outline btn-sm"
+                          style={{ padding: '4px 8px', fontSize: '12px', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
+                          title="Download this trip (CSV)"
+                        >
+                          <Download size={13} />
+                          <span>CSV</span>
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))

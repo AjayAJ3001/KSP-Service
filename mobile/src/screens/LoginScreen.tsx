@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -10,8 +10,11 @@ import {
   Platform,
   ScrollView,
   Modal,
+  Animated,
+  Easing,
+  Pressable,
 } from 'react-native';
-import { Truck, Eye, EyeOff, Lock, User as UserIcon, AlertCircle, Server, CheckCircle2, XCircle, Wifi } from 'lucide-react-native';
+import { Truck, Eye, EyeOff, Lock, User as UserIcon, AlertCircle, Server, CheckCircle2, XCircle, Wifi, Shield, Briefcase } from 'lucide-react-native';
 import { useAuth } from '../context/AuthContext';
 import { COLORS, SPACING, RADIUS, SHADOWS } from '../constants/theme';
 import { getServerBaseUrl, setServerBaseUrl, checkServerHealth, CURRENT_WIFI_IP } from '../services/api';
@@ -22,6 +25,8 @@ export const LoginScreen: React.FC<{ navigation: any }> = ({ navigation }) => {
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [isUserFocused, setIsUserFocused] = useState(false);
+  const [isPassFocused, setIsPassFocused] = useState(false);
 
   // Server settings modal state
   const [currentServerUrl, setCurrentServerUrl] = useState(getServerBaseUrl());
@@ -30,12 +35,177 @@ export const LoginScreen: React.FC<{ navigation: any }> = ({ navigation }) => {
   const [testResult, setTestResult] = useState<{ ok: boolean; message: string } | null>(null);
   const [testingConnection, setTestingConnection] = useState(false);
 
+  // ── Animation Values ──────────────────────────────────────────────────────
+  const logoScale = useRef(new Animated.Value(0.4)).current;
+  const logoFloat = useRef(new Animated.Value(0)).current;
+  const glowScale = useRef(new Animated.Value(1)).current;
+  const glowOpacity = useRef(new Animated.Value(0.25)).current;
+  const brandTranslateY = useRef(new Animated.Value(-24)).current;
+  const brandOpacity = useRef(new Animated.Value(0)).current;
+
+  const cardTranslateY = useRef(new Animated.Value(45)).current;
+  const cardOpacity = useRef(new Animated.Value(0)).current;
+  const shakeAnim = useRef(new Animated.Value(0)).current;
+
+  const inputUserAnim = useRef(new Animated.Value(20)).current;
+  const inputUserOpacity = useRef(new Animated.Value(0)).current;
+  const inputPassAnim = useRef(new Animated.Value(20)).current;
+  const inputPassOpacity = useRef(new Animated.Value(0)).current;
+
+  const btnScale = useRef(new Animated.Value(1)).current;
+  const btnTranslateY = useRef(new Animated.Value(20)).current;
+  const btnOpacity = useRef(new Animated.Value(0)).current;
+
+  const footerOpacity = useRef(new Animated.Value(0)).current;
+
   const { login } = useAuth();
 
   useEffect(() => {
     setCurrentServerUrl(getServerBaseUrl());
     setCustomServerUrl(getServerBaseUrl());
+
+    // ── Initial Entry Sequence ──
+    Animated.parallel([
+      // Logo spring in
+      Animated.spring(logoScale, {
+        toValue: 1,
+        friction: 6,
+        tension: 45,
+        useNativeDriver: true,
+      }),
+      // Brand text glide down
+      Animated.timing(brandTranslateY, {
+        toValue: 0,
+        duration: 550,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: true,
+      }),
+      Animated.timing(brandOpacity, {
+        toValue: 1,
+        duration: 500,
+        useNativeDriver: true,
+      }),
+      // Card glide up
+      Animated.timing(cardTranslateY, {
+        toValue: 0,
+        duration: 650,
+        easing: Easing.out(Easing.back(1.1)),
+        useNativeDriver: true,
+      }),
+      Animated.timing(cardOpacity, {
+        toValue: 1,
+        duration: 550,
+        useNativeDriver: true,
+      }),
+    ]).start(() => {
+      // Staggered inputs & button
+      Animated.stagger(100, [
+        Animated.parallel([
+          Animated.timing(inputUserAnim, { toValue: 0, duration: 400, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
+          Animated.timing(inputUserOpacity, { toValue: 1, duration: 350, useNativeDriver: true }),
+        ]),
+        Animated.parallel([
+          Animated.timing(inputPassAnim, { toValue: 0, duration: 400, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
+          Animated.timing(inputPassOpacity, { toValue: 1, duration: 350, useNativeDriver: true }),
+        ]),
+        Animated.parallel([
+          Animated.timing(btnTranslateY, { toValue: 0, duration: 400, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
+          Animated.timing(btnOpacity, { toValue: 1, duration: 350, useNativeDriver: true }),
+        ]),
+        Animated.timing(footerOpacity, { toValue: 1, duration: 450, useNativeDriver: true }),
+      ]).start();
+    });
+
+    // ── Continuous Floating & Ambient Glow Breathing ──
+    const floatLoop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(logoFloat, {
+          toValue: -5,
+          duration: 1600,
+          easing: Easing.inOut(Easing.quad),
+          useNativeDriver: true,
+        }),
+        Animated.timing(logoFloat, {
+          toValue: 5,
+          duration: 1600,
+          easing: Easing.inOut(Easing.quad),
+          useNativeDriver: true,
+        }),
+      ])
+    );
+    floatLoop.start();
+
+    const glowLoop = Animated.loop(
+      Animated.sequence([
+        Animated.parallel([
+          Animated.timing(glowScale, {
+            toValue: 1.25,
+            duration: 1800,
+            easing: Easing.inOut(Easing.quad),
+            useNativeDriver: true,
+          }),
+          Animated.timing(glowOpacity, {
+            toValue: 0.1,
+            duration: 1800,
+            easing: Easing.inOut(Easing.quad),
+            useNativeDriver: true,
+          }),
+        ]),
+        Animated.parallel([
+          Animated.timing(glowScale, {
+            toValue: 1,
+            duration: 1800,
+            easing: Easing.inOut(Easing.quad),
+            useNativeDriver: true,
+          }),
+          Animated.timing(glowOpacity, {
+            toValue: 0.35,
+            duration: 1800,
+            easing: Easing.inOut(Easing.quad),
+            useNativeDriver: true,
+          }),
+        ]),
+      ])
+    );
+    glowLoop.start();
+
+    return () => {
+      floatLoop.stop();
+      glowLoop.stop();
+    };
   }, []);
+
+  // ── Shake animation on error ──
+  useEffect(() => {
+    if (error) {
+      Animated.sequence([
+        Animated.timing(shakeAnim, { toValue: -12, duration: 45, useNativeDriver: true }),
+        Animated.timing(shakeAnim, { toValue: 12, duration: 45, useNativeDriver: true }),
+        Animated.timing(shakeAnim, { toValue: -8, duration: 45, useNativeDriver: true }),
+        Animated.timing(shakeAnim, { toValue: 8, duration: 45, useNativeDriver: true }),
+        Animated.timing(shakeAnim, { toValue: -4, duration: 45, useNativeDriver: true }),
+        Animated.timing(shakeAnim, { toValue: 0, duration: 45, useNativeDriver: true }),
+      ]).start();
+    }
+  }, [error]);
+
+  const handlePressIn = () => {
+    Animated.spring(btnScale, {
+      toValue: 0.95,
+      speed: 50,
+      bounciness: 0,
+      useNativeDriver: true,
+    }).start();
+  };
+
+  const handlePressOut = () => {
+    Animated.spring(btnScale, {
+      toValue: 1,
+      speed: 30,
+      bounciness: 6,
+      useNativeDriver: true,
+    }).start();
+  };
 
   const handleLogin = async () => {
     if (!username.trim() || !password.trim()) {
@@ -93,19 +263,76 @@ export const LoginScreen: React.FC<{ navigation: any }> = ({ navigation }) => {
       style={styles.container}
     >
       <ScrollView contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled">
-        {/* Brand Banner */}
+        {/* Animated Brand Banner */}
         <View style={styles.brandContainer}>
-          <View style={styles.logoBadge}>
-            <Truck size={40} color={COLORS.white} />
+          <View style={styles.logoAnchor}>
+            {/* Ambient Breathing Glow */}
+            <Animated.View
+              style={[
+                styles.logoGlowRing,
+                {
+                  transform: [{ scale: glowScale }],
+                  opacity: glowOpacity,
+                },
+              ]}
+            />
+            {/* Floating Logo Badge */}
+            <Animated.View
+              style={[
+                styles.logoBadge,
+                {
+                  transform: [
+                    { scale: logoScale },
+                    { translateY: logoFloat },
+                  ],
+                },
+              ]}
+            >
+              <Truck size={42} color={COLORS.white} />
+            </Animated.View>
           </View>
-          <Text style={styles.brandName}>KSP TRANSPORT</Text>
-          <Text style={styles.brandTagline}>Mobile Driver & Operator Portal</Text>
+
+          <Animated.View
+            style={{
+              alignItems: 'center',
+              transform: [{ translateY: brandTranslateY }],
+              opacity: brandOpacity,
+            }}
+          >
+            <Text style={styles.brandName}>KSP TRANSPORT</Text>
+            <Text style={styles.brandTagline}>Mobile Driver & Operator Portal</Text>
+          </Animated.View>
         </View>
 
-        {/* Login Form Card */}
-        <View style={styles.card}>
-          <Text style={styles.cardTitle}>Sign In</Text>
-          <Text style={styles.cardSubtitle}>Use credentials created by your Administrator</Text>
+        {/* Animated Login Form Card */}
+        <Animated.View
+          style={[
+            styles.card,
+            {
+              opacity: cardOpacity,
+              transform: [
+                { translateY: cardTranslateY },
+                { translateX: shakeAnim },
+              ],
+            },
+          ]}
+        >
+          <View style={styles.cardHeaderRow}>
+            <View>
+              <Text style={styles.cardTitle}>Sign In</Text>
+              <Text style={styles.cardSubtitle}>Manager, Operator & Admin Portal</Text>
+            </View>
+            <View style={styles.roleBadgesRow}>
+              <View style={styles.roleBadge}>
+                <Briefcase size={11} color="#2563eb" />
+                <Text style={styles.roleBadgeText}>Manager</Text>
+              </View>
+              <View style={[styles.roleBadge, { backgroundColor: '#fef3c7', borderColor: '#fde68a' }]}>
+                <Shield size={11} color="#d97706" />
+                <Text style={[styles.roleBadgeText, { color: '#b45309' }]}>Admin</Text>
+              </View>
+            </View>
+          </View>
 
           {error ? (
             <View style={styles.errorBox}>
@@ -114,11 +341,28 @@ export const LoginScreen: React.FC<{ navigation: any }> = ({ navigation }) => {
             </View>
           ) : null}
 
-          {/* Username */}
-          <View style={styles.inputGroup}>
+          {/* Username Input with Animation & Focus Glow */}
+          <Animated.View
+            style={[
+              styles.inputGroup,
+              {
+                opacity: inputUserOpacity,
+                transform: [{ translateY: inputUserAnim }],
+              },
+            ]}
+          >
             <Text style={styles.label}>Username</Text>
-            <View style={styles.inputWrapper}>
-              <UserIcon size={20} color={COLORS.textLight} style={styles.inputIcon} />
+            <View
+              style={[
+                styles.inputWrapper,
+                isUserFocused && styles.inputWrapperFocused,
+              ]}
+            >
+              <UserIcon
+                size={20}
+                color={isUserFocused ? COLORS.accent : COLORS.textLight}
+                style={styles.inputIcon}
+              />
               <TextInput
                 style={styles.input}
                 placeholder="Enter your username"
@@ -127,15 +371,34 @@ export const LoginScreen: React.FC<{ navigation: any }> = ({ navigation }) => {
                 onChangeText={setUsername}
                 autoCapitalize="none"
                 autoCorrect={false}
+                onFocus={() => setIsUserFocused(true)}
+                onBlur={() => setIsUserFocused(false)}
               />
             </View>
-          </View>
+          </Animated.View>
 
-          {/* Password */}
-          <View style={styles.inputGroup}>
+          {/* Password Input with Animation & Focus Glow */}
+          <Animated.View
+            style={[
+              styles.inputGroup,
+              {
+                opacity: inputPassOpacity,
+                transform: [{ translateY: inputPassAnim }],
+              },
+            ]}
+          >
             <Text style={styles.label}>Password</Text>
-            <View style={styles.inputWrapper}>
-              <Lock size={20} color={COLORS.textLight} style={styles.inputIcon} />
+            <View
+              style={[
+                styles.inputWrapper,
+                isPassFocused && styles.inputWrapperFocused,
+              ]}
+            >
+              <Lock
+                size={20}
+                color={isPassFocused ? COLORS.accent : COLORS.textLight}
+                style={styles.inputIcon}
+              />
               <TextInput
                 style={[styles.input, { paddingRight: 44 }]}
                 placeholder="Enter your password"
@@ -144,52 +407,73 @@ export const LoginScreen: React.FC<{ navigation: any }> = ({ navigation }) => {
                 onChangeText={setPassword}
                 secureTextEntry={!showPassword}
                 autoCapitalize="none"
+                onFocus={() => setIsPassFocused(true)}
+                onBlur={() => setIsPassFocused(false)}
               />
               <TouchableOpacity
                 style={styles.eyeIcon}
                 onPress={() => setShowPassword(!showPassword)}
+                hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
               >
                 {showPassword ? (
-                  <EyeOff size={20} color={COLORS.textLight} />
+                  <EyeOff size={20} color={isPassFocused ? COLORS.accent : COLORS.textLight} />
                 ) : (
-                  <Eye size={20} color={COLORS.textLight} />
+                  <Eye size={20} color={isPassFocused ? COLORS.accent : COLORS.textLight} />
                 )}
               </TouchableOpacity>
             </View>
-          </View>
+          </Animated.View>
 
-          {/* Submit Button */}
-          <TouchableOpacity
-            style={[styles.loginBtn, isLoading && { opacity: 0.7 }]}
-            onPress={handleLogin}
-            disabled={isLoading}
+          {/* Animated Submit Button with Spring Scale Touch */}
+          <Animated.View
+            style={{
+              opacity: btnOpacity,
+              transform: [
+                { translateY: btnTranslateY },
+                { scale: btnScale },
+              ],
+            }}
           >
-            {isLoading ? (
-              <ActivityIndicator color={COLORS.white} />
-            ) : (
-              <Text style={styles.loginBtnText}>LOGIN</Text>
-            )}
+            <Pressable
+              style={[styles.loginBtn, isLoading && { opacity: 0.75 }]}
+              onPress={handleLogin}
+              onPressIn={handlePressIn}
+              onPressOut={handlePressOut}
+              disabled={isLoading}
+            >
+              {isLoading ? (
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                  <ActivityIndicator color={COLORS.white} />
+                  <Text style={styles.loginBtnText}>AUTHENTICATING...</Text>
+                </View>
+              ) : (
+                <Text style={styles.loginBtnText}>SECURE SIGN IN</Text>
+              )}
+            </Pressable>
+          </Animated.View>
+        </Animated.View>
+
+        {/* Server Connection Badge with Fade In */}
+        <Animated.View style={{ opacity: footerOpacity }}>
+          <TouchableOpacity
+            style={styles.serverStatusBtn}
+            onPress={() => {
+              setCustomServerUrl(getServerBaseUrl());
+              setTestResult(null);
+              setShowServerModal(true);
+            }}
+          >
+            <View style={styles.statusDot} />
+            <Server size={13} color="#94a3b8" />
+            <Text style={styles.serverStatusText} numberOfLines={1}>
+              API: {currentServerUrl}
+            </Text>
           </TouchableOpacity>
-        </View>
 
-        {/* Server Connection Badge */}
-        <TouchableOpacity
-          style={styles.serverStatusBtn}
-          onPress={() => {
-            setCustomServerUrl(getServerBaseUrl());
-            setTestResult(null);
-            setShowServerModal(true);
-          }}
-        >
-          <Server size={14} color="#94a3b8" />
-          <Text style={styles.serverStatusText} numberOfLines={1}>
-            API: {currentServerUrl}
+          <Text style={styles.footerNote}>
+            KSP Transport Management System • Enterprise Security
           </Text>
-        </TouchableOpacity>
-
-        <Text style={styles.footerNote}>
-          KSP Transport Management System • Secure JWT Access
-        </Text>
+        </Animated.View>
       </ScrollView>
 
       {/* Server Configuration Modal */}
@@ -331,19 +615,31 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: SPACING.xl,
   },
+  logoAnchor: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: SPACING.md,
+    position: 'relative',
+  },
+  logoGlowRing: {
+    position: 'absolute',
+    width: 96,
+    height: 96,
+    borderRadius: 32,
+    backgroundColor: COLORS.accent,
+  },
   logoBadge: {
-    width: 72,
-    height: 72,
+    width: 76,
+    height: 76,
     borderRadius: RADIUS.lg,
     backgroundColor: COLORS.accent,
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: SPACING.sm,
     shadowColor: COLORS.accent,
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.4,
-    shadowRadius: 10,
-    elevation: 6,
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.5,
+    shadowRadius: 14,
+    elevation: 8,
   },
   brandName: {
     fontSize: 24,
@@ -365,16 +661,41 @@ const styles = StyleSheet.create({
     padding: SPACING.xl,
     ...SHADOWS.lg,
   },
+  cardHeaderRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    marginBottom: SPACING.md,
+  },
+  roleBadgesRow: {
+    flexDirection: 'row',
+    gap: 6,
+  },
+  roleBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: '#eff6ff',
+    borderWidth: 1,
+    borderColor: '#bfdbfe',
+    borderRadius: RADIUS.full,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+  },
+  roleBadgeText: {
+    fontSize: 10.5,
+    fontWeight: '700',
+    color: '#1d4ed8',
+  },
   cardTitle: {
     fontSize: 22,
     fontWeight: '800',
     color: COLORS.primary,
   },
   cardSubtitle: {
-    fontSize: 13,
+    fontSize: 12.5,
     color: COLORS.textMuted,
-    marginTop: 4,
-    marginBottom: SPACING.lg,
+    marginTop: 3,
   },
   errorBox: {
     flexDirection: 'row',
@@ -426,6 +747,16 @@ const styles = StyleSheet.create({
     fontSize: 15,
     color: COLORS.text,
   },
+  inputWrapperFocused: {
+    borderRadius: RADIUS.md,
+    borderColor: COLORS.accent,
+    backgroundColor: '#ffffff',
+    shadowColor: COLORS.accent,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 5,
+    elevation: 3,
+  },
   loginBtn: {
     backgroundColor: COLORS.accent,
     height: 50,
@@ -434,14 +765,14 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     marginTop: SPACING.md,
     shadowColor: COLORS.accent,
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 4,
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.35,
+    shadowRadius: 10,
+    elevation: 5,
   },
   loginBtnText: {
     color: COLORS.white,
-    fontSize: 16,
+    fontSize: 15,
     fontWeight: '800',
     letterSpacing: 1,
   },
@@ -452,10 +783,19 @@ const styles = StyleSheet.create({
     gap: 6,
     marginTop: SPACING.lg,
     paddingVertical: 6,
-    paddingHorizontal: 12,
+    paddingHorizontal: 14,
     backgroundColor: 'rgba(255, 255, 255, 0.08)',
     borderRadius: RADIUS.full,
     alignSelf: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.12)',
+  },
+  statusDot: {
+    width: 7,
+    height: 7,
+    borderRadius: 3.5,
+    backgroundColor: '#22c55e',
+    marginRight: 2,
   },
   serverStatusText: {
     color: '#94a3b8',

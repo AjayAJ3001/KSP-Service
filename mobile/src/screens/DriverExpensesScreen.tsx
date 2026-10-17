@@ -873,22 +873,30 @@ export const DriverExpensesScreen: React.FC<{ route: any; navigation: any }> = (
       <View
         style={[
           styles.balanceBanner,
-          balanceToDriver >= 0 ? styles.balanceBannerPositive : styles.balanceBannerNegative,
+          balanceToDriver >= 0
+            ? styles.balanceBannerPositive
+            : { backgroundColor: '#eff6ff', borderColor: '#93c5fd' },
         ]}
       >
         <View style={{ flex: 1 }}>
-          <Text style={styles.balanceBannerTitle}>
-            {balanceToDriver >= 0 ? 'BALANCE TO PAY DRIVER' : 'DRIVER ADVANCE RETURN DUE'}
+          <Text
+            style={[
+              styles.balanceBannerTitle,
+              balanceToDriver < 0 && { color: '#1d4ed8' },
+            ]}
+          >
+            {balanceToDriver >= 0 ? 'BALANCE TO PAY DRIVER' : 'REMAINING ADVANCE IN DRIVER HAND'}
           </Text>
           <Text style={styles.balanceBannerSub}>
-            Expenses {formatCurrency(totalExpenses)} - Advance {formatCurrency(advancePaid)}
-            {driverCarryForwardBalance > 0 ? ` - Prior Balance ${formatCurrency(driverCarryForwardBalance)}` : ''}
+            {balanceToDriver >= 0
+              ? `Expenses ${formatCurrency(totalExpenses)} - Advance ${formatCurrency(advancePaid)}${driverCarryForwardBalance > 0 ? ` - Prior Balance ${formatCurrency(driverCarryForwardBalance)}` : ''}`
+              : `Advance ${formatCurrency(advancePaid)} - Expenses ${formatCurrency(totalExpenses)} (Cash in driver hand)`}
           </Text>
         </View>
         <Text
           style={[
             styles.balanceBannerAmount,
-            { color: balanceToDriver >= 0 ? COLORS.successDark : COLORS.dangerDark },
+            { color: balanceToDriver >= 0 ? COLORS.successDark : '#1d4ed8' },
           ]}
         >
           {formatCurrency(Math.abs(balanceToDriver))}

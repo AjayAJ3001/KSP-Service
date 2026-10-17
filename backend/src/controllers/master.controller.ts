@@ -247,6 +247,25 @@ export const getExpiringVehicles = asyncHandler(async (req: AuthRequest, res: Re
   res.json({ success: true, message: 'Expiring vehicles retrieved.', data: result.rows });
 });
 
+/**
+ * Road Tax and TDS certificates always expire on March 31st (end of financial year).
+ * Any year specified snaps to YYYY-03-31; null/empty defaults to the upcoming March 31st.
+ */
+const snapToMarch31Backend = (d?: string | null): string => {
+  if (!d) {
+    const today = new Date();
+    const y = today.getFullYear();
+    const march31 = new Date(y, 2, 31, 23, 59, 59);
+    return today.getTime() <= march31.getTime() ? `${y}-03-31` : `${y + 1}-03-31`;
+  }
+  const clean = String(d).trim();
+  const m = clean.match(/^(\d{4})/);
+  if (m) {
+    return `${m[1]}-03-31`;
+  }
+  return clean;
+};
+
 export const createVehicle = asyncHandler(async (req: AuthRequest, res: Response): Promise<void> => {
   const {
     lorry_number, truck_image_url, vehicle_type, capacity_tons, goodshed_loading_expense,
@@ -265,7 +284,8 @@ export const createVehicle = asyncHandler(async (req: AuthRequest, res: Response
 
   const rc_reg_date = req.body.rc_reg_date || req.body.rc_expiry_date || null;
   const tds_number = req.body.tds_number || req.body.dts_number || null;
-  const tds_expiry_date = req.body.tds_expiry_date || req.body.dts_expiry_date || null;
+  const tds_expiry_date = snapToMarch31Backend(req.body.tds_expiry_date || req.body.dts_expiry_date);
+  const clean_tax_expiry_date = snapToMarch31Backend(tax_expiry_date);
   const tds_certificate_url = req.body.tds_certificate_url || req.body.dts_certificate_url || null;
   const tds_certificate_url_2 = req.body.tds_certificate_url_2 || null;
 
@@ -327,7 +347,7 @@ export const createVehicle = asyncHandler(async (req: AuthRequest, res: Response
       fc_number || null,
       fc_expiry_date || null,
       fc_photo_url || null,
-      tax_expiry_date || null,
+      clean_tax_expiry_date,
       tax_photo_url || null,
       rc_reg_date,
       rc_reg_date,
@@ -352,7 +372,9 @@ export const updateVehicle = asyncHandler(async (req: AuthRequest, res: Response
 
   const rc_reg_date = req.body.rc_reg_date !== undefined ? req.body.rc_reg_date : (req.body.rc_expiry_date !== undefined ? req.body.rc_expiry_date : undefined);
   const tds_number = req.body.tds_number !== undefined ? req.body.tds_number : (req.body.dts_number !== undefined ? req.body.dts_number : undefined);
-  const tds_expiry_date = req.body.tds_expiry_date !== undefined ? req.body.tds_expiry_date : (req.body.dts_expiry_date !== undefined ? req.body.dts_expiry_date : undefined);
+  const raw_tds = req.body.tds_expiry_date !== undefined ? req.body.tds_expiry_date : req.body.dts_expiry_date;
+  const tds_expiry_date = raw_tds !== undefined ? (raw_tds ? snapToMarch31Backend(raw_tds) : null) : undefined;
+  const clean_tax_expiry_date = tax_expiry_date !== undefined ? (tax_expiry_date ? snapToMarch31Backend(tax_expiry_date) : null) : undefined;
   const tds_certificate_url = req.body.tds_certificate_url !== undefined ? req.body.tds_certificate_url : (req.body.dts_certificate_url !== undefined ? req.body.dts_certificate_url : undefined);
   const tds_certificate_url_2 = req.body.tds_certificate_url_2 !== undefined ? req.body.tds_certificate_url_2 : undefined;
   const result = await query(
@@ -421,7 +443,7 @@ export const updateVehicle = asyncHandler(async (req: AuthRequest, res: Response
       fc_number !== undefined ? fc_number : null,
       fc_expiry_date !== undefined ? fc_expiry_date : null,
       fc_photo_url !== undefined ? fc_photo_url : null,
-      tax_expiry_date !== undefined ? tax_expiry_date : null,
+      clean_tax_expiry_date !== undefined ? clean_tax_expiry_date : null,
       tax_photo_url !== undefined ? tax_photo_url : null,
       rc_reg_date !== undefined ? rc_reg_date : null,
       req.params.id,

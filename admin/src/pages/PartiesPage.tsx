@@ -11,11 +11,15 @@ import {
   User,
   Compass,
   CheckCircle,
+  Printer,
+  Download,
+  Loader2,
 } from 'lucide-react';
 import { partyService, routeService } from '../services/adminService';
 import { Party, Route } from '../types';
 import { Modal } from '../components/Common/Modal';
 import { StatusBadge } from '../components/Common/StatusBadge';
+import * as XLSX from 'xlsx';
 
 export const PartiesPage: React.FC = () => {
   // Parties state
@@ -25,6 +29,8 @@ export const PartiesPage: React.FC = () => {
   const [partySearch, setPartySearch] = useState('');
   const [partyStatusFilter, setPartyStatusFilter] = useState('');
   const [isPartiesLoading, setIsPartiesLoading] = useState(false);
+  const [isPrinting, setIsPrinting] = useState(false);
+  const [isExporting, setIsExporting] = useState(false);
 
   // Selected party
   const [selectedParty, setSelectedParty] = useState<Party | null>(null);
@@ -36,6 +42,8 @@ export const PartiesPage: React.FC = () => {
   const [routeSearch, setRouteSearch] = useState('');
   const [routeStatusFilter, setRouteStatusFilter] = useState('');
   const [isRoutesLoading, setIsRoutesLoading] = useState(false);
+  const [isPrintingUnits, setIsPrintingUnits] = useState(false);
+  const [isExportingUnits, setIsExportingUnits] = useState(false);
 
   // Party Modal
   const [isPartyModalOpen, setIsPartyModalOpen] = useState(false);
@@ -101,6 +109,202 @@ export const PartiesPage: React.FC = () => {
     }
   };
 
+  const handlePrintParties = async () => {
+    try {
+      setIsPrinting(true);
+      const res = await partyService.getParties({ limit: 10000, search: partySearch || undefined, status: partyStatusFilter || undefined });
+      const items: Party[] = res?.data?.items || [];
+      if (items.length === 0) {
+        alert('No party records found to print.');
+        setIsPrinting(false);
+        return;
+      }
+
+      const totalCount = items.length;
+      const totalUnits = items.reduce((sum, p) => sum + (Number(p.routes_count) || 0), 0);
+      const generatedAt = new Date().toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' });
+
+      const printHtml = `
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>KSP Transport - Parties & Customers Directory</title>
+  <style>
+    * { box-sizing: border-box; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif; margin: 0; padding: 20px; color: #1e293b; background: #fff; font-size: 12px; }
+    @page { size: landscape; margin: 10mm; }
+    .header-bar { display: flex; justify-content: space-between; align-items: flex-start; padding-bottom: 14px; border-bottom: 2px solid #0f172a; margin-bottom: 14px; }
+    .company-title { font-size: 20px; font-weight: 800; color: #0f172a; letter-spacing: 0.5px; margin: 0 0 4px 0; }
+    .report-subtitle { font-size: 13px; font-weight: 700; color: #2563eb; margin: 0 0 4px 0; text-transform: uppercase; letter-spacing: 0.5px; }
+    .meta-text { font-size: 11px; color: #64748b; margin: 0; }
+    .summary-cards { display: flex; gap: 12px; margin-bottom: 14px; }
+    .card-box { padding: 8px 14px; border-radius: 6px; background: #f8fafc; border: 1px solid #e2e8f0; font-size: 11.5px; }
+    .card-box strong { font-size: 14px; color: #0f172a; }
+    table { width: 100%; border-collapse: collapse; font-size: 11px; margin-top: 6px; }
+    th { background: #0f172a; color: #ffffff; font-weight: 700; text-align: left; padding: 7px 8px; font-size: 11px; }
+    th.center, td.center { text-align: center; }
+    td { padding: 7px 8px; border-bottom: 1px solid #e2e8f0; vertical-align: middle; }
+    tr:nth-child(even) td { background: #fbfcfe; }
+    .badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 10px; font-weight: 700; text-align: center; }
+    .badge-unit { background: #dbeafe; color: #1d4ed8; }
+    .footer-row td { background: #f1f5f9 !important; font-weight: 800; border-top: 2px solid #0f172a; border-bottom: 2px solid #0f172a; color: #0f172a; }
+    .print-btn-bar { display: flex; justify-content: flex-end; gap: 10px; margin-bottom: 14px; }
+    .print-btn { background: #2563eb; color: #fff; border: none; padding: 8px 16px; border-radius: 6px; font-weight: 600; cursor: pointer; font-size: 12px; }
+    @media print {
+      .print-btn-bar { display: none !important; }
+      body { padding: 0; }
+    }
+  </style>
+</head>
+<body>
+  <div class="print-btn-bar">
+    <button class="print-btn" onclick="window.print()">Print Report / Save as PDF</button>
+    <button class="print-btn" style="background:#64748b" onclick="window.close()">Close</button>
+  </div>
+
+  <div class="header-bar">
+    <div>
+      <h1 class="company-title">KSP TRANSPORT</h1>
+      <div class="report-subtitle">Parties & Customers Master Directory</div>
+      <p class="meta-text">Client accounts, contact information, and delivery units</p>
+    </div>
+    <div style="text-align: right;">
+      <p class="meta-text"><strong>Generated On:</strong> ${generatedAt}</p>
+      <p class="meta-text"><strong>Total Parties:</strong> ${totalCount}</p>
+      <p class="meta-text"><strong>Total Delivery Units:</strong> ${totalUnits}</p>
+      ${partySearch ? `<p class="meta-text"><strong>Filter:</strong> ${partySearch}</p>` : ''}
+    </div>
+  </div>
+
+  <div class="summary-cards">
+    <div class="card-box">Total Parties: <strong>${totalCount}</strong></div>
+    <div class="card-box">Total Destination Units: <strong style="color:#2563eb">${totalUnits}</strong></div>
+  </div>
+
+  <table>
+    <thead>
+      <tr>
+        <th style="width: 45px;" class="center">S.No</th>
+        <th>Party / Company Name</th>
+        <th>Contact Person</th>
+        <th>Mobile / Phone Number</th>
+        <th>Address / City</th>
+        <th class="center">Delivery Units</th>
+      </tr>
+    </thead>
+    <tbody>
+      ${items.map((p, idx) => `
+        <tr>
+          <td class="center">${idx + 1}</td>
+          <td><strong style="color: #0f172a; font-size: 12px;">${p.name}</strong></td>
+          <td>${p.contact_person || '—'}</td>
+          <td>${p.mobile_number || '—'}</td>
+          <td>${p.address || '—'}</td>
+          <td class="center">
+            <span class="badge badge-unit">${Number(p.routes_count) || 0} Units</span>
+          </td>
+        </tr>
+      `).join('')}
+      <tr class="footer-row">
+        <td class="center" colspan="2">TOTAL DIRECTORY</td>
+        <td colspan="3"><strong>${totalCount} Parties Listed</strong></td>
+        <td class="center"><strong>${totalUnits} Units Total</strong></td>
+      </tr>
+    </tbody>
+  </table>
+
+  <div style="margin-top: 24px; display: flex; justify-content: space-between; font-size: 10px; color: #94a3b8; border-top: 1px solid #e2e8f0; padding-top: 8px;">
+    <span>KSP Service Management ERP · Parties Master</span>
+    <span>Page 1 of 1</span>
+  </div>
+</body>
+</html>
+      `;
+
+      const printWin = window.open('', '_blank', 'width=1100,height=850');
+      if (!printWin) {
+        alert('Please allow pop-ups for this website to print.');
+        setIsPrinting(false);
+        return;
+      }
+      printWin.document.open();
+      printWin.document.write(printHtml);
+      printWin.document.close();
+      printWin.focus();
+      setTimeout(() => {
+        printWin.print();
+      }, 500);
+    } catch (err: any) {
+      console.error('Failed to print parties', err);
+      alert(err.message || 'Failed to print parties.');
+    } finally {
+      setIsPrinting(false);
+    }
+  };
+
+  const handleExportExcel = async () => {
+    try {
+      setIsExporting(true);
+      const res = await partyService.getParties({ limit: 10000, search: partySearch || undefined, status: partyStatusFilter || undefined });
+      const items: Party[] = res?.data?.items || [];
+      if (items.length === 0) {
+        alert('No party records found to export.');
+        setIsExporting(false);
+        return;
+      }
+
+      const excelRows: any[] = items.map((p, idx) => ({
+        'S.No': idx + 1,
+        'Party Name': p.name,
+        'Contact Person': p.contact_person || '—',
+        'Mobile Number': p.mobile_number || '—',
+        'Address': p.address || '—',
+        'Delivery Units Count': Number(p.routes_count) || 0,
+      }));
+
+      // Blank separator
+      excelRows.push({
+        'S.No': '',
+        'Party Name': '',
+        'Contact Person': '',
+        'Mobile Number': '',
+        'Address': '',
+        'Delivery Units Count': '',
+      });
+
+      // Total row
+      excelRows.push({
+        'S.No': '',
+        'Party Name': 'TOTAL PARTIES',
+        'Contact Person': `Count: ${items.length}`,
+        'Mobile Number': '',
+        'Address': 'Total Units:',
+        'Delivery Units Count': items.reduce((sum, p) => sum + (Number(p.routes_count) || 0), 0),
+      });
+
+      const worksheet = XLSX.utils.json_to_sheet(excelRows);
+      worksheet['!cols'] = [
+        { wch: 8 },  // S.No
+        { wch: 28 }, // Party Name
+        { wch: 20 }, // Contact Person
+        { wch: 18 }, // Mobile Number
+        { wch: 30 }, // Address
+        { wch: 22 }, // Delivery Units Count
+      ];
+
+      const workbook = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(workbook, worksheet, 'Parties');
+      const dateStr = new Date().toISOString().split('T')[0];
+      XLSX.writeFile(workbook, `KSP_Parties_List_${dateStr}.xlsx`);
+    } catch (err: any) {
+      console.error('Failed to export parties', err);
+      alert(err.message || 'Failed to export parties.');
+    } finally {
+      setIsExporting(false);
+    }
+  };
+
   const loadRoutes = async () => {
     try {
       setIsRoutesLoading(true);
@@ -117,6 +321,226 @@ export const PartiesPage: React.FC = () => {
       console.error('Failed to load routes', err);
     } finally {
       setIsRoutesLoading(false);
+    }
+  };
+
+  const handlePrintUnits = async () => {
+    try {
+      setIsPrintingUnits(true);
+      const res = await routeService.getRoutes({
+        limit: 10000,
+        search: routeSearch || undefined,
+        party_id: selectedParty ? selectedParty.id : undefined,
+        status: routeStatusFilter || undefined,
+      });
+      const items: Route[] = res?.data?.items || [];
+      if (items.length === 0) {
+        alert('No delivery units found to print.');
+        setIsPrintingUnits(false);
+        return;
+      }
+
+      const totalCount = items.length;
+      const activeCount = items.filter(r => r.status === 'ACTIVE').length;
+      const partyTitle = selectedParty ? selectedParty.name : 'All Parties';
+      const generatedAt = new Date().toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' });
+
+      const printHtml = `
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>KSP Transport - Delivery Units & Freight Rates</title>
+  <style>
+    * { box-sizing: border-box; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif; margin: 0; padding: 20px; color: #1e293b; background: #fff; font-size: 12px; }
+    @page { size: landscape; margin: 10mm; }
+    .header-bar { display: flex; justify-content: space-between; align-items: flex-start; padding-bottom: 14px; border-bottom: 2px solid #0f172a; margin-bottom: 14px; }
+    .company-title { font-size: 20px; font-weight: 800; color: #0f172a; letter-spacing: 0.5px; margin: 0 0 4px 0; }
+    .report-subtitle { font-size: 13px; font-weight: 700; color: #2563eb; margin: 0 0 4px 0; text-transform: uppercase; letter-spacing: 0.5px; }
+    .meta-text { font-size: 11px; color: #64748b; margin: 0; }
+    .summary-cards { display: flex; gap: 12px; margin-bottom: 14px; }
+    .card-box { padding: 8px 14px; border-radius: 6px; background: #f8fafc; border: 1px solid #e2e8f0; font-size: 11.5px; }
+    .card-box strong { font-size: 14px; color: #0f172a; }
+    table { width: 100%; border-collapse: collapse; font-size: 11px; margin-top: 6px; }
+    th { background: #0f172a; color: #ffffff; font-weight: 700; text-align: left; padding: 7px 8px; font-size: 11px; }
+    th.center, td.center { text-align: center; }
+    th.right, td.right { text-align: right; }
+    td { padding: 7px 8px; border-bottom: 1px solid #e2e8f0; vertical-align: middle; }
+    tr:nth-child(even) td { background: #fbfcfe; }
+    .badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 10px; font-weight: 700; text-align: center; }
+    .badge-active { background: #dcfce7; color: #166534; }
+    .badge-inactive { background: #fee2e2; color: #991b1b; }
+    .footer-row td { background: #f1f5f9 !important; font-weight: 800; border-top: 2px solid #0f172a; border-bottom: 2px solid #0f172a; color: #0f172a; }
+    .print-btn-bar { display: flex; justify-content: flex-end; gap: 10px; margin-bottom: 14px; }
+    .print-btn { background: #2563eb; color: #fff; border: none; padding: 8px 16px; border-radius: 6px; font-weight: 600; cursor: pointer; font-size: 12px; }
+    @media print {
+      .print-btn-bar { display: none !important; }
+      body { padding: 0; }
+    }
+  </style>
+</head>
+<body>
+  <div class="print-btn-bar">
+    <button class="print-btn" onclick="window.print()">Print Report / Save as PDF</button>
+    <button class="print-btn" style="background:#64748b" onclick="window.close()">Close</button>
+  </div>
+
+  <div class="header-bar">
+    <div>
+      <h1 class="company-title">KSP TRANSPORT</h1>
+      <div class="report-subtitle">Delivery Units & Freight Rate Directory (${partyTitle})</div>
+      <p class="meta-text">Destination delivery units, standard routes, distances, and freight charges</p>
+    </div>
+    <div style="text-align: right;">
+      <p class="meta-text"><strong>Generated On:</strong> ${generatedAt}</p>
+      <p class="meta-text"><strong>Total Units:</strong> ${totalCount}</p>
+      ${selectedParty ? `<p class="meta-text"><strong>Party:</strong> ${selectedParty.name}</p>` : ''}
+      ${routeSearch ? `<p class="meta-text"><strong>Filter:</strong> ${routeSearch}</p>` : ''}
+    </div>
+  </div>
+
+  <div class="summary-cards">
+    <div class="card-box">Total Delivery Units: <strong>${totalCount}</strong></div>
+    <div class="card-box">Active: <strong style="color:#16a34a">${activeCount}</strong></div>
+    <div class="card-box">Inactive: <strong style="color:#dc2626">${totalCount - activeCount}</strong></div>
+    ${selectedParty ? `<div class="card-box">Party: <strong style="color:#2563eb">${selectedParty.name}</strong></div>` : ''}
+  </div>
+
+  <table>
+    <thead>
+      <tr>
+        <th style="width: 45px;" class="center">S.No</th>
+        <th>Delivery Unit / Destination</th>
+        <th>Applicable Party</th>
+        <th>Origin</th>
+        <th class="right">Freight Rate (₹)</th>
+        <th class="right">Distance (KM)</th>
+        <th class="center">Status</th>
+      </tr>
+    </thead>
+    <tbody>
+      ${items.map((r, idx) => `
+        <tr>
+          <td class="center">${idx + 1}</td>
+          <td><strong style="color: #0f172a; font-size: 12px;">${r.to_location}</strong></td>
+          <td>${r.party_name || (selectedParty ? selectedParty.name : '—')}</td>
+          <td>${r.from_location || 'Erode'}</td>
+          <td class="right" style="font-weight: 700; color: #1e40af;">₹${Number(r.rate_per_unit || 0).toLocaleString('en-IN')}</td>
+          <td class="right">${r.distance_km ? `${r.distance_km} KM` : '—'}</td>
+          <td class="center">
+            <span class="badge ${r.status === 'ACTIVE' ? 'badge-active' : 'badge-inactive'}">
+              ${r.status || 'ACTIVE'}
+            </span>
+          </td>
+        </tr>
+      `).join('')}
+      <tr class="footer-row">
+        <td class="center" colspan="2">TOTAL DIRECTORY</td>
+        <td colspan="4"><strong>${totalCount} Units Listed (${activeCount} Active, ${totalCount - activeCount} Inactive)</strong></td>
+        <td class="center"><strong>${totalCount} Units</strong></td>
+      </tr>
+    </tbody>
+  </table>
+
+  <div style="margin-top: 24px; display: flex; justify-content: space-between; font-size: 10px; color: #94a3b8; border-top: 1px solid #e2e8f0; padding-top: 8px;">
+    <span>KSP Service Management ERP · Delivery Units Master</span>
+    <span>Page 1 of 1</span>
+  </div>
+</body>
+</html>
+      `;
+
+      const printWin = window.open('', '_blank', 'width=1100,height=850');
+      if (!printWin) {
+        alert('Please allow pop-ups for this website to print.');
+        setIsPrintingUnits(false);
+        return;
+      }
+      printWin.document.open();
+      printWin.document.write(printHtml);
+      printWin.document.close();
+      printWin.focus();
+      setTimeout(() => {
+        printWin.print();
+      }, 500);
+    } catch (err: any) {
+      console.error('Failed to print delivery units', err);
+      alert(err.message || 'Failed to print delivery units.');
+    } finally {
+      setIsPrintingUnits(false);
+    }
+  };
+
+  const handleExportUnitsExcel = async () => {
+    try {
+      setIsExportingUnits(true);
+      const res = await routeService.getRoutes({
+        limit: 10000,
+        search: routeSearch || undefined,
+        party_id: selectedParty ? selectedParty.id : undefined,
+        status: routeStatusFilter || undefined,
+      });
+      const items: Route[] = res?.data?.items || [];
+      if (items.length === 0) {
+        alert('No delivery units found to export.');
+        setIsExportingUnits(false);
+        return;
+      }
+
+      const excelRows: any[] = items.map((r, idx) => ({
+        'S.No': idx + 1,
+        'Delivery Unit / Destination': r.to_location,
+        'Applicable Party': r.party_name || (selectedParty ? selectedParty.name : '—'),
+        'Origin': r.from_location || 'Erode',
+        'Freight Rate (₹)': Number(r.rate_per_unit || 0),
+        'Distance (KM)': r.distance_km || '—',
+        'Status': r.status || 'ACTIVE',
+      }));
+
+      // Blank separator
+      excelRows.push({
+        'S.No': '',
+        'Delivery Unit / Destination': '',
+        'Applicable Party': '',
+        'Origin': '',
+        'Freight Rate (₹)': '',
+        'Distance (KM)': '',
+        'Status': '',
+      });
+
+      // Total row
+      excelRows.push({
+        'S.No': '',
+        'Delivery Unit / Destination': 'TOTAL UNITS',
+        'Applicable Party': `Count: ${items.length}`,
+        'Origin': '',
+        'Freight Rate (₹)': '',
+        'Distance (KM)': '',
+        'Status': `${items.filter(r => r.status === 'ACTIVE').length} Active`,
+      });
+
+      const worksheet = XLSX.utils.json_to_sheet(excelRows);
+      worksheet['!cols'] = [
+        { wch: 8 },  // S.No
+        { wch: 28 }, // Delivery Unit
+        { wch: 25 }, // Party
+        { wch: 15 }, // Origin
+        { wch: 18 }, // Freight Rate
+        { wch: 15 }, // Distance
+        { wch: 12 }, // Status
+      ];
+
+      const workbook = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(workbook, worksheet, 'DeliveryUnits');
+      const partyTag = selectedParty ? selectedParty.name.replace(/[^a-zA-Z0-9]/g, '_') : 'All';
+      const dateStr = new Date().toISOString().split('T')[0];
+      XLSX.writeFile(workbook, `KSP_Units_${partyTag}_${dateStr}.xlsx`);
+    } catch (err: any) {
+      console.error('Failed to export delivery units', err);
+      alert(err.message || 'Failed to export delivery units.');
+    } finally {
+      setIsExportingUnits(false);
     }
   };
 
@@ -262,16 +686,110 @@ export const PartiesPage: React.FC = () => {
   return (
     <div>
       {/* Standard KSP Portal Page Header */}
-      <div className="card-header" style={{ marginBottom: '20px' }}>
+      <div className="card-header" style={{ marginBottom: '20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px' }}>
         <div>
           <h2 style={{ fontSize: '22px', fontWeight: 800 }}>Parties and Units Master</h2>
           <p style={{ color: 'var(--text-muted)', fontSize: '13.5px', marginTop: '2px' }}>
             Maintain customer accounts and manage their destination delivery units & freight rates
           </p>
         </div>
-        <button onClick={openCreatePartyModal} className="btn btn-primary">
-          <Plus size={18} /> Add New Party
-        </button>
+        <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
+          <button
+            type="button"
+            onClick={handlePrintParties}
+            disabled={isPrinting}
+            className="btn btn-outline"
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              borderColor: '#3b82f6',
+              color: '#1d4ed8',
+              background: '#eff6ff',
+              fontWeight: 600,
+              height: '38px',
+              padding: '0 14px',
+              fontSize: '13px',
+            }}
+            title="Print Parties Master Directory"
+          >
+            {isPrinting ? <Loader2 size={14} className="animate-spin" /> : <Printer size={14} />}
+            {isPrinting ? 'Preparing...' : 'Print Parties'}
+          </button>
+
+          <button
+            type="button"
+            onClick={handleExportExcel}
+            disabled={isExporting}
+            className="btn btn-outline"
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              borderColor: '#10b981',
+              color: '#059669',
+              background: '#ecfdf5',
+              fontWeight: 600,
+              height: '38px',
+              padding: '0 14px',
+              fontSize: '13px',
+            }}
+            title="Download Parties Directory as Excel"
+          >
+            {isExporting ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
+            {isExporting ? 'Exporting...' : 'Download Parties'}
+          </button>
+
+          <button
+            type="button"
+            onClick={handlePrintUnits}
+            disabled={isPrintingUnits}
+            className="btn btn-outline"
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              borderColor: '#6366f1',
+              color: '#4338ca',
+              background: '#eef2ff',
+              fontWeight: 600,
+              height: '38px',
+              padding: '0 14px',
+              fontSize: '13px',
+            }}
+            title={selectedParty ? `Print delivery units for ${selectedParty.name}` : 'Print all delivery units'}
+          >
+            {isPrintingUnits ? <Loader2 size={14} className="animate-spin" /> : <Printer size={14} />}
+            {isPrintingUnits ? 'Preparing...' : selectedParty ? `Print Units (${selectedParty.name.length > 15 ? selectedParty.name.slice(0, 15) + '...' : selectedParty.name})` : 'Print Units'}
+          </button>
+
+          <button
+            type="button"
+            onClick={handleExportUnitsExcel}
+            disabled={isExportingUnits}
+            className="btn btn-outline"
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              borderColor: '#059669',
+              color: '#065f46',
+              background: '#f0fdf4',
+              fontWeight: 600,
+              height: '38px',
+              padding: '0 14px',
+              fontSize: '13px',
+            }}
+            title={selectedParty ? `Download delivery units for ${selectedParty.name} as Excel` : 'Download all delivery units as Excel'}
+          >
+            {isExportingUnits ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
+            {isExportingUnits ? 'Exporting...' : selectedParty ? `Download Units (${selectedParty.name.length > 15 ? selectedParty.name.slice(0, 15) + '...' : selectedParty.name})` : 'Download Units'}
+          </button>
+
+          <button onClick={openCreatePartyModal} className="btn btn-primary" style={{ height: '38px' }}>
+            <Plus size={18} /> Add New Party
+          </button>
+        </div>
       </div>
 
       {/* Main Two-Column Master-Detail Layout */}
@@ -600,7 +1118,57 @@ export const PartiesPage: React.FC = () => {
                 </div>
               </div>
 
-              <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexShrink: 0 }}>
+              <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap', flexShrink: 0 }}>
+                <button
+                  type="button"
+                  onClick={handlePrintUnits}
+                  disabled={isPrintingUnits}
+                  className="btn"
+                  style={{
+                    background: '#ffffff',
+                    color: '#1d4ed8',
+                    fontWeight: 700,
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '6px',
+                    fontSize: '12px',
+                    padding: '6px 12px',
+                    border: 'none',
+                    borderRadius: '6px',
+                    whiteSpace: 'nowrap',
+                    boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
+                  }}
+                  title={`Print delivery units for ${selectedParty.name}`}
+                >
+                  {isPrintingUnits ? <Loader2 size={13} className="animate-spin" /> : <Printer size={13} />}
+                  Print Units
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleExportUnitsExcel}
+                  disabled={isExportingUnits}
+                  className="btn"
+                  style={{
+                    background: '#10b981',
+                    color: '#ffffff',
+                    fontWeight: 700,
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '6px',
+                    fontSize: '12px',
+                    padding: '6px 12px',
+                    border: 'none',
+                    borderRadius: '6px',
+                    whiteSpace: 'nowrap',
+                    boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
+                  }}
+                  title={`Download delivery units for ${selectedParty.name} as Excel`}
+                >
+                  {isExportingUnits ? <Loader2 size={13} className="animate-spin" /> : <Download size={13} />}
+                  Download Units
+                </button>
+
                 <button
                   onClick={openCreateRouteModal}
                   className="btn"
@@ -611,15 +1179,15 @@ export const PartiesPage: React.FC = () => {
                     display: 'inline-flex',
                     alignItems: 'center',
                     gap: '6px',
-                    fontSize: '12.5px',
-                    padding: '7px 12px',
+                    fontSize: '12px',
+                    padding: '6px 12px',
                     border: 'none',
                     borderRadius: '6px',
                     whiteSpace: 'nowrap',
                     boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
                   }}
                 >
-                  <Plus size={15} /> Add Delivery Unit
+                  <Plus size={14} /> Add Delivery Unit
                 </button>
                 <button
                   onClick={() => setSelectedParty(null)}
@@ -628,7 +1196,7 @@ export const PartiesPage: React.FC = () => {
                     background: 'rgba(255,255,255,0.15)',
                     color: '#ffffff',
                     fontSize: '12px',
-                    padding: '7px 10px',
+                    padding: '6px 10px',
                     border: '1px solid rgba(255,255,255,0.25)',
                     whiteSpace: 'nowrap',
                   }}
@@ -649,6 +1217,7 @@ export const PartiesPage: React.FC = () => {
                 justifyContent: 'space-between',
                 alignItems: 'center',
                 gap: '10px',
+                flexWrap: 'wrap',
               }}
             >
               <div>
@@ -659,19 +1228,65 @@ export const PartiesPage: React.FC = () => {
                   Showing delivery units across all parties. Select a party on the left to filter.
                 </p>
               </div>
-              <button
-                onClick={openCreateRouteModal}
-                className="btn btn-primary btn-sm"
-                style={{ flexShrink: 0 }}
-              >
-                <Plus size={14} /> Add Delivery Unit
-              </button>
+              <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
+                <button
+                  type="button"
+                  onClick={handlePrintUnits}
+                  disabled={isPrintingUnits}
+                  className="btn btn-outline"
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '6px',
+                    borderColor: '#3b82f6',
+                    color: '#1d4ed8',
+                    background: '#eff6ff',
+                    fontWeight: 600,
+                    height: '34px',
+                    padding: '0 12px',
+                    fontSize: '12.5px',
+                  }}
+                  title="Print all delivery units"
+                >
+                  {isPrintingUnits ? <Loader2 size={13} className="animate-spin" /> : <Printer size={13} />}
+                  Print Units
+                </button>
+                <button
+                  type="button"
+                  onClick={handleExportUnitsExcel}
+                  disabled={isExportingUnits}
+                  className="btn btn-outline"
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '6px',
+                    borderColor: '#10b981',
+                    color: '#059669',
+                    background: '#ecfdf5',
+                    fontWeight: 600,
+                    height: '34px',
+                    padding: '0 12px',
+                    fontSize: '12.5px',
+                  }}
+                  title="Download all delivery units as Excel"
+                >
+                  {isExportingUnits ? <Loader2 size={13} className="animate-spin" /> : <Download size={13} />}
+                  Download Units
+                </button>
+                <button
+                  onClick={openCreateRouteModal}
+                  className="btn btn-primary btn-sm"
+                  style={{ height: '34px' }}
+                >
+                  <Plus size={14} /> Add Delivery Unit
+                </button>
+              </div>
             </div>
           )}
 
           {/* Filter Bar */}
-          <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
-            <div className="search-input-wrapper" style={{ flex: 1 }}>
+          <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
+            <div className="search-input-wrapper" style={{ flex: '1 1 200px', minWidth: '160px' }}>
               <Search size={15} />
               <input
                 type="text"
@@ -692,7 +1307,7 @@ export const PartiesPage: React.FC = () => {
 
             <select
               className="form-control form-select"
-              style={{ width: '140px', fontSize: '12px', height: '34px' }}
+              style={{ width: '130px', fontSize: '12px', height: '34px', flexShrink: 0 }}
               value={routeStatusFilter}
               onChange={(e) => {
                 setRouteStatusFilter(e.target.value);
@@ -703,6 +1318,56 @@ export const PartiesPage: React.FC = () => {
               <option value="ACTIVE">ACTIVE</option>
               <option value="INACTIVE">INACTIVE</option>
             </select>
+
+            <button
+              type="button"
+              onClick={handlePrintUnits}
+              disabled={isPrintingUnits}
+              className="btn btn-outline"
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+                borderColor: '#3b82f6',
+                color: '#1d4ed8',
+                background: '#eff6ff',
+                fontWeight: 600,
+                height: '34px',
+                padding: '0 12px',
+                fontSize: '12px',
+                whiteSpace: 'nowrap',
+                flexShrink: 0,
+              }}
+              title={selectedParty ? `Print delivery units for ${selectedParty.name}` : 'Print Delivery Units'}
+            >
+              {isPrintingUnits ? <Loader2 size={13} className="animate-spin" /> : <Printer size={13} />}
+              {isPrintingUnits ? 'Preparing...' : 'Print Units'}
+            </button>
+
+            <button
+              type="button"
+              onClick={handleExportUnitsExcel}
+              disabled={isExportingUnits}
+              className="btn btn-outline"
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+                borderColor: '#10b981',
+                color: '#059669',
+                background: '#ecfdf5',
+                fontWeight: 600,
+                height: '34px',
+                padding: '0 12px',
+                fontSize: '12px',
+                whiteSpace: 'nowrap',
+                flexShrink: 0,
+              }}
+              title={selectedParty ? `Download delivery units for ${selectedParty.name} as Excel` : 'Download Delivery Units as Excel'}
+            >
+              {isExportingUnits ? <Loader2 size={13} className="animate-spin" /> : <Download size={13} />}
+              {isExportingUnits ? 'Exporting...' : 'Download Units'}
+            </button>
           </div>
 
           {/* Units Table */}

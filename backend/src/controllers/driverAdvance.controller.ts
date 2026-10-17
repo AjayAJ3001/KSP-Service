@@ -483,14 +483,15 @@ export const getDriverAdvancesSummary = asyncHandler(async (req: AuthRequest, re
     for (const row of driverRows) {
       const adv = parseFloat(row.total_advance_given || 0);
       const exp = parseFloat(row.total_expenses_reported || 0);
-      runningBal = Math.round((runningBal + adv - exp) * 100) / 100;
-      const clampedBal = Math.max(0, runningBal);
+      const balBefore = Math.max(0, runningBal);
+      row.previous_balance_in_hand = balBefore;
+      const rawAfter = Math.round((runningBal + adv - exp) * 100) / 100;
+      const clampedBal = Math.max(0, rawAfter);
       row.balance_in_hand = clampedBal;
       row.remaining_advance_balance = clampedBal;
       row.trip_balance = clampedBal;
-      if (runningBal < 0) {
-        runningBal = 0;
-      }
+      row.need_to_pay = rawAfter < 0 ? Math.abs(rawAfter) : 0;
+      runningBal = Math.max(0, rawAfter);
     }
   }
 
@@ -521,6 +522,8 @@ export const getDriverAdvancesSummary = asyncHandler(async (req: AuthRequest, re
 
     // Final balance = cumulative balance after last event
     const finalBalance = parseFloat(latestRow.balance_in_hand) || 0;
+    const finalNeedToPay = parseFloat(latestRow.need_to_pay) || 0;
+    const finalPrevInHand = parseFloat(latestRow.previous_balance_in_hand) || 0;
 
     // Settlement status calculation across all trips for this driver:
     let driverSettlementStatus: 'SETTLED' | 'PENDING' | 'VERIFIED' | 'CASH_IN_HAND' = 'SETTLED';
@@ -578,6 +581,8 @@ export const getDriverAdvancesSummary = asyncHandler(async (req: AuthRequest, re
       cleaning_expense:          Math.round(cleaningExp * 100) / 100,
       other_expense:             Math.round(otherExp * 100) / 100,
       balance_in_hand:           finalBalance,
+      need_to_pay:               finalNeedToPay,
+      previous_balance_in_hand:  finalPrevInHand,
       remaining_advance_balance: finalBalance,
       trip_balance:              finalBalance,
       overall_balance_in_hand:   finalBalance,

@@ -13,6 +13,8 @@ import {
   Modal,
   Pressable,
   FlatList,
+  Animated,
+  Easing,
 } from 'react-native';
 import {
   Truck,
@@ -593,11 +595,66 @@ export const HomeScreen: React.FC<{ navigation: any }> = ({ navigation }) => {
   const [tripsModalVisible, setTripsModalVisible] = useState(false);
   const [selectedRecentTrip, setSelectedRecentTrip] = useState<Trip | null>(null);
 
+  // ── Animation Values ──────────────────────────────────────────────────────
+  const headerAnim = useRef(new Animated.Value(-16)).current;
+  const headerOpacity = useRef(new Animated.Value(0)).current;
+  const statsScale = useRef(new Animated.Value(0.92)).current;
+  const livePulse = useRef(new Animated.Value(1)).current;
+  const alertPulse = useRef(new Animated.Value(1)).current;
+  const contentTranslateY = useRef(new Animated.Value(24)).current;
+  const contentOpacity = useRef(new Animated.Value(0)).current;
+
+  // Spring scales for buttons on touch
+  const newTripScale = useRef(new Animated.Value(1)).current;
+  const truckAdvScale = useRef(new Animated.Value(1)).current;
+  const advanceTileScale = useRef(new Animated.Value(1)).current;
+  const recentTripsTileScale = useRef(new Animated.Value(1)).current;
+
   useFocusEffect(
     useCallback(() => {
       loadDashboard();
+
+      // Trigger smooth entry animation on screen focus
+      headerAnim.setValue(-16);
+      headerOpacity.setValue(0);
+      statsScale.setValue(0.92);
+      contentTranslateY.setValue(24);
+      contentOpacity.setValue(0);
+
+      Animated.parallel([
+        Animated.timing(headerOpacity, { toValue: 1, duration: 400, useNativeDriver: true }),
+        Animated.spring(headerAnim, { toValue: 0, friction: 7, tension: 40, useNativeDriver: true }),
+        Animated.spring(statsScale, { toValue: 1, friction: 6, tension: 45, useNativeDriver: true }),
+        Animated.timing(contentOpacity, { toValue: 1, duration: 450, delay: 80, useNativeDriver: true }),
+        Animated.spring(contentTranslateY, { toValue: 0, friction: 7, tension: 40, delay: 80, useNativeDriver: true }),
+      ]).start();
     }, [])
   );
+
+  useEffect(() => {
+    // Pulse animation for live status beacon
+    const pulseLoop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(livePulse, { toValue: 1.35, duration: 1200, easing: Easing.inOut(Easing.quad), useNativeDriver: true }),
+        Animated.timing(livePulse, { toValue: 1.0, duration: 1200, easing: Easing.inOut(Easing.quad), useNativeDriver: true }),
+      ])
+    );
+    pulseLoop.start();
+
+    // Pulse animation for alert shield
+    const alertLoop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(alertPulse, { toValue: 1.15, duration: 1000, easing: Easing.inOut(Easing.quad), useNativeDriver: true }),
+        Animated.timing(alertPulse, { toValue: 1.0, duration: 1000, easing: Easing.inOut(Easing.quad), useNativeDriver: true }),
+      ])
+    );
+    alertLoop.start();
+
+    return () => {
+      pulseLoop.stop();
+      alertLoop.stop();
+    };
+  }, []);
 
   const loadDashboard = async () => {
     try {
@@ -684,10 +741,23 @@ export const HomeScreen: React.FC<{ navigation: any }> = ({ navigation }) => {
         contentContainerStyle={styles.content}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={[COLORS.accent]} />}
       >
-        {/* ── Header Card ── */}
-        <View style={styles.headerCard}>
+        {/* ── Animated Header Card ── */}
+        <Animated.View
+          style={[
+            styles.headerCard,
+            {
+              opacity: headerOpacity,
+              transform: [{ translateY: headerAnim }],
+            },
+          ]}
+        >
           <View style={styles.headerRow}>
             <View>
+              <View style={styles.liveBeaconBadge}>
+                <Animated.View style={[styles.liveBeaconRing, { transform: [{ scale: livePulse }] }]} />
+                <View style={styles.liveBeaconDot} />
+                <Text style={styles.liveBeaconText}>Operator Online</Text>
+              </View>
               <Text style={styles.greetingText}>{getGreeting()},</Text>
               <Text style={styles.userNameText}>{user?.name || 'Operator'}</Text>
               {user?.username ? (
@@ -699,7 +769,12 @@ export const HomeScreen: React.FC<{ navigation: any }> = ({ navigation }) => {
             </TouchableOpacity>
           </View>
 
-          <View style={styles.statsRow}>
+          <Animated.View
+            style={[
+              styles.statsRow,
+              { transform: [{ scale: statsScale }] },
+            ]}
+          >
             <View style={styles.statBox}>
               <Text style={styles.statLabel}>Trips Today</Text>
               <Text style={styles.statValue}>{data?.trips_today || 0}</Text>
@@ -710,124 +785,145 @@ export const HomeScreen: React.FC<{ navigation: any }> = ({ navigation }) => {
                 {formatCurrency(data?.balance_due || 0)}
               </Text>
             </View>
-          </View>
-        </View>
+          </Animated.View>
+        </Animated.View>
 
-        {/* ── Expiry Alert ── */}
-        {expiringVehicles.length > 0 && (
-          <View style={styles.expiryBanner}>
-            <View style={styles.expiryBannerTop}>
-              <View style={styles.expiryIconCircle}>
-                <ShieldAlert size={20} color="#b45309" />
-              </View>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.expiryBannerTitle}>Fleet document alerts (≤ 30 days)</Text>
-                <Text style={styles.expiryBannerSub}>
-                  {expiringVehicles.length} truck{expiringVehicles.length === 1 ? '' : 's'} — insurance, permit, yearly tax or RC
-                </Text>
-              </View>
-            </View>
-            {expiringVehicles.slice(0, 4).map((v) => {
-              const alerts = getVehicleDocAlerts(v);
-              const urgent = alerts[0];
-              if (!urgent) return null;
-              return (
-                <View key={v.id} style={styles.expiryRow}>
-                  <Truck size={14} color="#92400e" />
-                  <Text style={styles.expiryLorry}>{v.lorry_number}</Text>
-                  <Text style={styles.expiryDoc}>
-                    {urgent.isExpired ? `${urgent.name} expired` : `${urgent.name} in ${urgent.days}d`}
-                    {alerts.length > 1 ? ` +${alerts.length - 1}` : ''}
-                  </Text>
-                </View>
-              );
-            })}
-          </View>
-        )}
-
-        {/* ── Owner Advance Credit — tap to open modal ── */}
-        {(data?.owner_advance_credit ?? 0) > 0 && (
-          <TouchableOpacity
-            style={styles.sectionTile}
-            activeOpacity={0.82}
-            onPress={() => setAdvanceModalVisible(true)}
-          >
-            <View style={styles.tileLead}>
-              <View style={styles.tileIconBox}>
-                <HandCoins size={22} color="#15803d" />
-              </View>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.tileTitle}>Owner Advance Credit</Text>
-                <Text style={styles.tileSub}>
-                  Total: {formatCurrency(data?.owner_advance_credit ?? 0)}{'  ·  '}
-                  Available: ₹{(data?.manager_available_balance ?? 0).toLocaleString('en-IN')}
-                </Text>
-              </View>
-            </View>
-            <View style={styles.tileCta}>
-              <Text style={styles.tileCtaText}>View Details</Text>
-              <ChevronRight size={16} color="#16a34a" />
-            </View>
-          </TouchableOpacity>
-        )}
-
-        {/* ── Give Truck Advance ── */}
-        {(data?.manager_available_balance ?? 0) > 0 && (
-          <TouchableOpacity
-            style={styles.truckAdvanceBtn}
-            onPress={() => navigation.navigate('GiveTruckAdvance', {
-              availableBalance: data?.manager_available_balance ?? 0,
-            })}
-          >
-            <Truck size={20} color={COLORS.white} />
-            <Text style={styles.truckAdvanceBtnText}>Give Advance to Truck</Text>
-            <ChevronRight size={18} color={COLORS.white} />
-          </TouchableOpacity>
-        )}
-
-        {/* ── Start New Trip ── */}
-        <TouchableOpacity
-          style={styles.newTripBtn}
-          onPress={() => navigation.navigate('NewTrip')}
-          activeOpacity={0.85}
-        >
-          <PlusCircle size={22} color={COLORS.white} />
-          <Text style={styles.newTripBtnText}>+ START NEW TRIP</Text>
-        </TouchableOpacity>
-
-        {/* ── Recent Trips — tap to open modal ── */}
-        <TouchableOpacity
-          style={[styles.sectionTile, { borderColor: COLORS.border }]}
-          activeOpacity={0.82}
-          onPress={() => {
-            setSelectedRecentTrip(null);
-            setTripsModalVisible(true);
+        {/* ── Animated Actions & Details Container ── */}
+        <Animated.View
+          style={{
+            opacity: contentOpacity,
+            transform: [{ translateY: contentTranslateY }],
           }}
         >
-          <View style={styles.tileLead}>
-            <View style={[styles.tileIconBox, { backgroundColor: COLORS.infoLight }]}>
-              <List size={22} color={COLORS.info} />
+          {/* ── Expiry Alert ── */}
+          {expiringVehicles.length > 0 && (
+            <View style={styles.expiryBanner}>
+              <View style={styles.expiryBannerTop}>
+                <Animated.View style={[styles.expiryIconCircle, { transform: [{ scale: alertPulse }] }]}>
+                  <ShieldAlert size={20} color="#b45309" />
+                </Animated.View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.expiryBannerTitle}>Fleet document alerts (≤ 30 days)</Text>
+                  <Text style={styles.expiryBannerSub}>
+                    {expiringVehicles.length} truck{expiringVehicles.length === 1 ? '' : 's'} — insurance, permit, yearly tax or RC
+                  </Text>
+                </View>
+              </View>
+              {expiringVehicles.slice(0, 4).map((v) => {
+                const alerts = getVehicleDocAlerts(v);
+                const urgent = alerts[0];
+                if (!urgent) return null;
+                return (
+                  <View key={v.id} style={styles.expiryRow}>
+                    <Truck size={14} color="#92400e" />
+                    <Text style={styles.expiryLorry}>{v.lorry_number}</Text>
+                    <Text style={styles.expiryDoc}>
+                      {urgent.isExpired ? `${urgent.name} expired` : `${urgent.name} in ${urgent.days}d`}
+                      {alerts.length > 1 ? ` +${alerts.length - 1}` : ''}
+                    </Text>
+                  </View>
+                );
+              })}
             </View>
-            <View style={{ flex: 1 }}>
-              <Text style={[styles.tileTitle, { color: COLORS.primary }]}>Recent Trips</Text>
-              <Text style={styles.tileSub}>
-                {recentTrips.length > 0
-                  ? `${recentTrips.length} trip${recentTrips.length === 1 ? '' : 's'} — tap to open modal`
-                  : 'No trips yet'}
-              </Text>
-            </View>
-          </View>
-          <View style={styles.tileCta}>
-            <Text style={[styles.tileCtaText, { color: COLORS.accent }]}>Open Modal</Text>
-            <ChevronRight size={16} color={COLORS.accent} />
-          </View>
-        </TouchableOpacity>
+          )}
 
-        {/* View All link */}
-        <TouchableOpacity style={styles.viewAllRow} onPress={() => navigation.navigate('Trips')}>
-          <Text style={styles.viewAllText}>View all trips in Trips tab</Text>
-          <ChevronRight size={14} color={COLORS.accent} />
-        </TouchableOpacity>
+          {/* ── Owner Advance Credit — with touch spring ── */}
+          {(data?.owner_advance_credit ?? 0) > 0 && (
+            <Animated.View style={{ transform: [{ scale: advanceTileScale }] }}>
+              <Pressable
+                style={styles.sectionTile}
+                onPress={() => setAdvanceModalVisible(true)}
+                onPressIn={() => Animated.spring(advanceTileScale, { toValue: 0.97, speed: 50, useNativeDriver: true }).start()}
+                onPressOut={() => Animated.spring(advanceTileScale, { toValue: 1.0, speed: 30, bounciness: 6, useNativeDriver: true }).start()}
+              >
+                <View style={styles.tileLead}>
+                  <View style={styles.tileIconBox}>
+                    <HandCoins size={22} color="#15803d" />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.tileTitle}>Owner Advance Credit</Text>
+                    <Text style={styles.tileSub}>
+                      Total: {formatCurrency(data?.owner_advance_credit ?? 0)}{'  ·  '}
+                      Available: ₹{(data?.manager_available_balance ?? 0).toLocaleString('en-IN')}
+                    </Text>
+                  </View>
+                </View>
+                <View style={styles.tileCta}>
+                  <Text style={styles.tileCtaText}>View Details</Text>
+                  <ChevronRight size={16} color="#16a34a" />
+                </View>
+              </Pressable>
+            </Animated.View>
+          )}
+
+          {/* ── Give Truck Advance — with touch spring ── */}
+          {(data?.manager_available_balance ?? 0) > 0 && (
+            <Animated.View style={{ transform: [{ scale: truckAdvScale }] }}>
+              <Pressable
+                style={styles.truckAdvanceBtn}
+                onPress={() => navigation.navigate('GiveTruckAdvance', {
+                  availableBalance: data?.manager_available_balance ?? 0,
+                })}
+                onPressIn={() => Animated.spring(truckAdvScale, { toValue: 0.96, speed: 50, useNativeDriver: true }).start()}
+                onPressOut={() => Animated.spring(truckAdvScale, { toValue: 1.0, speed: 30, bounciness: 6, useNativeDriver: true }).start()}
+              >
+                <Truck size={20} color={COLORS.white} />
+                <Text style={styles.truckAdvanceBtnText}>Give Advance to Truck</Text>
+                <ChevronRight size={18} color={COLORS.white} />
+              </Pressable>
+            </Animated.View>
+          )}
+
+          {/* ── Start New Trip — with touch spring ── */}
+          <Animated.View style={{ transform: [{ scale: newTripScale }] }}>
+            <Pressable
+              style={styles.newTripBtn}
+              onPress={() => navigation.navigate('NewTrip')}
+              onPressIn={() => Animated.spring(newTripScale, { toValue: 0.96, speed: 50, useNativeDriver: true }).start()}
+              onPressOut={() => Animated.spring(newTripScale, { toValue: 1.0, speed: 30, bounciness: 6, useNativeDriver: true }).start()}
+            >
+              <PlusCircle size={22} color={COLORS.white} />
+              <Text style={styles.newTripBtnText}>+ START NEW TRIP</Text>
+            </Pressable>
+          </Animated.View>
+
+          {/* ── Recent Trips — with touch spring ── */}
+          <Animated.View style={{ transform: [{ scale: recentTripsTileScale }] }}>
+            <Pressable
+              style={[styles.sectionTile, { borderColor: COLORS.border }]}
+              onPress={() => {
+                setSelectedRecentTrip(null);
+                setTripsModalVisible(true);
+              }}
+              onPressIn={() => Animated.spring(recentTripsTileScale, { toValue: 0.97, speed: 50, useNativeDriver: true }).start()}
+              onPressOut={() => Animated.spring(recentTripsTileScale, { toValue: 1.0, speed: 30, bounciness: 6, useNativeDriver: true }).start()}
+            >
+              <View style={styles.tileLead}>
+                <View style={[styles.tileIconBox, { backgroundColor: COLORS.infoLight }]}>
+                  <List size={22} color={COLORS.info} />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={[styles.tileTitle, { color: COLORS.primary }]}>Recent Trips</Text>
+                  <Text style={styles.tileSub}>
+                    {recentTrips.length > 0
+                      ? `${recentTrips.length} trip${recentTrips.length === 1 ? '' : 's'} — tap to open modal`
+                      : 'No trips yet'}
+                  </Text>
+                </View>
+              </View>
+              <View style={styles.tileCta}>
+                <Text style={[styles.tileCtaText, { color: COLORS.accent }]}>Open Modal</Text>
+                <ChevronRight size={16} color={COLORS.accent} />
+              </View>
+            </Pressable>
+          </Animated.View>
+
+          {/* View All link */}
+          <TouchableOpacity style={styles.viewAllRow} onPress={() => navigation.navigate('Trips')}>
+            <Text style={styles.viewAllText}>View all trips in Trips tab</Text>
+            <ChevronRight size={14} color={COLORS.accent} />
+          </TouchableOpacity>
+        </Animated.View>
       </ScrollView>
 
       {/* ── Advance Modal ── */}
@@ -1657,5 +1753,33 @@ const styles = StyleSheet.create({
   emptyRecentText: {
     fontSize: 13,
     color: COLORS.textMuted,
+  },
+  liveBeaconBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginBottom: 4,
+  },
+  liveBeaconRing: {
+    position: 'absolute',
+    left: -2,
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    backgroundColor: '#4ade80',
+    opacity: 0.4,
+  },
+  liveBeaconDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#22c55e',
+  },
+  liveBeaconText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#86efac',
+    letterSpacing: 0.4,
+    textTransform: 'uppercase',
   },
 });

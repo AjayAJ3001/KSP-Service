@@ -95,8 +95,8 @@ export function DataTable<T extends { id?: string | number }>({
                 return (
                   <tr key={row.id !== undefined ? String(row.id) : rowIdx}>
                     {showSerialNumber && (
-                      <td style={{ textAlign: 'center', fontWeight: 600, color: 'var(--text-muted)', fontSize: '13px' }}>
-                        {serialNumber}
+                      <td style={{ textAlign: 'center', width: '65px' }}>
+                        <span className="sno-badge">{serialNumber}</span>
                       </td>
                     )}
                     {columns.map((col, colIdx) => (

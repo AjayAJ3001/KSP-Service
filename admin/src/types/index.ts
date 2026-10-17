@@ -247,6 +247,9 @@ export interface Trip {
   // Settlement data (populated by getTrips)
   settlement_id?: number;
   settlement_status?: 'PENDING' | 'VERIFIED' | 'SETTLED' | string;
+  previous_driver_balance?: number;
+  net_balance_to_driver?: number;
+  settlement_paid_amount?: number;
   total_expenses?: number;
   trip_driver_balance?: number;
   created_by?: number;
@@ -459,6 +462,8 @@ export interface DriverAdvanceSummary {
   overall_balance_in_hand?: number | string;
   remaining_advance_balance: number;
   balance_in_hand: number;
+  need_to_pay?: number;
+  previous_balance_in_hand?: number;
   settlement_net_balance: number;
   settlement_id?: number | null;
   settlement_status?: 'SETTLED' | 'PENDING' | 'VERIFIED' | 'CASH_IN_HAND' | string;

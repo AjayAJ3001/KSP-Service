@@ -15,8 +15,14 @@ export const generateSettlementHtml = (trip: Trip, settlement: Settlement) => {
   const isSettled = settlement.settlement_status === 'SETTLED';
   const tripDate = formatDateDMY(trip.trip_date || settlement.trip_date || new Date());
   const payDate = settlement.payment_date ? formatDateDMY(settlement.payment_date) : '';
-  const netPayable = parseFloat(String(settlement.balance_to_driver || 0));
-  const isPositive = netPayable >= 0;
+  const totalExpenses = parseFloat(String(settlement.total_expenses || 0));
+  const advancePaid = parseFloat(String(settlement.advance_paid || 0));
+  const prevDriverBalance = parseFloat(String(settlement.previous_driver_balance || 0));
+  const totalAdvanceAvailable = advancePaid + prevDriverBalance;
+  const netDiff = totalExpenses - totalAdvanceAvailable;
+  const balanceInHand = netDiff < 0 ? Math.abs(netDiff) : 0;
+  const payableToDriver = netDiff > 0 ? netDiff : 0;
+  const isPositive = payableToDriver > 0;
 
   const items = settlement.expense_items || [];
   const expenseRows = items.length > 0
@@ -358,21 +364,46 @@ export const generateSettlementHtml = (trip: Trip, settlement: Settlement) => {
     </div>
     <div class="calc-box">
       <div class="calc-row">
-        <span>Total Gross Freight Billed:</span>
-        <strong>${formatCurrency(settlement.total_freight)}</strong>
+        <span>Total Driver Expenses Incurred:</span>
+        <strong style="color: #b45309;">${formatCurrency(totalExpenses)}</strong>
       </div>
+      ${prevDriverBalance > 0 ? `
       <div class="calc-row">
-        <span>Less: Total Driver Expenses Incurred:</span>
-        <strong style="color: #b45309;">(-) ${formatCurrency(settlement.total_expenses)}</strong>
+        <span>Add: Prior Advance in Driver Hand:</span>
+        <strong style="color: #1d4ed8;">(+) ${formatCurrency(prevDriverBalance)}</strong>
       </div>
+      ` : ''}
       <div class="calc-row">
-        <span>Less: Trip Advance Already Paid to Driver:</span>
-        <strong style="color: #475569;">(-) ${formatCurrency(settlement.advance_paid)}</strong>
+        <span>Less: Advance Paid for Trip:</span>
+        <strong style="color: #475569;">(-) ${formatCurrency(advancePaid)}</strong>
       </div>
+      ${prevDriverBalance > 0 ? `
+      <div class="calc-row" style="background: #f8fafc; font-weight: 700;">
+        <span>Total Advance Available:</span>
+        <strong>${formatCurrency(totalAdvanceAvailable)}</strong>
+      </div>
+      ` : ''}
+      ${balanceInHand > 0 ? `
+      <div class="calc-row highlight" style="background: #eff6ff; border-top: 1.5px solid #2563eb; color: #1e40af;">
+        <div>
+          <span style="font-size: 13px; font-weight: 900; letter-spacing: 0.3px;">REMAINING BALANCE IN DRIVER HAND:</span>
+          <div style="font-size: 10px; color: #3b82f6; font-weight: 600; margin-top: 2px;">Remaining advance cash held by driver for subsequent trips</div>
+        </div>
+        <span style="font-size: 16px; font-weight: 900; color: #1d4ed8;">${formatCurrency(balanceInHand)}</span>
+      </div>
+      <div class="calc-row" style="background: #f8fafc; color: #64748b; font-size: 11px;">
+        <span>Net Cash Payable by Office:</span>
+        <span style="font-weight: 700;">₹0.00 (Covered by Advance)</span>
+      </div>
+      ` : `
       <div class="calc-row highlight">
-        <span>NET BALANCE PAYABLE TO DRIVER:</span>
-        <span>${isPositive ? '+' : ''}${formatCurrency(settlement.balance_to_driver)}</span>
+        <div>
+          <span>NET BALANCE PAYABLE TO DRIVER:</span>
+          <div style="font-size: 10px; color: #15803d; font-weight: 600; margin-top: 2px;">Dues payable to driver by office</div>
+        </div>
+        <span>${isPositive ? '+' : ''}${formatCurrency(payableToDriver)}</span>
       </div>
+      `}
     </div>
 
     ${isSettled && settlement.payment_mode ? `

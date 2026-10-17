@@ -58,8 +58,10 @@ export const getTrips = asyncHandler(async (req: AuthRequest, res: Response): Pr
             (t.total_freight - COALESCE((SELECT SUM(received_amount) FROM trip_payments WHERE trip_id = t.id), 0)) as balance_due,
             s.id as settlement_id,
             s.settlement_status,
+            s.previous_driver_balance,
             s.net_balance_to_driver,
             s.payment_mode as settlement_payment_mode,
+            s.paid_amount as settlement_paid_amount,
             COALESCE(s.total_expenses, (SELECT COALESCE(SUM(de.amount), 0) FROM driver_expenses de WHERE de.trip_id = t.id), 0) as total_expenses,
             (t.advance_paid - COALESCE(s.total_expenses, (SELECT COALESCE(SUM(de.amount), 0) FROM driver_expenses de WHERE de.trip_id = t.id), 0)) as trip_driver_balance
      FROM trips t
@@ -85,13 +87,22 @@ export const getTripById = asyncHandler(async (req: AuthRequest, res: Response):
             p.name as party_name, p.mobile_number as party_mobile,
             r.from_location, r.to_location, u.name as unit_name, u.abbreviation as unit_abbreviation,
             (SELECT COALESCE(SUM(received_amount), 0) FROM trip_payments WHERE trip_id = t.id) as total_received,
-            (t.total_freight - COALESCE((SELECT SUM(received_amount) FROM trip_payments WHERE trip_id = t.id), 0)) as balance_due
+            (t.total_freight - COALESCE((SELECT SUM(received_amount) FROM trip_payments WHERE trip_id = t.id), 0)) as balance_due,
+            s.id as settlement_id,
+            s.settlement_status,
+            s.previous_driver_balance,
+            s.net_balance_to_driver,
+            s.payment_mode as settlement_payment_mode,
+            s.paid_amount as settlement_paid_amount,
+            COALESCE(s.total_expenses, (SELECT COALESCE(SUM(de.amount), 0) FROM driver_expenses de WHERE de.trip_id = t.id), 0) as total_expenses,
+            (t.advance_paid - COALESCE(s.total_expenses, (SELECT COALESCE(SUM(de.amount), 0) FROM driver_expenses de WHERE de.trip_id = t.id), 0)) as trip_driver_balance
      FROM trips t
      JOIN vehicles v ON t.vehicle_id = v.id
      JOIN drivers d ON t.driver_id = d.id
      JOIN parties p ON t.party_id = p.id
      JOIN routes r ON t.route_id = r.id
      JOIN units u ON t.unit_id = u.id
+     LEFT JOIN settlements s ON s.trip_id = t.id
      WHERE t.id = $1`,
     [req.params.id]
   );

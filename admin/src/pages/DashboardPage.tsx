@@ -51,14 +51,28 @@ export const DashboardPage: React.FC = () => {
   };
 
   if (isLoading) {
-    return <div style={{ textAlign: 'center', padding: '60px' }}>Loading Dashboard...</div>;
+    return (
+      <div className="loading-overlay">
+        <div style={{
+          width: 56, height: 56,
+          border: '4px solid #e2e8f0',
+          borderTopColor: '#6366f1',
+          borderRadius: '50%',
+          animation: 'spin 0.8s linear infinite',
+        }} />
+        <div className="loading-dots">
+          <span /><span /><span />
+        </div>
+        <div style={{ fontSize: 14, color: 'var(--text-muted)', fontWeight: 600 }}>Loading Dashboard...</div>
+      </div>
+    );
   }
 
   const stats = data?.stats;
   const financials = data?.financials;
 
   return (
-    <div>
+    <div className="page-enter">
       {/* Top Header Banner */}
       <div
         style={{
@@ -189,29 +203,31 @@ export const DashboardPage: React.FC = () => {
         <div
           className="card"
           style={{
-            background: 'linear-gradient(135deg, #0f172a 0%, #1e293b 100%)',
+            background: 'linear-gradient(135deg, #090d16 0%, #1e1b4b 55%, #0f172a 100%)',
             color: '#fff',
+            border: '1px solid rgba(99, 102, 241, 0.3)',
+            boxShadow: '0 10px 28px -4px rgba(79, 70, 229, 0.25)',
           }}
         >
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-            <span style={{ fontSize: '13px', color: '#94a3b8', textTransform: 'uppercase', fontWeight: 700, letterSpacing: '0.5px' }}>
+            <span style={{ fontSize: '12px', color: '#a5b4fc', textTransform: 'uppercase', fontWeight: 800, letterSpacing: '0.8px' }}>
               Total Freight Billed
             </span>
-            <div style={{ padding: '6px', background: 'rgba(255,255,255,0.1)', borderRadius: '8px' }}>
-              <TrendingUp size={18} color="#f59e0b" />
+            <div style={{ padding: '7px', background: 'rgba(99, 102, 241, 0.25)', borderRadius: '10px', border: '1px solid rgba(165, 180, 252, 0.3)' }}>
+              <TrendingUp size={18} color="#818cf8" />
             </div>
           </div>
-          <div style={{ fontSize: '28px', fontWeight: 800, color: '#f59e0b', fontFamily: 'var(--font-heading)' }}>
+          <div style={{ fontSize: '30px', fontWeight: 900, color: '#ffffff', fontFamily: 'var(--font-heading)', letterSpacing: '-0.02em' }}>
             {formatCurrency(financials?.total_freight || 0)}
           </div>
-          <div style={{ marginTop: '16px', paddingTop: '16px', borderTop: '1px solid rgba(255,255,255,0.1)', display: 'flex', justifyContent: 'space-between', fontSize: '13px' }}>
+          <div style={{ marginTop: '16px', paddingTop: '16px', borderTop: '1px solid rgba(255,255,255,0.12)', display: 'flex', justifyContent: 'space-between', fontSize: '13px' }}>
             <div>
               <span style={{ color: '#94a3b8' }}>Collected: </span>
-              <strong style={{ color: '#10b981' }}>{formatCurrency(financials?.total_received || 0)}</strong>
+              <strong style={{ color: '#34d399' }}>{formatCurrency(financials?.total_received || 0)}</strong>
             </div>
             <div>
               <span style={{ color: '#94a3b8' }}>Balance: </span>
-              <strong style={{ color: '#ef4444' }}>{formatCurrency(financials?.total_balance || 0)}</strong>
+              <strong style={{ color: '#f87171' }}>{formatCurrency(financials?.total_balance || 0)}</strong>
             </div>
           </div>
         </div>

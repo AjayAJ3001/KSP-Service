@@ -1,9 +1,11 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import {
   Plus, Edit2, Trash2, Search, Download, Eye,
   Phone, CreditCard, Camera, X, FileText, CheckCircle, User as UserIcon,
-  Printer, ShieldCheck, AlertCircle, AlertTriangle, Calendar, Loader, ScanLine, Truck, Sparkles, Lock, Unlock
+  Printer, ShieldCheck, AlertCircle, AlertTriangle, Calendar, Loader, Loader2, ScanLine, Truck, Sparkles, Lock, Unlock
 } from 'lucide-react';
+import * as XLSX from 'xlsx';
 import { createWorker } from 'tesseract.js';
 import { isPdfFile, extractTextFromFile } from '../utils/fileExtraction';
 import { driverService } from '../services/adminService';
@@ -479,19 +481,27 @@ const DriverProfileModal: React.FC<ProfileModalProps> = ({ driver, onClose, onEd
     </div>
   );
 
-  return (
+  return createPortal(
     <>
       <div
         style={{
           position: 'fixed',
-          inset: 0,
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          width: '100vw',
+          height: '100vh',
           zIndex: 9999,
           background: 'rgba(6, 12, 34, 0.78)',
           backdropFilter: 'blur(10px)',
+          WebkitBackdropFilter: 'blur(10px)',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
           padding: '16px',
+          boxSizing: 'border-box',
+          overflowY: 'auto',
         }}
         onClick={(e) => {
           if (e.target === e.currentTarget) onClose();
@@ -501,15 +511,18 @@ const DriverProfileModal: React.FC<ProfileModalProps> = ({ driver, onClose, onEd
         <div
           style={{
             background: '#f8fafc',
-            borderRadius: '22px',
+            borderRadius: '20px',
             width: '100%',
             maxWidth: '860px',
-            maxHeight: '94vh',
-            overflowY: 'auto',
+            maxHeight: '90vh',
             boxShadow: '0 32px 80px rgba(0,0,0,0.45), 0 0 0 1px rgba(255,255,255,0.06)',
             display: 'flex',
             flexDirection: 'column',
+            margin: 'auto',
+            position: 'relative',
+            overflow: 'hidden',
           }}
+          onClick={(e) => e.stopPropagation()}
         >
 
           {/* ═══════════════════════════════════════════════════════════
@@ -680,9 +693,9 @@ const DriverProfileModal: React.FC<ProfileModalProps> = ({ driver, onClose, onEd
           </div>
 
           {/* ═══════════════════════════════════════════════════════════
-              BODY
+              BODY (scrollable)
           ═══════════════════════════════════════════════════════════ */}
-          <div style={{ padding: '22px 28px', flex: 1 }}>
+          <div style={{ padding: '20px 24px', flex: 1, overflowY: 'auto' }}>
 
             {/* Expiry alerts */}
             {isLicenseExpired && (
@@ -709,12 +722,12 @@ const DriverProfileModal: React.FC<ProfileModalProps> = ({ driver, onClose, onEd
             )}
 
             {/* Documents section */}
-            <div style={{ marginBottom: '20px' }}>
+            <div>
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '14px' }}>
                 <FileText size={16} color="#2563eb" />
                 <span style={{ fontSize: '14px', fontWeight: 800, color: '#0f172a' }}>Submitted Documents & Photos</span>
               </div>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '14px' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))', gap: '14px' }}>
                 <DocCard
                   title="Passport Photo"
                   icon={<Camera size={14} />}
@@ -746,99 +759,102 @@ const DriverProfileModal: React.FC<ProfileModalProps> = ({ driver, onClose, onEd
                 />
               </div>
             </div>
+          </div>
 
-            {/* Footer actions */}
-            <div
-              style={{
-                display: 'flex',
-                justifyContent: 'space-between',
-                alignItems: 'center',
-                borderTop: '1px solid #e2e8f0',
-                paddingTop: '16px',
-                marginTop: '4px',
-                flexShrink: 0,
-              }}
-            >
-              {onEdit ? (
-                <button
-                  onClick={() => { onClose(); onEdit(driver); }}
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '7px',
-                    background: '#ffffff',
-                    border: '1.5px solid #e2e8f0',
-                    borderRadius: '10px',
-                    padding: '9px 18px',
-                    fontSize: '13px',
-                    fontWeight: 700,
-                    color: '#374151',
-                    cursor: 'pointer',
-                    transition: 'border-color 0.15s',
-                  }}
-                >
-                  <Edit2 size={14} color="#2563eb" /> Edit Driver Details
-                </button>
-              ) : <div />}
+          {/* ═══════════════════════════════════════════════════════════
+              FOOTER ACTIONS (pinned at bottom of card)
+          ═══════════════════════════════════════════════════════════ */}
+          <div
+            style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              borderTop: '1px solid #e2e8f0',
+              padding: '14px 24px',
+              background: '#ffffff',
+              borderRadius: '0 0 20px 20px',
+              flexShrink: 0,
+            }}
+          >
+            {onEdit ? (
+              <button
+                onClick={() => { onClose(); onEdit(driver); }}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '7px',
+                  background: '#ffffff',
+                  border: '1.5px solid #e2e8f0',
+                  borderRadius: '10px',
+                  padding: '9px 18px',
+                  fontSize: '13px',
+                  fontWeight: 700,
+                  color: '#374151',
+                  cursor: 'pointer',
+                  transition: 'border-color 0.15s',
+                }}
+              >
+                <Edit2 size={14} color="#2563eb" /> Edit Driver Details
+              </button>
+            ) : <div />}
 
-              <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
-                <button
-                  onClick={onClose}
-                  style={{
-                    background: '#ffffff',
-                    border: '1.5px solid #e2e8f0',
-                    borderRadius: '10px',
-                    padding: '9px 18px',
-                    fontSize: '13px',
-                    fontWeight: 700,
-                    color: '#475569',
-                    cursor: 'pointer',
-                  }}
-                >
-                  Close
-                </button>
-                <button
-                  onClick={handlePrint}
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '6px',
-                    background: '#ffffff',
-                    border: '1.5px solid #cbd5e1',
-                    borderRadius: '10px',
-                    padding: '9px 16px',
-                    fontSize: '13px',
-                    fontWeight: 700,
-                    color: '#334155',
-                    cursor: 'pointer',
-                    transition: 'background 0.15s',
-                  }}
-                  title="Print Driver Record or Save as PDF"
-                >
-                  <Printer size={15} color="#475569" /> Print
-                </button>
-                <button
-                  onClick={handleDownload}
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '7px',
-                    background: 'linear-gradient(135deg, #f59e0b, #d97706)',
-                    border: 'none',
-                    borderRadius: '10px',
-                    padding: '9px 20px',
-                    fontSize: '13px',
-                    fontWeight: 700,
-                    color: '#ffffff',
-                    cursor: 'pointer',
-                    boxShadow: '0 4px 12px rgba(217,119,6,0.35)',
-                    transition: 'transform 0.1s, box-shadow 0.15s',
-                  }}
-                  title="Download Driver Verification Record"
-                >
-                  <Download size={15} /> Download Details
-                </button>
-              </div>
+            <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+              <button
+                onClick={onClose}
+                style={{
+                  background: '#ffffff',
+                  border: '1.5px solid #e2e8f0',
+                  borderRadius: '10px',
+                  padding: '9px 18px',
+                  fontSize: '13px',
+                  fontWeight: 700,
+                  color: '#475569',
+                  cursor: 'pointer',
+                }}
+              >
+                Close
+              </button>
+              <button
+                onClick={handlePrint}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  background: '#ffffff',
+                  border: '1.5px solid #cbd5e1',
+                  borderRadius: '10px',
+                  padding: '9px 16px',
+                  fontSize: '13px',
+                  fontWeight: 700,
+                  color: '#334155',
+                  cursor: 'pointer',
+                  transition: 'background 0.15s',
+                }}
+                title="Print Driver Record or Save as PDF"
+              >
+                <Printer size={15} color="#475569" /> Print
+              </button>
+              <button
+                onClick={handleDownload}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '7px',
+                  background: 'linear-gradient(135deg, #f59e0b, #d97706)',
+                  border: 'none',
+                  borderRadius: '10px',
+                  padding: '9px 20px',
+                  fontSize: '13px',
+                  fontWeight: 700,
+                  color: '#ffffff',
+                  cursor: 'pointer',
+                  boxShadow: '0 4px 12px rgba(217,119,6,0.35)',
+                  transition: 'transform 0.1s, box-shadow 0.15s',
+                }}
+                title="Download Driver Verification Record"
+              >
+                <Download size={15} /> Download Details
+              </button>
             </div>
           </div>
         </div>
@@ -869,7 +885,8 @@ const DriverProfileModal: React.FC<ProfileModalProps> = ({ driver, onClose, onEd
           </div>
         </div>
       )}
-    </>
+    </>,
+    document.body
   );
 };
 
@@ -1033,6 +1050,8 @@ export const DriversPage: React.FC = () => {
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [isPrinting, setIsPrinting] = useState(false);
+  const [isExporting, setIsExporting] = useState(false);
 
   // Add / Edit Modal state
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -1077,6 +1096,226 @@ export const DriversPage: React.FC = () => {
         setAllDriversList(res.data.items);
       }
     } catch { /* silent */ }
+  };
+
+  const handlePrintDrivers = async () => {
+    try {
+      setIsPrinting(true);
+      const res = await driverService.getDrivers({ limit: 10000, search: search || undefined });
+      const items: Driver[] = res?.data?.items || [];
+      if (items.length === 0) {
+        alert('No driver records found to print.');
+        setIsPrinting(false);
+        return;
+      }
+
+      const totalCount = items.length;
+      const activeCount = items.filter(d => d.status === 'ACTIVE').length;
+      const heavyCount = items.filter(d => (d.license_type || 'HEAVY').toUpperCase() === 'HEAVY').length;
+      const generatedAt = new Date().toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' });
+
+      const printHtml = `
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>KSP Transport - Driver Master Directory</title>
+  <style>
+    * { box-sizing: border-box; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif; margin: 0; padding: 20px; color: #1e293b; background: #fff; font-size: 12px; }
+    @page { size: landscape; margin: 10mm; }
+    .header-bar { display: flex; justify-content: space-between; align-items: flex-start; padding-bottom: 14px; border-bottom: 2px solid #0f172a; margin-bottom: 14px; }
+    .company-title { font-size: 20px; font-weight: 800; color: #0f172a; letter-spacing: 0.5px; margin: 0 0 4px 0; }
+    .report-subtitle { font-size: 13px; font-weight: 700; color: #2563eb; margin: 0 0 4px 0; text-transform: uppercase; letter-spacing: 0.5px; }
+    .meta-text { font-size: 11px; color: #64748b; margin: 0; }
+    .summary-cards { display: flex; gap: 12px; margin-bottom: 14px; }
+    .card-box { padding: 8px 14px; border-radius: 6px; background: #f8fafc; border: 1px solid #e2e8f0; font-size: 11.5px; }
+    .card-box strong { font-size: 14px; color: #0f172a; }
+    table { width: 100%; border-collapse: collapse; font-size: 11px; margin-top: 6px; }
+    th { background: #0f172a; color: #ffffff; font-weight: 700; text-align: left; padding: 7px 8px; font-size: 11px; }
+    th.center, td.center { text-align: center; }
+    td { padding: 6px 8px; border-bottom: 1px solid #e2e8f0; vertical-align: middle; }
+    tr:nth-child(even) td { background: #fbfcfe; }
+    .badge { display: inline-block; padding: 2px 7px; border-radius: 4px; font-size: 10px; font-weight: 700; text-align: center; }
+    .badge-active { background: #dcfce7; color: #166534; }
+    .badge-inactive { background: #fee2e2; color: #991b1b; }
+    .badge-heavy { background: #eff6ff; color: #1d4ed8; }
+    .badge-regular { background: #f0fdfa; color: #0f766e; }
+    .footer-row td { background: #f1f5f9 !important; font-weight: 800; border-top: 2px solid #0f172a; border-bottom: 2px solid #0f172a; color: #0f172a; }
+    .print-btn-bar { display: flex; justify-content: flex-end; gap: 10px; margin-bottom: 14px; }
+    .print-btn { background: #2563eb; color: #fff; border: none; padding: 8px 16px; border-radius: 6px; font-weight: 600; cursor: pointer; font-size: 12px; }
+    @media print {
+      .print-btn-bar { display: none !important; }
+      body { padding: 0; }
+    }
+  </style>
+</head>
+<body>
+  <div class="print-btn-bar">
+    <button class="print-btn" onclick="window.print()">Print Report / Save as PDF</button>
+    <button class="print-btn" style="background:#64748b" onclick="window.close()">Close</button>
+  </div>
+
+  <div class="header-bar">
+    <div>
+      <h1 class="company-title">KSP TRANSPORT</h1>
+      <div class="report-subtitle">Driver Master Directory</div>
+      <p class="meta-text">Registered drivers, license compliance, and contact details</p>
+    </div>
+    <div style="text-align: right;">
+      <p class="meta-text"><strong>Generated On:</strong> ${generatedAt}</p>
+      <p class="meta-text"><strong>Total Drivers:</strong> ${totalCount}</p>
+      ${search ? `<p class="meta-text"><strong>Filter:</strong> ${search}</p>` : ''}
+    </div>
+  </div>
+
+  <div class="summary-cards">
+    <div class="card-box">Total Drivers: <strong>${totalCount}</strong></div>
+    <div class="card-box">Active: <strong style="color:#16a34a">${activeCount}</strong></div>
+    <div class="card-box">Inactive: <strong style="color:#dc2626">${totalCount - activeCount}</strong></div>
+    <div class="card-box">Heavy Transport DL: <strong>${heavyCount}</strong></div>
+    <div class="card-box">Regular DL: <strong>${totalCount - heavyCount}</strong></div>
+  </div>
+
+  <table>
+    <thead>
+      <tr>
+        <th style="width: 45px;" class="center">S.No</th>
+        <th>Driver Name</th>
+        <th>Mobile Number</th>
+        <th>License Type</th>
+        <th>License (DL) Number</th>
+        <th>License Expiry Date</th>
+        <th>ID Proof Type</th>
+        <th class="center">Status</th>
+      </tr>
+    </thead>
+    <tbody>
+      ${items.map((d, idx) => `
+        <tr>
+          <td class="center">${idx + 1}</td>
+          <td><strong>${d.name || '—'}</strong></td>
+          <td>${d.mobile_number || '—'}</td>
+          <td>
+            <span class="badge ${(d.license_type || 'HEAVY').toUpperCase() === 'HEAVY' ? 'badge-heavy' : 'badge-regular'}">
+              ${(d.license_type || 'HEAVY').toUpperCase() === 'HEAVY' ? 'HEAVY (Transport)' : 'REGULAR (LMV)'}
+            </span>
+          </td>
+          <td style="font-family: monospace; font-weight: 600;">${d.license_number || '—'}</td>
+          <td>${d.license_expiry_date ? formatDateDMY(d.license_expiry_date) : '—'}</td>
+          <td>${d.id_proof_type || '—'}</td>
+          <td class="center">
+            <span class="badge ${d.status === 'ACTIVE' ? 'badge-active' : 'badge-inactive'}">
+              ${d.status || 'ACTIVE'}
+            </span>
+          </td>
+        </tr>
+      `).join('')}
+      <tr class="footer-row">
+        <td class="center" colspan="2">TOTAL DIRECTORY</td>
+        <td colspan="5"><strong>${totalCount} Drivers Listed (${activeCount} Active, ${totalCount - activeCount} Inactive)</strong></td>
+        <td class="center"><strong>${totalCount} Drivers</strong></td>
+      </tr>
+    </tbody>
+  </table>
+
+  <div style="margin-top: 24px; display: flex; justify-content: space-between; font-size: 10px; color: #94a3b8; border-top: 1px solid #e2e8f0; padding-top: 8px;">
+    <span>KSP Service Management ERP · Driver Master</span>
+    <span>Page 1 of 1</span>
+  </div>
+</body>
+</html>
+      `;
+
+      const printWin = window.open('', '_blank', 'width=1100,height=850');
+      if (!printWin) {
+        alert('Please allow pop-ups for this website to print.');
+        setIsPrinting(false);
+        return;
+      }
+      printWin.document.open();
+      printWin.document.write(printHtml);
+      printWin.document.close();
+      printWin.focus();
+      setTimeout(() => {
+        printWin.print();
+      }, 500);
+    } catch (err: any) {
+      console.error('Failed to print drivers', err);
+      alert(err.message || 'Failed to print drivers.');
+    } finally {
+      setIsPrinting(false);
+    }
+  };
+
+  const handleExportExcel = async () => {
+    try {
+      setIsExporting(true);
+      const res = await driverService.getDrivers({ limit: 10000, search: search || undefined });
+      const items: Driver[] = res?.data?.items || [];
+      if (items.length === 0) {
+        alert('No driver records found to export.');
+        setIsExporting(false);
+        return;
+      }
+
+      const excelRows: any[] = items.map((d, idx) => ({
+        'S.No': idx + 1,
+        'Driver Name': d.name || '—',
+        'Mobile Number': d.mobile_number || '—',
+        'License Type': (d.license_type || 'HEAVY').toUpperCase() === 'HEAVY' ? 'HEAVY (Transport)' : 'REGULAR (LMV)',
+        'License Number': d.license_number || '—',
+        'License Expiry Date': d.license_expiry_date ? formatDateDMY(d.license_expiry_date) : '—',
+        'ID Proof Type': d.id_proof_type || '—',
+        'Status': d.status || 'ACTIVE',
+      }));
+
+      // Blank row
+      excelRows.push({
+        'S.No': '',
+        'Driver Name': '',
+        'Mobile Number': '',
+        'License Type': '',
+        'License Number': '',
+        'License Expiry Date': '',
+        'ID Proof Type': '',
+        'Status': '',
+      });
+
+      // Total row
+      excelRows.push({
+        'S.No': '',
+        'Driver Name': 'TOTAL DRIVERS',
+        'Mobile Number': `Count: ${items.length}`,
+        'License Type': `Active: ${items.filter(d => d.status === 'ACTIVE').length}`,
+        'License Number': `Inactive: ${items.filter(d => d.status === 'INACTIVE').length}`,
+        'License Expiry Date': '',
+        'ID Proof Type': '',
+        'Status': `Total: ${items.length}`,
+      });
+
+      const worksheet = XLSX.utils.json_to_sheet(excelRows);
+      worksheet['!cols'] = [
+        { wch: 8 },  // S.No
+        { wch: 26 }, // Driver Name
+        { wch: 18 }, // Mobile Number
+        { wch: 22 }, // License Type
+        { wch: 24 }, // License Number
+        { wch: 20 }, // License Expiry Date
+        { wch: 20 }, // ID Proof Type
+        { wch: 14 }, // Status
+      ];
+
+      const workbook = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(workbook, worksheet, 'Drivers');
+      const dateStr = new Date().toISOString().split('T')[0];
+      XLSX.writeFile(workbook, `KSP_Drivers_List_${dateStr}.xlsx`);
+    } catch (err: any) {
+      console.error('Failed to export drivers', err);
+      alert(err.message || 'Failed to export drivers.');
+    } finally {
+      setIsExporting(false);
+    }
   };
 
   useEffect(() => {
@@ -1835,23 +2074,29 @@ export const DriversPage: React.FC = () => {
       {/* Page Header */}
       <div className="card-header" style={{ marginBottom: '24px' }}>
         <div>
-          <h2 style={{ fontSize: '22px', fontWeight: 800 }}>Driver Master</h2>
-          <p style={{ color: 'var(--text-muted)', fontSize: '13.5px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '14px', flexWrap: 'wrap' }}>
+            <h2 style={{ fontSize: '22px', fontWeight: 800, margin: 0 }}>Driver Master</h2>
+            <button
+              onClick={openCreate}
+              className="btn btn-primary"
+              style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', height: '36px', fontSize: '13px' }}
+            >
+              <Plus size={18} /> Add Driver
+            </button>
+          </div>
+          <p style={{ color: 'var(--text-muted)', fontSize: '13.5px', marginTop: '6px', marginBottom: 0 }}>
             Manage driver profiles, driving license photos & expiry dates, and address proofs
           </p>
         </div>
-        <button onClick={openCreate} className="btn btn-primary" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <Plus size={18} /> Add Driver
-        </button>
       </div>
 
       {/* Main Table Card */}
       <div className="card">
-        <div className="search-filter-bar" style={{ marginBottom: '16px', display: 'flex', gap: '12px', flexWrap: 'wrap', alignItems: 'center' }}>
-          <div style={{ flex: '1 1 260px', minWidth: '220px', maxWidth: '380px' }}>
+        <div className="search-filter-bar" style={{ marginBottom: '16px', display: 'flex', justifyContent: 'flex-start', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
+          <div style={{ width: '185px', maxWidth: '100%' }}>
             <select
               className="form-control form-select"
-              style={{ width: '100%', height: '38px', fontWeight: 600 }}
+              style={{ width: '100%', height: '38px', fontWeight: 600, fontSize: '13px', textOverflow: 'ellipsis' }}
               value={search}
               onChange={(e) => {
                 setSearch(e.target.value);
@@ -1869,6 +2114,54 @@ export const DriversPage: React.FC = () => {
             </select>
           </div>
 
+          <button
+            type="button"
+            onClick={handlePrintDrivers}
+            disabled={isPrinting}
+            className="btn btn-outline"
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              borderColor: '#3b82f6',
+              color: '#1d4ed8',
+              background: '#eff6ff',
+              fontWeight: 600,
+              height: '38px',
+              padding: '0 14px',
+              fontSize: '13px',
+              flexShrink: 0,
+            }}
+            title="Print Driver Master Directory"
+          >
+            {isPrinting ? <Loader2 size={14} className="animate-spin" /> : <Printer size={14} />}
+            {isPrinting ? 'Preparing...' : 'Print'}
+          </button>
+
+          <button
+            type="button"
+            onClick={handleExportExcel}
+            disabled={isExporting}
+            className="btn btn-outline"
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              borderColor: '#10b981',
+              color: '#059669',
+              background: '#ecfdf5',
+              fontWeight: 600,
+              height: '38px',
+              padding: '0 14px',
+              fontSize: '13px',
+              flexShrink: 0,
+            }}
+            title="Download Driver Master as Excel"
+          >
+            {isExporting ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
+            {isExporting ? 'Exporting...' : 'Download'}
+          </button>
+
           {search && (
             <button
               type="button"
@@ -1877,7 +2170,7 @@ export const DriversPage: React.FC = () => {
                 setPage(1);
               }}
               className="btn btn-outline"
-              style={{ height: '38px', padding: '0 14px', fontSize: '13px' }}
+              style={{ height: '38px', padding: '0 14px', fontSize: '13px', flexShrink: 0 }}
               title="Reset driver filter"
             >
               Reset

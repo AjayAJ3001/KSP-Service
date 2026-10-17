@@ -231,6 +231,15 @@ export const SettlementReceiptScreen: React.FC<{ route: any; navigation: any }> 
   const totalExpenses = parseFloat(String(settlement.total_expenses || 0));
   const advancePaid = parseFloat(String(settlement.advance_paid || 0));
   const balanceToDriver = parseFloat(String(settlement.balance_to_driver || 0));
+  const previousDriverBalance = parseFloat(String(settlement.previous_driver_balance || 0));
+  const totalAdvanceAvailable = advancePaid + previousDriverBalance;
+
+  // Advance vs expenses:
+  // If advance >= expenses: driver holds remaining advance in hand
+  // If expenses > advance: office owes driver net balance
+  const netDiff = totalExpenses - totalAdvanceAvailable;
+  const balanceInHand = netDiff < 0 ? Math.abs(netDiff) : 0;
+  const payableToDriver = netDiff > 0 ? netDiff : 0;
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
@@ -341,7 +350,7 @@ export const SettlementReceiptScreen: React.FC<{ route: any; navigation: any }> 
           </View>
         </View>
 
-        {/* 3. SETTLEMENT CALCULATION SUMMARY (No Total Freight down here — only Expenses, Advance & Net Balance) */}
+        {/* 3. SETTLEMENT CALCULATION SUMMARY (Expenses, Advance & Net Balance / In-Hand Balance) */}
         <View style={styles.financialSection}>
           <Text style={styles.finSectionTitle}>SETTLEMENT CALCULATION SUMMARY</Text>
 
@@ -352,27 +361,69 @@ export const SettlementReceiptScreen: React.FC<{ route: any; navigation: any }> 
             </Text>
           </View>
 
+          {previousDriverBalance > 0 && (
+            <View style={styles.finRow}>
+              <Text style={styles.finLabel}>Add: Prior Advance in Driver Hand:</Text>
+              <Text style={[styles.finVal, { color: '#1d4ed8' }]}>
+                (+) {formatCurrency(previousDriverBalance)}
+              </Text>
+            </View>
+          )}
+
           <View style={styles.finRow}>
-            <Text style={styles.finLabel}>Less: Advance Paid to Driver:</Text>
+            <Text style={styles.finLabel}>Less: Advance Paid for Trip:</Text>
             <Text style={styles.finVal}>(-) {formatCurrency(advancePaid)}</Text>
           </View>
 
-          <View style={styles.finHighlightRow}>
-            <View>
-              <Text style={styles.finHighlightLabel}>Net Balance to Driver:</Text>
-              <Text style={styles.finHighlightSub}>
-                {balanceToDriver >= 0 ? '✓ Payable to Driver' : '⚠️ Recoverable from Driver'}
+          {previousDriverBalance > 0 && (
+            <View style={[styles.finRow, { borderTopWidth: 1, borderTopColor: '#e2e8f0', paddingTop: 4, marginTop: 2 }]}>
+              <Text style={[styles.finLabel, { fontWeight: '700' }]}>Total Advance Available:</Text>
+              <Text style={[styles.finVal, { fontWeight: '700' }]}>{formatCurrency(totalAdvanceAvailable)}</Text>
+            </View>
+          )}
+
+          {balanceInHand > 0 ? (
+            <>
+              {/* Highlight card for Balance in Driver Hand */}
+              <View style={styles.inHandCard}>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.inHandTitle}>BALANCE IN DRIVER HAND:</Text>
+                  <Text style={styles.inHandSubtitle}>
+                    ✓ Remaining advance held by driver for subsequent trips
+                  </Text>
+                </View>
+                <Text style={styles.inHandAmount}>
+                  {formatCurrency(balanceInHand)}
+                </Text>
+              </View>
+
+              <View style={[styles.finRow, { marginTop: 2, paddingVertical: 4 }]}>
+                <Text style={[styles.finLabel, { color: COLORS.textMuted }]}>
+                  Net Cash Payable by Office:
+                </Text>
+                <Text style={[styles.finVal, { color: COLORS.textMuted, fontWeight: '600' }]}>
+                  ₹0.00 (Covered by Advance)
+                </Text>
+              </View>
+            </>
+          ) : (
+            <View style={styles.finHighlightRow}>
+              <View>
+                <Text style={styles.finHighlightLabel}>Net Balance to Driver:</Text>
+                <Text style={styles.finHighlightSub}>
+                  {payableToDriver > 0 ? '✓ Payable to Driver by Office' : '✓ Fully Settled (₹0.00)'}
+                </Text>
+              </View>
+              <Text
+                style={[
+                  styles.finHighlightValue,
+                  { color: payableToDriver > 0 ? COLORS.successDark : COLORS.textMuted },
+                ]}
+              >
+                {payableToDriver > 0 ? '+' : ''}{formatCurrency(payableToDriver)}
               </Text>
             </View>
-            <Text
-              style={[
-                styles.finHighlightValue,
-                { color: balanceToDriver >= 0 ? COLORS.successDark : COLORS.dangerDark },
-              ]}
-            >
-              {balanceToDriver >= 0 ? '+' : ''}{formatCurrency(balanceToDriver)}
-            </Text>
-          </View>
+          )}
         </View>
 
         {/* Signatures Row */}
@@ -724,6 +775,36 @@ const styles = StyleSheet.create({
   finHighlightValue: {
     fontSize: 19,
     fontWeight: '900',
+  },
+  inHandCard: {
+    backgroundColor: '#eff6ff',
+    borderColor: '#3b82f6',
+    borderWidth: 1.5,
+    borderRadius: RADIUS.md,
+    padding: SPACING.md,
+    marginTop: 10,
+    marginBottom: 4,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  inHandTitle: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: '#1d4ed8',
+    letterSpacing: 0.5,
+  },
+  inHandSubtitle: {
+    fontSize: 11,
+    color: '#2563eb',
+    marginTop: 2,
+    fontWeight: '500',
+  },
+  inHandAmount: {
+    fontSize: 20,
+    fontWeight: '900',
+    color: '#1d4ed8',
+    marginLeft: 12,
   },
   signaturesRow: {
     flexDirection: 'row',

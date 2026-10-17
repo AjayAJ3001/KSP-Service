@@ -26,6 +26,8 @@ import {
   Banknote,
   BookOpen,
   Wallet,
+  Menu,
+  X,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { LicenseExpiryAlertModal } from '../Common/LicenseExpiryAlertModal';
@@ -39,6 +41,37 @@ export const AdminLayout: React.FC = () => {
   const [showVehicleExpiryModal, setShowVehicleExpiryModal] = useState(false);
   const [expiringCount, setExpiringCount] = useState(0);
   const [expiringVehicleCount, setExpiringVehicleCount] = useState(0);
+  const [isSidebarOpen, setIsSidebarOpen] = useState(() => {
+    return typeof window !== 'undefined' ? window.innerWidth > 768 : true;
+  });
+
+  useEffect(() => {
+    const handleResize = () => {
+      if (window.innerWidth <= 768) {
+        setIsSidebarOpen(false);
+      } else {
+        setIsSidebarOpen(true);
+      }
+    };
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setIsSidebarOpen(false);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
+
+  const handleNavClick = () => {
+    if (window.innerWidth <= 768) {
+      setIsSidebarOpen(false);
+    }
+  };
 
   useEffect(() => {
     // Driver license expiry count (30 days threshold)
@@ -57,83 +90,102 @@ export const AdminLayout: React.FC = () => {
   };
 
   return (
-    <div className="app-container">
+    <div className={`app-container ${isSidebarOpen ? 'sidebar-open' : 'sidebar-closed'}`}>
+      {/* Mobile / Modal Backdrop Overlay */}
+      {isSidebarOpen && (
+        <div
+          className="sidebar-backdrop"
+          onClick={() => setIsSidebarOpen(false)}
+          aria-hidden="true"
+        />
+      )}
+
       {/* Sidebar */}
       <aside className="sidebar">
         <div className="sidebar-brand">
-          <div className="brand-icon-box">KSP</div>
-          <div className="brand-text">
-            <h1>KSP Transport</h1>
-            <span>Admin Portal</span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flex: 1, minWidth: 0 }}>
+            <div className="brand-icon-box">KSP</div>
+            <div className="brand-text">
+              <h1>KSP Transport</h1>
+              <span>Admin Portal</span>
+            </div>
           </div>
+          <button
+            onClick={() => setIsSidebarOpen(false)}
+            className="sidebar-close-btn"
+            title="Close Sidebar"
+            aria-label="Close Sidebar"
+          >
+            <X size={18} />
+          </button>
         </div>
 
         <nav className="sidebar-nav">
           <div className="nav-section-title">Overview</div>
-          <NavLink to="/dashboard" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
+          <NavLink to="/dashboard" onClick={handleNavClick} className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
             <LayoutDashboard /> Dashboard
           </NavLink>
 
           <div className="nav-section-title">Operations</div>
-          <NavLink to="/trips" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
+          <NavLink to="/trips" onClick={handleNavClick} className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
             <Navigation /> Trips
           </NavLink>
-          <NavLink to="/payments" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
+          <NavLink to="/payments" onClick={handleNavClick} className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
             <CreditCard /> Party Payments
           </NavLink>
-          <NavLink to="/owner-advances" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
+          <NavLink to="/owner-advances" onClick={handleNavClick} className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
             <HandCoins /> Owner Advances
           </NavLink>
-          <NavLink to="/manager-ledger" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
+          <NavLink to="/manager-ledger" onClick={handleNavClick} className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
             <BookOpen /> Manager Advances
           </NavLink>
-          <NavLink to="/truck-advances" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
+          <NavLink to="/truck-advances" onClick={handleNavClick} className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
             <Banknote /> Truck Advances
           </NavLink>
-          <NavLink to="/driver-advances" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
+          <NavLink to="/driver-advances" onClick={handleNavClick} className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
             <Wallet /> Driver Advances
           </NavLink>
-          <NavLink to="/settlements" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
+          <NavLink to="/settlements" onClick={handleNavClick} className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
             <FileCheck /> Settlements
           </NavLink>
 
           <div className="nav-section-title">Master Data</div>
-          <NavLink to="/users" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
+          <NavLink to="/users" onClick={handleNavClick} className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
             <Users /> User Management
           </NavLink>
-          <NavLink to="/drivers" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
+          <NavLink to="/drivers" onClick={handleNavClick} className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
             <UserCheck /> Drivers
           </NavLink>
-          <NavLink to="/owners" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
+          <NavLink to="/owners" onClick={handleNavClick} className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
             <Briefcase /> Owners
           </NavLink>
-          <NavLink to="/vehicles" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
+          <NavLink to="/vehicles" onClick={handleNavClick} className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
             <Truck /> Vehicles / Lorries
           </NavLink>
-          <NavLink to="/parties" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
+          <NavLink to="/parties" onClick={handleNavClick} className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
             <Building2 /> Parties and Units
           </NavLink>
-          <NavLink to="/cleaning-expenses" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
+          <NavLink to="/cleaning-expenses" onClick={handleNavClick} className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
             <Droplets /> Cleaning Expenses
           </NavLink>
-          <NavLink to="/unloading-rates" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
+          <NavLink to="/unloading-rates" onClick={handleNavClick} className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
             <ArrowDownCircle /> Unloading Rates
           </NavLink>
-          <NavLink to="/driver-bata" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
+          <NavLink to="/driver-bata" onClick={handleNavClick} className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
             <Percent /> Driver Bata
           </NavLink>
-          <NavLink to="/other-expense-limit" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
+          <NavLink to="/other-expense-limit" onClick={handleNavClick} className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
             <ShieldAlert /> Other Expense Limit
           </NavLink>
 
           <div className="nav-section-title">Analytics & Security</div>
-          <NavLink to="/reports" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
+          <NavLink to="/reports" onClick={handleNavClick} className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
             <BarChart3 /> Reports
           </NavLink>
-          <NavLink to="/audit-logs" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
+          <NavLink to="/audit-logs" onClick={handleNavClick} className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
             <History /> Audit Logs
           </NavLink>
-          <NavLink to="/profile" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
+          <NavLink to="/profile" onClick={handleNavClick} className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
             <UserCircle /> Profile
           </NavLink>
         </nav>
@@ -142,7 +194,17 @@ export const AdminLayout: React.FC = () => {
       {/* Main Content Area */}
       <div className="main-content">
         <header className="header">
-          <div className="page-title">KSP Transport Management System</div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
+            <button
+              onClick={() => setIsSidebarOpen((prev) => !prev)}
+              className="sidebar-toggle-btn"
+              title={isSidebarOpen ? "Collapse Sidebar" : "Open Sidebar"}
+              aria-label="Toggle Sidebar"
+            >
+              <Menu size={20} />
+            </button>
+            <div className="page-title">KSP Transport Management System</div>
+          </div>
           <div className="header-actions">
             {expiringCount > 0 && (
               <button

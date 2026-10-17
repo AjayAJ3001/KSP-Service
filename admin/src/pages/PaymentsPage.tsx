@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { CreditCard, History, Trash2, Download, Printer, Calendar, RefreshCw, Clock, FileSpreadsheet, Loader2 } from 'lucide-react';
+import { CreditCard, History, Trash2, Download, Printer, Calendar, RefreshCw, Clock, FileSpreadsheet, Loader2, FileText } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { tripService, paymentService, partyService, vehicleService, routeService } from '../services/adminService';
 import { Trip, TripPayment, Party, Vehicle, Route } from '../types';
@@ -56,6 +56,7 @@ export const PaymentsPage: React.FC = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [isExportingExcel, setIsExportingExcel] = useState(false);
   const [isPrinting, setIsPrinting] = useState(false);
+  const [downloadingPdfTripId, setDownloadingPdfTripId] = useState<number | null>(null);
 
   // Overdue payment alert
   const [isOverdueAlertOpen, setIsOverdueAlertOpen] = useState(false);
@@ -542,6 +543,315 @@ export const PaymentsPage: React.FC = () => {
     );
   };
 
+  // Single-row PDF Voucher Export
+  const handleDownloadPdfSingleTrip = async (t: Trip) => {
+    try {
+      setDownloadingPdfTripId(t.id);
+
+      // Fetch payment history for this specific trip
+      let payments: TripPayment[] = [];
+      try {
+        const res = await paymentService.getTripPayments(t.id);
+        payments = res.data || [];
+      } catch (fetchErr) {
+        console.warn('Could not fetch payment receipts for PDF', fetchErr);
+      }
+
+      const { jsPDF } = await import('jspdf');
+      const html2canvas = (await import('html2canvas')).default;
+
+      const freightNum = parseFloat(String(t.total_freight)) || 0;
+      const receivedNum = parseFloat(String(t.total_received || 0)) || 0;
+      const balanceNum = parseFloat(String(t.balance_due ?? t.total_freight)) || 0;
+      const freightRateNum = parseFloat(String(t.freight_rate || 0)) || 0;
+
+      let statusText = 'PENDING';
+      let statusStyle = 'background: #fee2e2; color: #dc2626; border: 1px solid #fca5a5;';
+      if (balanceNum <= 0) {
+        statusText = 'FULLY PAID';
+        statusStyle = 'background: #dcfce7; color: #15803d; border: 1px solid #86efac;';
+      } else if (receivedNum > 0) {
+        statusText = 'PARTIALLY PAID';
+        statusStyle = 'background: #fef3c7; color: #b45309; border: 1px solid #fcd34d;';
+      }
+
+      const partyName = t.party_name || '—';
+      const unitName = t.to_location || t.from_location || '—';
+      const fromLoc = t.from_location || '—';
+      const toLoc = t.to_location || '—';
+      const lorryNum = t.lorry_number || '—';
+      const driverName = t.driver_name || '—';
+      const weightStr = `${t.goods_weight || 0} ${t.unit_abbreviation || 'TONS'}`;
+      const todayStr = formatDateDMY(new Date().toISOString());
+      const tripDateStr = formatDateDMY(t.trip_date);
+
+      const paymentRowsHtml = (payments && payments.length > 0)
+        ? payments.map((p, idx) => `
+          <tr>
+            <td style="text-align: center; padding: 6px 8px; border: 1px solid #cbd5e1; font-size: 11px;">${idx + 1}</td>
+            <td style="padding: 6px 8px; border: 1px solid #cbd5e1; font-weight: 700; font-size: 11px; color: #0f172a;">${formatDateDMY(p.payment_date)}</td>
+            <td style="text-align: right; padding: 6px 8px; border: 1px solid #cbd5e1; font-weight: 700; font-size: 11px; color: #15803d;">₹${(parseFloat(String(p.received_amount)) || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td>
+            <td style="text-align: right; padding: 6px 8px; border: 1px solid #cbd5e1; font-weight: 700; font-size: 11px; color: ${(parseFloat(String(p.balance_due)) || 0) > 0 ? '#dc2626' : '#15803d'};">₹${(parseFloat(String(p.balance_due)) || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td>
+            <td style="padding: 6px 8px; border: 1px solid #cbd5e1; font-size: 11px; color: #475569;">${p.created_by_name || 'Admin'}</td>
+            <td style="padding: 6px 8px; border: 1px solid #cbd5e1; font-size: 11px; color: #475569;">${p.notes || '—'}</td>
+          </tr>
+        `).join('')
+        : `
+          <tr>
+            <td colspan="6" style="text-align: center; padding: 14px; border: 1px solid #cbd5e1; color: #64748b; font-size: 11px;">
+              No payment transactions recorded yet for this trip. Outstanding balance: ₹${balanceNum.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+            </td>
+          </tr>
+        `;
+
+      const voucherHtml = `
+        <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; color: #0f172a; background: #ffffff; width: 730px; margin: 0 auto; box-sizing: border-box;">
+          <div style="border: 2px solid #1e3a8a; border-radius: 8px; padding: 20px 22px; background: #ffffff; box-sizing: border-box;">
+            
+            <!-- Header Top Bar -->
+            <table style="width: 100%; border-bottom: 2.5px solid #1e3a8a; padding-bottom: 12px; margin-bottom: 14px; border-collapse: collapse;">
+              <tr>
+                <td style="width: 58%; vertical-align: top; text-align: left;">
+                  <div style="font-size: 24px; font-weight: 900; color: #1e3a8a; line-height: 1.1;">K.S.P. TRANSPORT</div>
+                  <div style="font-size: 10.5px; font-weight: 700; color: #b45309; text-transform: uppercase; margin-top: 3px;">
+                    Professional Heavy Freight &amp; Logistics Services
+                  </div>
+                  <div style="font-size: 10px; color: #475569; margin-top: 4px; line-height: 1.45;">
+                    Head Office: Namakkal / Salem Highway, Tamil Nadu<br/>
+                    Registered Transport Carrier &bull; Phone: +91 98765 43210
+                  </div>
+                </td>
+                <td style="width: 42%; vertical-align: top; text-align: right;">
+                  <div style="font-size: 16px; font-weight: 900; color: #1e3a8a; text-transform: uppercase;">
+                    PARTY PAYMENT VOUCHER
+                  </div>
+                  <div style="font-size: 10px; color: #64748b; margin-top: 3px; font-weight: 600;">
+                    Official Freight Payment &amp; Settlement Receipt
+                  </div>
+                </td>
+              </tr>
+            </table>
+
+            <!-- Integrated Header Metadata Table -->
+            <table style="width: 100%; border-collapse: collapse; margin-bottom: 16px; border: 1.5px solid #1e3a8a; font-size: 11px;">
+              <tbody>
+                <tr>
+                  <td style="width: 18%; background: #eff6ff; font-weight: 700; color: #1e3a8a; padding: 7px 10px; border: 1px solid #bfdbfe;">
+                    VOUCHER NO
+                  </td>
+                  <td style="width: 32%; font-weight: 900; color: #0f172a; padding: 7px 10px; border: 1px solid #bfdbfe; font-size: 12px;">
+                    KSP-PV-${t.id}
+                  </td>
+                  <td style="width: 18%; background: #eff6ff; font-weight: 700; color: #1e3a8a; padding: 7px 10px; border: 1px solid #bfdbfe;">
+                    TRIP DATE
+                  </td>
+                  <td style="width: 32%; font-weight: 900; color: #1d4ed8; padding: 7px 10px; border: 1px solid #bfdbfe; font-size: 12.5px;">
+                    ${tripDateStr}
+                  </td>
+                </tr>
+                <tr>
+                  <td style="background: #f8fafc; font-weight: 700; color: #475569; padding: 7px 10px; border: 1px solid #cbd5e1;">
+                    TRIP REF NO
+                  </td>
+                  <td style="font-weight: 800; color: #0f172a; padding: 7px 10px; border: 1px solid #cbd5e1;">
+                    #${t.id}
+                  </td>
+                  <td style="background: #f8fafc; font-weight: 700; color: #475569; padding: 7px 10px; border: 1px solid #cbd5e1;">
+                    PAYMENT STATUS
+                  </td>
+                  <td style="padding: 7px 10px; border: 1px solid #cbd5e1;">
+                    <span style="display: inline-block; font-size: 10.5px; font-weight: 800; padding: 2px 10px; border-radius: 3px; text-transform: uppercase; ${statusStyle}">
+                      ${statusText}
+                    </span>
+                  </td>
+                </tr>
+                <tr>
+                  <td style="background: #f8fafc; font-weight: 700; color: #475569; padding: 6px 10px; border: 1px solid #cbd5e1;">
+                    ISSUE DATE
+                  </td>
+                  <td style="font-weight: 600; color: #334155; padding: 6px 10px; border: 1px solid #cbd5e1;">
+                    ${todayStr}
+                  </td>
+                  <td style="background: #f8fafc; font-weight: 700; color: #475569; padding: 6px 10px; border: 1px solid #cbd5e1;">
+                    SETTLEMENT REF
+                  </td>
+                  <td style="font-weight: 700; color: #334155; padding: 6px 10px; border: 1px solid #cbd5e1;">
+                    ${t.settlement_id ? `#SETTLE-${t.settlement_id}` : (t.status === 'SETTLED' ? 'SETTLED' : (t.status || 'PENDING'))}
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+
+            <!-- Section 1: Trip & Party Details -->
+            <div style="font-size: 11.5px; font-weight: 800; color: #1e3a8a; text-transform: uppercase; margin-bottom: 6px;">
+              1. Party &amp; Trip Details
+            </div>
+            <table style="width: 100%; border-collapse: collapse; margin-bottom: 16px; border: 1px solid #cbd5e1; font-size: 10.5px;">
+              <tbody>
+                <tr>
+                  <td style="width: 20%; background: #f8fafc; font-weight: 700; color: #475569; padding: 6px 9px; border: 1px solid #cbd5e1;">PARTY NAME</td>
+                  <td style="width: 30%; font-weight: 800; color: #0f172a; padding: 6px 9px; border: 1px solid #cbd5e1;">${partyName}</td>
+                  <td style="width: 20%; background: #f8fafc; font-weight: 700; color: #475569; padding: 6px 9px; border: 1px solid #cbd5e1;">DELIVERY UNIT</td>
+                  <td style="width: 30%; font-weight: 800; color: #1d4ed8; padding: 6px 9px; border: 1px solid #cbd5e1;">${unitName}</td>
+                </tr>
+                <tr>
+                  <td style="background: #f8fafc; font-weight: 700; color: #475569; padding: 6px 9px; border: 1px solid #cbd5e1;">ROUTE</td>
+                  <td style="font-weight: 600; color: #0f172a; padding: 6px 9px; border: 1px solid #cbd5e1;">${fromLoc} ➔ ${toLoc}</td>
+                  <td style="background: #f8fafc; font-weight: 700; color: #475569; padding: 6px 9px; border: 1px solid #cbd5e1;">LORRY NUMBER</td>
+                  <td style="padding: 6px 9px; border: 1px solid #cbd5e1;">
+                    <span style="background: #f1f5f9; border: 1px solid #94a3b8; padding: 2px 6px; border-radius: 3px; font-family: monospace; font-weight: 800; font-size: 11px;">${lorryNum}</span>
+                  </td>
+                </tr>
+                <tr>
+                  <td style="background: #f8fafc; font-weight: 700; color: #475569; padding: 6px 9px; border: 1px solid #cbd5e1;">DRIVER NAME</td>
+                  <td style="font-weight: 600; color: #0f172a; padding: 6px 9px; border: 1px solid #cbd5e1;">${driverName}</td>
+                  <td style="background: #f8fafc; font-weight: 700; color: #475569; padding: 6px 9px; border: 1px solid #cbd5e1;">GOODS / WEIGHT</td>
+                  <td style="font-weight: 600; color: #0f172a; padding: 6px 9px; border: 1px solid #cbd5e1;">${weightStr}</td>
+                </tr>
+                <tr>
+                  <td style="background: #f8fafc; font-weight: 700; color: #475569; padding: 6px 9px; border: 1px solid #cbd5e1;">FREIGHT RATE</td>
+                  <td style="font-weight: 600; color: #0f172a; padding: 6px 9px; border: 1px solid #cbd5e1;">₹${freightRateNum.toFixed(2)} / unit</td>
+                  <td style="background: #f8fafc; font-weight: 700; color: #475569; padding: 6px 9px; border: 1px solid #cbd5e1;">TRIP STATUS</td>
+                  <td style="font-weight: 700; color: #0f172a; padding: 6px 9px; border: 1px solid #cbd5e1;">${t.status || 'NEW'}</td>
+                </tr>
+              </tbody>
+            </table>
+
+            <!-- Section 2: Summary Cards Table -->
+            <div style="font-size: 11.5px; font-weight: 800; color: #1e3a8a; text-transform: uppercase; margin-bottom: 6px;">
+              2. Freight &amp; Payment Summary
+            </div>
+            <table style="width: 100%; border-collapse: separate; border-spacing: 10px 0; margin-bottom: 16px; margin-left: -10px;">
+              <tr>
+                <td style="width: 33.33%; border: 1px solid #cbd5e1; border-top: 3px solid #1e3a8a; border-radius: 4px; padding: 8px 12px; background: #f8fafc; vertical-align: top;">
+                  <div style="font-size: 9.5px; font-weight: 700; color: #64748b; text-transform: uppercase;">Total Freight Amount</div>
+                  <div style="font-size: 16px; font-weight: 900; color: #1e3a8a; margin-top: 2px;">₹${freightNum.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</div>
+                  <div style="font-size: 9.5px; color: #64748b; margin-top: 2px;">Billable trip gross freight</div>
+                </td>
+                <td style="width: 33.33%; border: 1px solid #bbf7d0; border-top: 3px solid #16a34a; border-radius: 4px; padding: 8px 12px; background: #f0fdf4; vertical-align: top;">
+                  <div style="font-size: 9.5px; font-weight: 700; color: #15803d; text-transform: uppercase;">Total Received Amount</div>
+                  <div style="font-size: 16px; font-weight: 900; color: #15803d; margin-top: 2px;">₹${receivedNum.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</div>
+                  <div style="font-size: 9.5px; color: #15803d; margin-top: 2px;">Collected from party</div>
+                </td>
+                <td style="width: 33.33%; border: 1px solid ${balanceNum > 0 ? '#fecaca' : '#bbf7d0'}; border-top: 3px solid ${balanceNum > 0 ? '#dc2626' : '#16a34a'}; border-radius: 4px; padding: 8px 12px; background: ${balanceNum > 0 ? '#fef2f2' : '#f0fdf4'}; vertical-align: top;">
+                  <div style="font-size: 9.5px; font-weight: 700; color: ${balanceNum > 0 ? '#b91c1c' : '#15803d'}; text-transform: uppercase;">Outstanding Balance Due</div>
+                  <div style="font-size: 16px; font-weight: 900; color: ${balanceNum > 0 ? '#dc2626' : '#15803d'}; margin-top: 2px;">₹${balanceNum.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</div>
+                  <div style="font-size: 9.5px; color: ${balanceNum > 0 ? '#b91c1c' : '#15803d'}; margin-top: 2px;">${balanceNum > 0 ? 'Pending collection' : 'Zero balance / Cleared'}</div>
+                </td>
+              </tr>
+            </table>
+
+            <!-- Section 3: Payment Transactions Breakdown -->
+            <div style="font-size: 11.5px; font-weight: 800; color: #1e3a8a; text-transform: uppercase; margin-bottom: 6px;">
+              3. Payment Transactions Breakdown (${payments.length} ${payments.length === 1 ? 'Receipt' : 'Receipts'})
+            </div>
+            <table style="width: 100%; border-collapse: collapse; margin-bottom: 22px; border: 1px solid #cbd5e1; font-size: 10.5px;">
+              <thead>
+                <tr style="background: #f1f5f9;">
+                  <th style="padding: 6px 8px; border: 1px solid #cbd5e1; text-align: center; width: 5%;">#</th>
+                  <th style="padding: 6px 8px; border: 1px solid #cbd5e1; text-align: left; width: 18%;">Payment Date</th>
+                  <th style="padding: 6px 8px; border: 1px solid #cbd5e1; text-align: right; width: 20%;">Received Amount</th>
+                  <th style="padding: 6px 8px; border: 1px solid #cbd5e1; text-align: right; width: 20%;">Balance After Payment</th>
+                  <th style="padding: 6px 8px; border: 1px solid #cbd5e1; text-align: left; width: 17%;">Recorded By</th>
+                  <th style="padding: 6px 8px; border: 1px solid #cbd5e1; text-align: left; width: 20%;">Notes</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${paymentRowsHtml}
+              </tbody>
+            </table>
+
+            <!-- Section 4: Signatures -->
+            <table style="width: 100%; margin-top: 22px; border-top: 1px dashed #cbd5e1; padding-top: 18px;">
+              <tr>
+                <td style="width: 50%; vertical-align: top;">
+                  <div style="font-size: 10.5px; font-weight: 700; color: #334155; margin-bottom: 40px;">Party / Customer Signature:</div>
+                  <div style="border-top: 1px solid #64748b; width: 180px; padding-top: 3px; font-size: 9.5px; color: #64748b;">
+                    Authorized Signatory (${partyName})
+                  </div>
+                </td>
+                <td style="width: 50%; vertical-align: top; text-align: right;">
+                  <div style="font-size: 10.5px; font-weight: 700; color: #334155; margin-bottom: 40px;">For K.S.P. TRANSPORT:</div>
+                  <div style="border-top: 1px solid #64748b; width: 180px; margin-left: auto; padding-top: 3px; font-size: 9.5px; color: #64748b; text-align: center;">
+                    Authorized Signatory / Accountant
+                  </div>
+                </td>
+              </tr>
+            </table>
+
+            <!-- ERP Footer -->
+            <div style="margin-top: 20px; padding-top: 6px; border-top: 1px solid #e2e8f0; display: flex; justify-content: space-between; font-size: 9px; color: #94a3b8;">
+              <span>Generated by KSP Service Management ERP &bull; Official Document</span>
+              <span>Printed on ${new Date().toLocaleString('en-IN')}</span>
+            </div>
+
+          </div>
+        </div>
+      `;
+
+      const RENDER_WIDTH = 794;
+      const container = document.createElement('div');
+      container.style.cssText = `
+        position: fixed; left: -9999px; top: 0;
+        width: ${RENDER_WIDTH}px; background: #ffffff;
+        padding: 24px 28px; box-sizing: border-box; z-index: -9999;
+      `;
+      container.innerHTML = voucherHtml;
+      document.body.appendChild(container);
+
+      if (document.fonts && document.fonts.ready) {
+        await document.fonts.ready;
+      }
+      await new Promise(r => setTimeout(r, 150));
+
+      const canvas = await html2canvas(container, {
+        scale: 2,
+        useCORS: true,
+        allowTaint: true,
+        backgroundColor: '#ffffff',
+        logging: false,
+        windowWidth: RENDER_WIDTH,
+      });
+
+      const pdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+      const pageW = pdf.internal.pageSize.getWidth();
+      const pageH = pdf.internal.pageSize.getHeight();
+      const margin = 10;
+      const imgW = pageW - (margin * 2);
+      const imgH = (canvas.height * imgW) / canvas.width;
+
+      if (imgH <= pageH - (margin * 2)) {
+        pdf.addImage(canvas.toDataURL('image/png'), 'PNG', margin, margin, imgW, imgH);
+      } else {
+        let heightLeft = imgH;
+        let position = margin;
+        const maxPageHeight = pageH - (margin * 2);
+
+        pdf.addImage(canvas.toDataURL('image/png'), 'PNG', margin, position, imgW, imgH);
+        heightLeft -= maxPageHeight;
+
+        while (heightLeft > 0) {
+          position = heightLeft - imgH + margin;
+          pdf.addPage();
+          pdf.addImage(canvas.toDataURL('image/png'), 'PNG', margin, position, imgW, imgH);
+          heightLeft -= maxPageHeight;
+        }
+      }
+
+      const partySlug = (t.party_name || 'party').replace(/[^a-zA-Z0-9]/g, '_');
+      pdf.save(`KSP_Payment_Voucher_Trip_${t.id}_${partySlug}.pdf`);
+
+      if (container.parentNode) {
+        container.parentNode.removeChild(container);
+      }
+    } catch (err: any) {
+      console.error('Failed to generate trip PDF voucher', err);
+      alert('Failed to generate PDF voucher. Please try again.');
+    } finally {
+      setDownloadingPdfTripId(null);
+    }
+  };
+
   const columns: Column<Trip>[] = [
     { header: 'Trip ID', accessor: (t) => `#${t.id}` },
     { header: 'Date', accessor: (t) => formatDateDMY(t.trip_date) },
@@ -588,6 +898,28 @@ export const PaymentsPage: React.FC = () => {
           >
             <Download size={13} />
             <span style={{ fontSize: '11px', fontWeight: 600 }}>CSV</span>
+          </button>
+          <button
+            onClick={() => handleDownloadPdfSingleTrip(t)}
+            disabled={downloadingPdfTripId === t.id}
+            className="btn btn-outline btn-sm"
+            style={{
+              padding: '5px 8px',
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '4px',
+              borderColor: '#ef4444',
+              color: '#dc2626',
+              background: '#fef2f2',
+            }}
+            title="Download Payment Voucher (PDF)"
+          >
+            {downloadingPdfTripId === t.id ? (
+              <Loader2 size={13} className="animate-spin" />
+            ) : (
+              <FileText size={13} />
+            )}
+            <span style={{ fontSize: '11px', fontWeight: 700 }}>PDF</span>
           </button>
         </div>
       ),
@@ -743,6 +1075,25 @@ export const PaymentsPage: React.FC = () => {
             <Calendar size={14} />
             This Week
           </button>
+
+          <button
+            type="button"
+            onClick={resetFilters}
+            className="btn btn-outline btn-sm"
+            style={{
+              height: '38px',
+              padding: '0 14px',
+              fontSize: '13px',
+              fontWeight: 600,
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              flexShrink: 0,
+            }}
+            title="Reset all filters"
+          >
+            <RefreshCw size={14} /> Clear Filters
+          </button>
         </div>
 
         {/* Bottom Control Line: Entity Filters (Party, Truck, Unit, Payment Status, Reset) */}
@@ -756,7 +1107,7 @@ export const PaymentsPage: React.FC = () => {
           }}
         >
           {/* Party Wise */}
-          <div style={{ flex: '1 1 180px', minWidth: '160px' }}>
+          <div style={{ width: '180px', flexShrink: 0 }}>
             <select
               className="form-control form-select"
               style={{ width: '100%', height: '38px' }}
@@ -776,7 +1127,7 @@ export const PaymentsPage: React.FC = () => {
           </div>
 
           {/* Truck Wise */}
-          <div style={{ flex: '1 1 160px', minWidth: '140px' }}>
+          <div style={{ width: '180px', flexShrink: 0 }}>
             <select
               className="form-control form-select"
               style={{ width: '100%', height: '38px' }}
@@ -796,7 +1147,7 @@ export const PaymentsPage: React.FC = () => {
           </div>
 
           {/* Party Delivery Unit (Route) Filter */}
-          <div style={{ flex: '1 1 160px', minWidth: '140px' }}>
+          <div style={{ width: '160px', flexShrink: 0 }}>
             <select
               className="form-control form-select"
               style={{ width: '100%', height: '38px' }}
@@ -816,7 +1167,7 @@ export const PaymentsPage: React.FC = () => {
           </div>
 
           {/* Payment Status Filter */}
-          <div style={{ flex: '1 1 170px', minWidth: '150px' }}>
+          <div style={{ width: '190px', flexShrink: 0 }}>
             <select
               className="form-control form-select"
               style={{ width: '100%', height: '38px' }}
@@ -833,16 +1184,7 @@ export const PaymentsPage: React.FC = () => {
             </select>
           </div>
 
-          {/* Reset Filters Button */}
-          <button
-            type="button"
-            onClick={resetFilters}
-            className="btn btn-outline"
-            style={{ height: '38px', padding: '0 14px', fontSize: '13px', display: 'flex', alignItems: 'center', gap: '6px' }}
-            title="Reset all filters"
-          >
-            <RefreshCw size={14} /> Reset
-          </button>
+
         </div>
       </div>
 

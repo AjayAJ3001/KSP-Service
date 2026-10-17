@@ -197,8 +197,11 @@ export const SettlementsPage: React.FC = () => {
         'Freight Rate (Rs)': Number(s.freight_rate || 0),
         'Total Freight (Rs)': Number(s.total_freight || 0),
         'Advance Paid (Rs)': Number(s.advance_paid || 0),
+        'Prior Advance in Hand (Rs)': Number(s.previous_driver_balance || 0),
         'Total Expenses (Rs)': Number(s.total_expenses || 0),
-        'Balance Payable (Rs)': Number(s.balance_to_driver || 0),
+        'Already in Hand Taken (Rs)': Number(s.previous_driver_balance || 0) > 0 ? Math.min(Number(s.previous_driver_balance || 0), Math.max(0, Number(s.total_expenses || 0) - Number(s.advance_paid || 0))) : 0,
+        'Balance Need to Pay (Rs)': (s.net_balance_to_driver !== undefined && Number(s.net_balance_to_driver) > 0) ? Number(s.net_balance_to_driver) : Number(s.balance_to_driver || 0),
+        'Balance in Driver Hand (Rs)': (s.net_balance_to_driver !== undefined && Number(s.net_balance_to_driver) < 0) ? Math.abs(Number(s.net_balance_to_driver)) : 0,
         'Settlement Status': s.settlement_status,
         'Payment Mode': s.payment_mode || '-',
         'Payment Date': s.payment_date ? s.payment_date.slice(0, 10) : '-',
@@ -503,9 +506,12 @@ export const SettlementsPage: React.FC = () => {
           <td>${s.party_name || '-'}</td>
           <td>${s.to_location || s.from_location || '-'}</td>
           <td class="num">${Number(s.total_freight || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td>
-          <td class="num">${Number(s.advance_paid || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td>
+          <td class="num">${Number(s.advance_paid || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}${Number(s.previous_driver_balance || 0) > 0 ? `<div style="font-size:9px;color:#1d4ed8">+₹${Number(s.previous_driver_balance).toLocaleString('en-IN')} in hand</div>` : ''}</td>
           <td class="num">${Number(s.total_expenses || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td>
-          <td class="num"><strong>${Number(s.balance_to_driver || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</strong></td>
+          <td class="num">
+            ${Number(s.previous_driver_balance || 0) > 0 ? `<div style="font-size:9px;color:#475569">Taken: ₹${Math.min(Number(s.previous_driver_balance), Number(s.total_expenses)).toLocaleString('en-IN')}</div>` : ''}
+            <strong>${Number(s.net_balance_to_driver ?? s.balance_to_driver ?? 0) > 0 ? `+₹${Number(s.net_balance_to_driver ?? s.balance_to_driver).toLocaleString('en-IN', { minimumFractionDigits: 2 })}` : `₹${Math.abs(Number(s.net_balance_to_driver ?? 0)).toLocaleString('en-IN', { minimumFractionDigits: 2 })} (In Hand)`}</strong>
+          </td>
           <td class="num">${Number(s.paid_amount || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td>
           <td class="center"><span class="badge ${badgeClass}">${s.settlement_status}</span></td>
         </tr>
@@ -1251,42 +1257,85 @@ export const SettlementsPage: React.FC = () => {
     },
     { header: 'Total Freight', render: (s) => formatCurrency(s.total_freight) },
     { header: 'Total Expenses', render: (s) => formatCurrency(s.total_expenses) },
-    { header: 'Advance Paid', render: (s) => formatCurrency(s.advance_paid) },
+    {
+      header: 'Advance Paid',
+      render: (s) => {
+        const adv = parseFloat(String(s.advance_paid || 0));
+        const prevInHand = parseFloat(String(s.previous_driver_balance || 0));
+        return (
+          <div>
+            <div style={{ fontWeight: 700, color: '#b45309' }}>{formatCurrency(adv)}</div>
+            {prevInHand > 0 && (
+              <div
+                style={{
+                  fontSize: '10px',
+                  fontWeight: 700,
+                  color: '#1d4ed8',
+                  background: '#eff6ff',
+                  padding: '1px 5px',
+                  borderRadius: '3px',
+                  border: '1px solid #bfdbfe',
+                  marginTop: '2px',
+                  display: 'inline-block',
+                  whiteSpace: 'nowrap',
+                }}
+                title="Advance balance brought forward in driver hand from prior trips"
+              >
+                In Hand: {formatCurrency(prevInHand)}
+              </div>
+            )}
+          </div>
+        );
+      },
+    },
     {
       header: 'Balance to Driver',
       render: (s) => {
         const netBal = getNetBalance(s);
+        const prevInHand = parseFloat(String(s.previous_driver_balance || 0));
+        const tripExp = parseFloat(String(s.total_expenses || 0));
+        const tripAdv = parseFloat(String(s.advance_paid || 0));
         const isSettled = s.settlement_status === 'SETTLED';
-        if (isSettled) {
-          if (s.payment_mode === 'ADJUSTED_ADVANCE') {
-            return (
-              <div>
-                <span style={{ color: '#15803d', fontWeight: 700, fontSize: '13px' }}>₹0.00</span>
-                <div style={{ fontSize: '11px', color: '#2563eb', fontWeight: 600 }}>Adjusted from Advance</div>
-              </div>
-            );
-          }
-          return (
-            <div>
-              <span style={{ color: '#15803d', fontWeight: 700, fontSize: '13px' }}>₹0.00</span>
-              <div style={{ fontSize: '11px', color: '#15803d', fontWeight: 600 }}>Paid {formatCurrency(s.paid_amount || s.balance_to_driver)}</div>
-            </div>
-          );
-        }
+        const takenFromHand = prevInHand > 0 ? Math.min(prevInHand, Math.max(0, tripExp - tripAdv)) : 0;
+
         if (netBal > 0) {
           return (
             <div>
-              <strong style={{ color: '#b91c1c', fontSize: '13px' }}>+{formatCurrency(netBal)}</strong>
-              <div style={{ fontSize: '11px', color: '#b91c1c', fontWeight: 600 }}>Payable to Driver</div>
+              {prevInHand > 0 && (
+                <div style={{ fontSize: '11px', color: '#475569', fontWeight: 600 }}>
+                  Already in hand taken: <strong style={{ color: '#1d4ed8' }}>{formatCurrency(prevInHand)}</strong>
+                </div>
+              )}
+              <div style={{ marginTop: '2px' }}>
+                <strong style={{ color: isSettled ? '#15803d' : '#b91c1c', fontSize: '13px' }}>
+                  {isSettled ? 'Paid ' : 'Balance: '}{formatCurrency(isSettled ? (s.paid_amount || netBal) : netBal)} {isSettled ? '' : 'Need to Pay'}
+                </strong>
+                {isSettled ? (
+                  <div style={{ fontSize: '10.5px', color: '#15803d', fontWeight: 700 }}>✓ Settled (Paid to Driver)</div>
+                ) : (
+                  <div style={{ fontSize: '10.5px', color: '#b91c1c', fontWeight: 700 }}>Payable to Driver</div>
+                )}
+              </div>
             </div>
           );
         }
+
+        const inHand = Math.abs(netBal);
         return (
           <div>
-            <span style={{ color: '#1d4ed8', fontWeight: 700, fontSize: '13px' }}>
-              ₹{Math.abs(netBal).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
-            </span>
-            <div style={{ fontSize: '11px', color: '#1d4ed8', fontWeight: 600 }}>in Driver Hand</div>
+            {takenFromHand > 0 && (
+              <div style={{ fontSize: '11px', color: '#475569', fontWeight: 600 }}>
+                Already in hand taken: <strong style={{ color: '#1d4ed8' }}>{formatCurrency(takenFromHand)}</strong>
+              </div>
+            )}
+            <div style={{ marginTop: '2px' }}>
+              <span style={{ color: '#1d4ed8', fontWeight: 800, fontSize: '13px' }}>
+                {formatCurrency(inHand)}
+              </span>
+              <div style={{ fontSize: '10.5px', color: '#1d4ed8', fontWeight: 700 }}>
+                {isSettled ? 'in Driver Hand (Settled)' : 'in Driver Hand'}
+              </div>
+            </div>
           </div>
         );
       },
@@ -1409,246 +1458,141 @@ export const SettlementsPage: React.FC = () => {
       <div className="card">
         {/* ── Professional Filter Toolbar (Date, Status, Truck, Driver, Party, Search) ─── */}
         <div style={{ padding: '16px 18px', background: 'var(--surface-color, #ffffff)', border: '1px solid var(--border-color, #e5e7eb)', borderRadius: '8px', marginBottom: '18px' }}>
-          {/* Top Control Line: Date Range & This Week */}
-          <div
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              flexWrap: 'wrap',
-              gap: '14px',
-              paddingBottom: '12px',
-              borderBottom: '1px solid var(--border-color, #e5e7eb)',
-            }}
-          >
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 }}>
-              <span style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text-secondary, #374151)' }}>
-                Filter by Date:
-              </span>
-            </div>
-
-            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexShrink: 0 }}>
-              <span style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-muted)' }}>From:</span>
-              <DateField
-                style={{ width: '155px', height: '36px' }}
-                value={fromDate}
-                onChange={(e) => {
-                  setFromDate(e.target.value);
-                  setPage(1);
-                }}
-              />
-            </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexShrink: 0 }}>
-              <span style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-muted)' }}>To:</span>
-              <DateField
-                style={{ width: '155px', height: '36px' }}
-                value={toDate}
-                onChange={(e) => {
-                  setToDate(e.target.value);
-                  setPage(1);
-                }}
-              />
-            </div>
-            <button
-              type="button"
-              onClick={handleThisWeekClick}
-              className={`btn btn-sm ${isThisWeekActive ? 'btn-primary' : 'btn-outline'}`}
-              style={{
-                height: '36px',
-                padding: '0 12px',
-                fontSize: '12px',
-                fontWeight: 600,
-                display: 'flex',
-                alignItems: 'center',
-                gap: '5px',
-                borderRadius: '6px',
-                flexShrink: 0,
-              }}
-              title="Filter by current week"
-            >
-              <Calendar size={13} /> This Week
-            </button>
-          </div>
-
-          {/* Bottom Control Line: Status, Truck, Driver, Party, Search, Reset */}
-          <div
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '10px',
-              flexWrap: 'wrap',
-              paddingTop: '12px',
-            }}
-          >
+          {/* Row 1: Status, Truck, Driver, Party, Search */}
+          <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '10px', marginBottom: '10px' }}>
             {/* Status Dropdown */}
-            <div style={{ flex: '1 1 150px', minWidth: '140px' }}>
-              <select
-                className="form-control form-select"
-                style={{ width: '100%', height: '36px', fontSize: '13px' }}
-                value={statusFilter}
-                onChange={(e) => {
-                  setStatusFilter(e.target.value);
-                  setPage(1);
-                }}
-              >
-                <option value="">All Statuses</option>
-                <option value="PENDING">PENDING</option>
-                <option value="VERIFIED">VERIFIED</option>
-                <option value="SETTLED">SETTLED</option>
-              </select>
-            </div>
+            <select
+              className="form-control form-select"
+              style={{ width: '160px', height: '36px', fontSize: '13px', flexShrink: 0 }}
+              value={statusFilter}
+              onChange={(e) => { setStatusFilter(e.target.value); setPage(1); }}
+            >
+              <option value="">All Statuses</option>
+              <option value="PENDING">PENDING</option>
+              <option value="VERIFIED">VERIFIED</option>
+              <option value="SETTLED">SETTLED</option>
+            </select>
 
             {/* Truck Dropdown */}
-            <div style={{ flex: '1 1 150px', minWidth: '140px' }}>
-              <select
-                className="form-control form-select"
-                style={{ width: '100%', height: '36px', fontSize: '13px' }}
-                value={vehicleFilter}
-                onChange={(e) => {
-                  setVehicleFilter(e.target.value);
-                  setPage(1);
-                }}
-              >
-                <option value="">All Trucks / Lorries</option>
-                {vehicles.map((v) => (
-                  <option key={v.id} value={v.id}>
-                    {v.lorry_number}
-                  </option>
-                ))}
-              </select>
-            </div>
+            <select
+              className="form-control form-select"
+              style={{ width: '160px', height: '36px', fontSize: '13px', flexShrink: 0 }}
+              value={vehicleFilter}
+              onChange={(e) => { setVehicleFilter(e.target.value); setPage(1); }}
+            >
+              <option value="">All Trucks / Lorries</option>
+              {vehicles.map((v) => (
+                <option key={v.id} value={v.id}>{v.lorry_number}</option>
+              ))}
+            </select>
 
             {/* Driver Dropdown */}
-            <div style={{ flex: '1 1 150px', minWidth: '140px' }}>
-              <select
-                className="form-control form-select"
-                style={{ width: '100%', height: '36px', fontSize: '13px' }}
-                value={driverFilter}
-                onChange={(e) => {
-                  setDriverFilter(e.target.value);
-                  setPage(1);
-                }}
-              >
-                <option value="">All Drivers</option>
-                {drivers.map((d) => (
-                  <option key={d.id} value={d.id}>
-                    {d.name}
-                  </option>
-                ))}
-              </select>
-            </div>
+            <select
+              className="form-control form-select"
+              style={{ width: '160px', height: '36px', fontSize: '13px', flexShrink: 0 }}
+              value={driverFilter}
+              onChange={(e) => { setDriverFilter(e.target.value); setPage(1); }}
+            >
+              <option value="">All Drivers</option>
+              {drivers.map((d) => (
+                <option key={d.id} value={d.id}>{d.name}</option>
+              ))}
+            </select>
 
             {/* Party Dropdown */}
-            <div style={{ flex: '1 1 150px', minWidth: '140px' }}>
-              <select
-                className="form-control form-select"
-                style={{ width: '100%', height: '36px', fontSize: '13px' }}
-                value={partyFilter}
-                onChange={(e) => {
-                  setPartyFilter(e.target.value);
-                  setPage(1);
-                }}
-              >
-                <option value="">All Parties</option>
-                {parties.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.name}
-                  </option>
-                ))}
-              </select>
-            </div>
+            <select
+              className="form-control form-select"
+              style={{ width: '160px', height: '36px', fontSize: '13px', flexShrink: 0 }}
+              value={partyFilter}
+              onChange={(e) => { setPartyFilter(e.target.value); setPage(1); }}
+            >
+              <option value="">All Parties</option>
+              {parties.map((p) => (
+                <option key={p.id} value={p.id}>{p.name}</option>
+              ))}
+            </select>
 
             {/* Keyword Search */}
-            <div style={{ flex: '1 1 180px', minWidth: '160px', position: 'relative' }}>
+            <div style={{ position: 'relative', width: '200px', flexShrink: 0 }}>
               <input
                 type="text"
                 className="form-control"
                 placeholder="Search Lorry, Driver, ID..."
                 value={searchTerm}
-                onChange={(e) => {
-                  setSearchTerm(e.target.value);
-                  setPage(1);
-                }}
+                onChange={(e) => { setSearchTerm(e.target.value); setPage(1); }}
                 style={{ height: '36px', fontSize: '13px', paddingLeft: '32px' }}
               />
               <Search
                 size={14}
-                style={{
-                  position: 'absolute',
-                  left: '10px',
-                  top: '50%',
-                  transform: 'translateY(-50%)',
-                  color: 'var(--text-muted)',
-                  pointerEvents: 'none',
-                }}
+                style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)', pointerEvents: 'none' }}
+              />
+            </div>
+          </div>
+
+          {/* Row 2: From Date, To Date, This Week, Clear Filters, Print, Excel */}
+          <div style={{ display: 'flex', alignItems: 'flex-end', flexWrap: 'wrap', gap: '8px' }}>
+            <div>
+              <label style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-muted)', display: 'block', marginBottom: '4px' }}>From Date</label>
+              <DateField
+                style={{ width: '150px', height: '36px' }}
+                value={fromDate}
+                onChange={(e) => { setFromDate(e.target.value); setPage(1); }}
+              />
+            </div>
+            <div>
+              <label style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-muted)', display: 'block', marginBottom: '4px' }}>To Date</label>
+              <DateField
+                style={{ width: '150px', height: '36px' }}
+                value={toDate}
+                onChange={(e) => { setToDate(e.target.value); setPage(1); }}
               />
             </div>
 
-            {/* Reset Button */}
+            <button
+              type="button"
+              onClick={handleThisWeekClick}
+              className={`btn btn-sm ${isThisWeekActive ? 'btn-primary' : 'btn-outline'}`}
+              style={{ height: '36px', padding: '0 12px', fontSize: '12px', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '5px', flexShrink: 0 }}
+              title="Filter by current week"
+            >
+              <Calendar size={13} /> This Week
+            </button>
+
             <button
               type="button"
               onClick={resetFilters}
               className="btn btn-outline"
-              style={{
-                height: '36px',
-                padding: '0 12px',
-                fontSize: '12px',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '5px',
-              }}
+              style={{ height: '36px', padding: '0 12px', fontSize: '12px', display: 'flex', alignItems: 'center', gap: '5px', flexShrink: 0 }}
               title="Reset all filters"
             >
-              <RefreshCw size={13} /> Reset
+              <RefreshCw size={13} /> Clear Filters
             </button>
 
-            {/* Print Master Report */}
             <button
               type="button"
               onClick={handlePrintMaster}
               disabled={isPrintingMaster}
               className="btn btn-outline"
-              style={{
-                height: '36px',
-                padding: '0 12px',
-                fontSize: '12px',
-                fontWeight: 600,
-                display: 'flex',
-                alignItems: 'center',
-                gap: '5px',
-                borderColor: '#3b82f6',
-                color: '#1d4ed8',
-                background: '#eff6ff',
-              }}
-              title="Direct print Settlements Master audit records"
+              style={{ height: '36px', padding: '0 12px', fontSize: '12px', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '5px', borderColor: '#3b82f6', color: '#1d4ed8', background: '#eff6ff', flexShrink: 0 }}
+              title="Print Settlements Master audit records"
             >
               {isPrintingMaster ? <Loader2 size={13} className="animate-spin" /> : <Printer size={13} />}
               {isPrintingMaster ? 'Preparing...' : 'Print'}
             </button>
 
-            {/* Quick Export Button */}
             <button
               type="button"
               onClick={handleExportExcel}
               disabled={isExportingExcel}
               className="btn btn-outline"
-              style={{
-                height: '36px',
-                padding: '0 12px',
-                fontSize: '12px',
-                fontWeight: 600,
-                display: 'flex',
-                alignItems: 'center',
-                gap: '5px',
-                color: '#059669',
-                borderColor: '#10b981',
-                background: '#f0fdf4',
-              }}
-              title="Download filtered settlements to Excel & record in Local Storage"
+              style={{ height: '36px', padding: '0 12px', fontSize: '12px', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '5px', color: '#059669', borderColor: '#10b981', background: '#f0fdf4', flexShrink: 0 }}
+              title="Download filtered settlements to Excel"
             >
               <FileSpreadsheet size={14} /> {isExportingExcel ? 'Exporting...' : 'Excel'}
             </button>
           </div>
         </div>
+
 
         <DataTable
           columns={columns}

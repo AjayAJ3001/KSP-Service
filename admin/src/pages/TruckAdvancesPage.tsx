@@ -728,7 +728,7 @@ export const TruckAdvancesPage: React.FC = () => {
             width: '100%',
           }}
         >
-          <div style={{ flex: '1 1 200px', minWidth: '180px' }}>
+          <div style={{ width: '200px', flexShrink: 0 }}>
             <label style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-muted)', display: 'block', marginBottom: '4px' }}>
               Search
             </label>
@@ -745,7 +745,7 @@ export const TruckAdvancesPage: React.FC = () => {
             </div>
           </div>
 
-          <div style={{ flex: '1 1 150px', minWidth: '140px' }}>
+          <div style={{ width: '160px', flexShrink: 0 }}>
             <label style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-muted)', display: 'block', marginBottom: '4px' }}>
               Vehicle
             </label>
@@ -762,7 +762,7 @@ export const TruckAdvancesPage: React.FC = () => {
             </select>
           </div>
 
-          <div style={{ flex: '1 1 150px', minWidth: '140px' }}>
+          <div style={{ width: '160px', flexShrink: 0 }}>
             <label style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-muted)', display: 'block', marginBottom: '4px' }}>
               Driver
             </label>
@@ -779,7 +779,7 @@ export const TruckAdvancesPage: React.FC = () => {
             </select>
           </div>
 
-          <div style={{ flex: '1 1 160px', minWidth: '140px' }}>
+          <div style={{ width: '160px', flexShrink: 0 }}>
             <label style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-muted)', display: 'block', marginBottom: '4px' }}>
               Party
             </label>
@@ -796,7 +796,7 @@ export const TruckAdvancesPage: React.FC = () => {
             </select>
           </div>
 
-          <div style={{ flex: '1 1 150px', minWidth: '140px' }}>
+          <div style={{ width: '160px', flexShrink: 0 }}>
             <label style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-muted)', display: 'block', marginBottom: '4px' }}>
               Manager
             </label>
@@ -813,7 +813,20 @@ export const TruckAdvancesPage: React.FC = () => {
             </select>
           </div>
 
-          <div style={{ flex: '1 1 140px', minWidth: '130px' }}>
+
+        </div>
+
+        <div
+          style={{
+            display: 'flex',
+            flexWrap: 'wrap',
+            alignItems: 'flex-end',
+            gap: '8px',
+            marginTop: '14px',
+          }}
+        >
+          {/* From Date */}
+          <div style={{ minWidth: '140px' }}>
             <label style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-muted)', display: 'block', marginBottom: '4px' }}>
               From Date
             </label>
@@ -825,7 +838,8 @@ export const TruckAdvancesPage: React.FC = () => {
             />
           </div>
 
-          <div style={{ flex: '1 1 140px', minWidth: '130px' }}>
+          {/* To Date */}
+          <div style={{ minWidth: '140px' }}>
             <label style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-muted)', display: 'block', marginBottom: '4px' }}>
               To Date
             </label>
@@ -836,17 +850,8 @@ export const TruckAdvancesPage: React.FC = () => {
               placeholder="To Date"
             />
           </div>
-        </div>
 
-        <div
-          style={{
-            display: 'flex',
-            flexWrap: 'wrap',
-            alignItems: 'center',
-            gap: '8px',
-            marginTop: '14px',
-          }}
-        >
+          {/* Clear Filters */}
           <button
             type="button"
             onClick={resetFilters}
@@ -857,6 +862,8 @@ export const TruckAdvancesPage: React.FC = () => {
           >
             <RefreshCw size={14} /> Clear Filters
           </button>
+
+          {/* Print */}
           <button
             type="button"
             onClick={handlePrint}
@@ -880,6 +887,8 @@ export const TruckAdvancesPage: React.FC = () => {
             {isPrinting ? <Loader2 size={14} className="animate-spin" /> : <Printer size={14} />}
             {isPrinting ? 'Preparing...' : 'Print'}
           </button>
+
+          {/* Download */}
           <button
             type="button"
             onClick={handleExportExcel}
