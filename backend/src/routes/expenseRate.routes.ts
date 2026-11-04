@@ -6,8 +6,8 @@ const router = Router();
 router.use(authenticate);
 
 router.get('/', getExpenseRates);
-router.post('/', authorize('ADMIN'), createExpenseRate);
-router.put('/:id', authorize('ADMIN'), updateExpenseRate);
-router.delete('/:id', authorize('ADMIN'), deleteExpenseRate);
+router.post('/', authorize('ADMIN', 'OWNER'), createExpenseRate);
+router.put('/:id', authorize('ADMIN', 'OWNER'), updateExpenseRate);
+router.delete('/:id', authorize('ADMIN', 'OWNER'), deleteExpenseRate);
 
 export default router;

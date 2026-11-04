@@ -8,6 +8,6 @@ router.use(authenticate);
 router.get('/trip/:trip_id', getTripPayments);
 router.post('/trip/:trip_id', addPayment);
 router.get('/ledger/:party_id', getPartyLedger);
-router.delete('/:id', authorize('ADMIN'), deletePayment);
+router.delete('/:id', authorize('ADMIN', 'OWNER'), deletePayment);
 
 export default router;

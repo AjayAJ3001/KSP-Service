@@ -38,7 +38,7 @@ import {
   UserCheck,
 } from 'lucide-react-native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
-import { mobileLookupService, mobileTruckAdvanceService, mobileDashboardService } from '../services/mobileService';
+import { mobileLookupService, mobileDriverAdvanceService, mobileDashboardService } from '../services/mobileService';
 import { Vehicle, Driver, RootStackParamList } from '../types';
 import { COLORS, SPACING, RADIUS, SHADOWS } from '../constants/theme';
 import { ComplianceAlertModal, ComplianceDoc } from '../components/ComplianceAlertModal';
@@ -60,6 +60,9 @@ export const GiveTruckAdvanceScreen: React.FC<Props> = ({ navigation, route }) =
   const [amount, setAmount] = useState('');
   const [notes, setNotes] = useState('');
   const [error, setError] = useState('');
+
+  // Advance Dispatch Mode: 'WITH_TRIP' = Manager gives advance & starts trip now; 'WITHOUT_TRIP' = Manager gives advance directly without trip
+  const [advanceMode, setAdvanceMode] = useState<'WITH_TRIP' | 'WITHOUT_TRIP'>('WITH_TRIP');
 
   // Compliance Alert Modal State
   const [complianceModal, setComplianceModal] = useState<{
@@ -93,12 +96,13 @@ export const GiveTruckAdvanceScreen: React.FC<Props> = ({ navigation, route }) =
   const [createdAdvance, setCreatedAdvance] = useState<{
     id?: number;
     amount: number;
-    lorry_number: string;
-    vehicle_id: number;
+    lorry_number?: string;
+    vehicle_id?: number;
     driver_id?: number;
     driver_name?: string;
     remainingBalance: number;
     date: string;
+    withoutTrip?: boolean;
   } | null>(null);
 
   // Animation Refs
@@ -164,7 +168,7 @@ export const GiveTruckAdvanceScreen: React.FC<Props> = ({ navigation, route }) =
 
   const formatCurrency = (val: number | string) => {
     const num = parseFloat(String(val)) || 0;
-    return `\u20B9${num.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    return `\u20B9${Math.round(num).toLocaleString('en-IN')}`;
   };
 
   const getVehicleComplianceAlerts = (v?: Vehicle | null) => {
@@ -224,11 +228,12 @@ export const GiveTruckAdvanceScreen: React.FC<Props> = ({ navigation, route }) =
   const filteredVehicles = vehicles.filter(
     (v) =>
       v.lorry_number.toLowerCase().includes(vehicleSearch.toLowerCase()) ||
+      (v.owner_name ?? '').toLowerCase().includes(vehicleSearch.toLowerCase()) ||
       (v.vehicle_type ?? '').toLowerCase().includes(vehicleSearch.toLowerCase())
   );
 
-  // Proceed directly to Trip Dispatch with preselected Truck, Driver, and Advance Amount
-  // Advance is officially recorded and reduced ONLY when the trip settlement slip is generated!
+  // Option 1: Proceed to Trip Dispatch with preselected Truck, Driver, and Advance Amount
+  // Advance will be officially linked & recorded when the trip slip is generated!
   const handleProceedToTrip = () => {
     setError('');
     const numAmount = parseFloat(amount);
@@ -247,7 +252,6 @@ export const GiveTruckAdvanceScreen: React.FC<Props> = ({ navigation, route }) =
     }
 
     // Seamlessly navigate to NewTripScreen with pre-filled details.
-    // Advance will ONLY be finalized when the trip slip / bill is generated!
     navigation.navigate('NewTrip', {
       preselectedVehicleId: selectedVehicle.id,
       preselectedDriverId: selectedDriver?.id,
@@ -255,8 +259,49 @@ export const GiveTruckAdvanceScreen: React.FC<Props> = ({ navigation, route }) =
     });
   };
 
+  // Option 2: Open Technical Confirmation Popup for Direct Advance (Without Trip)
+  const openConfirmation = () => {
+    setError('');
+    const numAmount = parseFloat(amount);
+
+    if (!selectedDriver) {
+      setError('Please select a driver.');
+      return;
+    }
+    if (!amount || isNaN(numAmount) || numAmount <= 0) {
+      setError('Please enter a valid advance amount.');
+      return;
+    }
+    if (numAmount > availableBalance) {
+      setError(`Amount exceeds your available balance of ${formatCurrency(availableBalance)}.`);
+      return;
+    }
+
+    setConfirmTimestamp(formatDateDMY(new Date().toISOString()));
+    setConfirmModalVisible(true);
+    confirmScale.setValue(0.85);
+    confirmOpacity.setValue(0);
+    Animated.parallel([
+      Animated.spring(confirmScale, {
+        toValue: 1,
+        friction: 6,
+        tension: 80,
+        useNativeDriver: true,
+      }),
+      Animated.timing(confirmOpacity, {
+        toValue: 1,
+        duration: 180,
+        useNativeDriver: true,
+      }),
+    ]).start();
+  };
+
   const handleOpenConfirmation = () => {
-    handleProceedToTrip();
+    if (advanceMode === 'WITH_TRIP') {
+      handleProceedToTrip();
+    } else {
+      openConfirmation();
+    }
   };
 
   const closeConfirmation = () => {
@@ -267,10 +312,43 @@ export const GiveTruckAdvanceScreen: React.FC<Props> = ({ navigation, route }) =
     }).start(() => setConfirmModalVisible(false));
   };
 
-  // Dispatch Confirmed Advance via API
+  // Dispatch Confirmed Advance via API (Without Trip) — driver ledger, no truck required
   const handleConfirmDispatch = async () => {
-    setConfirmModalVisible(false);
-    handleProceedToTrip();
+    if (!selectedDriver) return;
+    const numAmount = parseFloat(amount);
+    if (!numAmount || numAmount <= 0) return;
+
+    try {
+      setIsSubmitting(true);
+      setError('');
+      const res = await mobileDriverAdvanceService.giveAdvance({
+        driver_id: selectedDriver.id,
+        amount: numAmount,
+        notes: notes.trim() || undefined,
+      });
+
+      const newRemaining = availableBalance - numAmount;
+      setAvailableBalance(newRemaining);
+
+      const advData = res.data;
+      setCreatedAdvance({
+        id: advData?.id,
+        amount: numAmount,
+        driver_id: selectedDriver.id,
+        driver_name: selectedDriver.name,
+        remainingBalance: newRemaining,
+        date: formatDateDMY(new Date().toISOString()),
+        withoutTrip: true,
+      });
+
+      setConfirmModalVisible(false);
+      triggerSuccessCelebration();
+    } catch (err: any) {
+      setConfirmModalVisible(false);
+      setError(err?.response?.data?.message || err?.message || 'Failed to dispatch advance.');
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   // Trigger Rich Colorful Animated Success UI & Toast
@@ -424,7 +502,8 @@ export const GiveTruckAdvanceScreen: React.FC<Props> = ({ navigation, route }) =
             <View style={{ flex: 1, marginLeft: 10 }}>
               <Text style={styles.toastTitle}>ADVANCE DISPATCHED!</Text>
               <Text style={styles.toastSub}>
-                {formatCurrency(createdAdvance.amount)} allocated to {createdAdvance.lorry_number}
+                {formatCurrency(createdAdvance.amount)} allocated to{' '}
+                {createdAdvance.driver_name || createdAdvance.lorry_number}
               </Text>
             </View>
             <TouchableOpacity onPress={() => setToastVisible(false)} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
@@ -466,105 +545,230 @@ export const GiveTruckAdvanceScreen: React.FC<Props> = ({ navigation, route }) =
         {/* Form Card */}
         <View style={styles.formCard}>
           <View style={styles.formHeaderRow}>
-            <Text style={styles.sectionTitle}>Truck Advance Allocation</Text>
+            <Text style={styles.sectionTitle}>
+              {advanceMode === 'WITHOUT_TRIP' ? 'Direct Driver Advance' : 'Truck Advance Allocation'}
+            </Text>
             <View style={styles.techChip}>
               <View style={styles.techDot} />
               <Text style={styles.techChipText}>FLEET DISPATCH</Text>
             </View>
           </View>
 
-          {/* Truck Selector */}
-          <Text style={styles.fieldLabel}>Select Target Truck *</Text>
-          <TouchableOpacity
-            style={[styles.dropdownBtn, !selectedVehicle && styles.dropdownBtnPlaceholder]}
-            onPress={() => {
-              setVehicleSearch('');
-              setVehicleModalVisible(true);
-            }}
-          >
-            <Truck size={18} color={selectedVehicle ? COLORS.primary : COLORS.textLight} />
-            <Text style={[styles.dropdownText, !selectedVehicle && styles.dropdownPlaceholderText]}>
-              {selectedVehicle
-                ? `${selectedVehicle.lorry_number}${
-                    selectedVehicle.vehicle_type ? ` — ${selectedVehicle.vehicle_type}` : ''
-                  }`
-                : 'Tap to select a truck'}
-            </Text>
-            <ChevronDown size={18} color={COLORS.textLight} />
-          </TouchableOpacity>
-
-          {/* Selected Truck Compliance Alert Notice */}
-          {selectedVehicle && (() => {
-            const alerts = getVehicleComplianceAlerts(selectedVehicle);
-            if (alerts.length === 0) return null;
-            const hasExpired = alerts.some((a) => a.isExpired);
-            return (
-              <View
-                style={{
-                  marginTop: 10,
-                  backgroundColor: hasExpired ? '#fef2f2' : '#fffbeb',
-                  borderColor: hasExpired ? '#fca5a5' : '#fde68a',
-                  borderWidth: 1.5,
-                  borderRadius: 10,
-                  padding: 12,
-                }}
+          {/* Advance Dispatch Mode Switcher */}
+          <View style={styles.modeCard}>
+            <Text style={styles.modeCardTitle}>HOW WILL THIS ADVANCE BE DISBURSED?</Text>
+            <View style={styles.modeToggleRow}>
+              <TouchableOpacity
+                style={[
+                  styles.modeBtn,
+                  advanceMode === 'WITH_TRIP' && styles.modeBtnActiveTrip,
+                ]}
+                onPress={() => setAdvanceMode('WITH_TRIP')}
+                activeOpacity={0.8}
               >
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 4 }}>
-                  <AlertCircle size={15} color={hasExpired ? '#dc2626' : '#d97706'} />
+                <Zap size={16} color={advanceMode === 'WITH_TRIP' ? '#ffffff' : '#0284c7'} />
+                <View style={{ marginLeft: 6, flex: 1 }}>
                   <Text
-                    style={{
-                      fontSize: 12,
-                      fontWeight: '700',
-                      color: hasExpired ? '#991b1b' : '#92400e',
-                    }}
+                    style={[
+                      styles.modeBtnTitle,
+                      advanceMode === 'WITH_TRIP' && styles.modeBtnTitleActive,
+                    ]}
                   >
-                    {hasExpired ? '⚠️ Compliance Warning — Documents Expired' : '⚠️ Expiry Notice (Within 30 Days)'}
+                    Start Trip Now
+                  </Text>
+                  <Text
+                    style={[
+                      styles.modeBtnSub,
+                      advanceMode === 'WITH_TRIP' && styles.modeBtnSubActive,
+                    ]}
+                    numberOfLines={1}
+                  >
+                    Advance with new trip
                   </Text>
                 </View>
-                {alerts.map((a, idx) => (
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[
+                  styles.modeBtn,
+                  advanceMode === 'WITHOUT_TRIP' && styles.modeBtnActiveDirect,
+                ]}
+                onPress={() => {
+                  setAdvanceMode('WITHOUT_TRIP');
+                  setSelectedVehicle(null);
+                  setVehicleModalVisible(false);
+                  setError('');
+                }}
+                activeOpacity={0.8}
+              >
+                <HandCoins size={16} color={advanceMode === 'WITHOUT_TRIP' ? '#ffffff' : '#059669'} />
+                <View style={{ marginLeft: 6, flex: 1 }}>
                   <Text
-                    key={idx}
+                    style={[
+                      styles.modeBtnTitle,
+                      advanceMode === 'WITHOUT_TRIP' && styles.modeBtnTitleActive,
+                    ]}
+                  >
+                    Without Trip
+                  </Text>
+                  <Text
+                    style={[
+                      styles.modeBtnSub,
+                      advanceMode === 'WITHOUT_TRIP' && styles.modeBtnSubActive,
+                    ]}
+                    numberOfLines={1}
+                  >
+                    Direct advance (no trip)
+                  </Text>
+                </View>
+              </TouchableOpacity>
+            </View>
+          </View>
+
+          {advanceMode === 'WITHOUT_TRIP' ? (
+            <>
+              <Text style={styles.fieldLabel}>Select Driver *</Text>
+              <TouchableOpacity
+                style={[styles.dropdownBtn, !selectedDriver && styles.dropdownBtnPlaceholder]}
+                onPress={() => {
+                  setDriverSearch('');
+                  setDriverModalVisible(true);
+                }}
+              >
+                <UserCheck size={18} color={selectedDriver ? COLORS.primary : COLORS.textLight} />
+                <Text style={[styles.dropdownText, !selectedDriver && styles.dropdownPlaceholderText]}>
+                  {selectedDriver
+                    ? `${selectedDriver.name}${selectedDriver.mobile_number ? ` — ${selectedDriver.mobile_number}` : ''}`
+                    : 'Tap to select driver'}
+                </Text>
+                <ChevronDown size={18} color={COLORS.textLight} />
+              </TouchableOpacity>
+              <Text style={{ fontSize: 11, color: COLORS.textMuted, marginTop: 3, marginBottom: 6, marginLeft: 2 }}>
+                Advance is given to the driver and recorded on their ledger. No truck is required.
+              </Text>
+            </>
+          ) : (
+            <>
+              <Text style={styles.fieldLabel}>Select Target Truck *</Text>
+              <TouchableOpacity
+                style={[styles.dropdownBtn, !selectedVehicle && styles.dropdownBtnPlaceholder]}
+                onPress={() => {
+                  setVehicleSearch('');
+                  setVehicleModalVisible(true);
+                }}
+              >
+                <Truck size={18} color={selectedVehicle ? COLORS.primary : COLORS.textLight} />
+                <Text style={[styles.dropdownText, !selectedVehicle && styles.dropdownPlaceholderText]}>
+                  {selectedVehicle
+                    ? `${selectedVehicle.lorry_number}${
+                        selectedVehicle.vehicle_type ? ` — ${selectedVehicle.vehicle_type}` : ''
+                      }`
+                    : 'Tap to select a truck'}
+                </Text>
+                <ChevronDown size={18} color={COLORS.textLight} />
+              </TouchableOpacity>
+
+              {selectedVehicle && (
+                <View
+                  style={{
+                    marginTop: 8,
+                    backgroundColor: '#eff6ff',
+                    borderColor: '#bfdbfe',
+                    borderWidth: 1,
+                    borderRadius: 8,
+                    paddingVertical: 7,
+                    paddingHorizontal: 10,
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    gap: 6,
+                  }}
+                >
+                  <Text style={{ fontSize: 12.5, fontWeight: '700', color: '#1e40af' }}>
+                    👤 Truck Owner:
+                  </Text>
+                  <Text style={{ fontSize: 12.5, fontWeight: '800', color: '#1d4ed8' }}>
+                    {selectedVehicle.owner_name || 'Direct / Self'}
+                  </Text>
+                  {selectedVehicle.owner_mobile ? (
+                    <Text style={{ fontSize: 11, color: '#64748b' }}>
+                      ({selectedVehicle.owner_mobile})
+                    </Text>
+                  ) : null}
+                </View>
+              )}
+
+              {selectedVehicle && (() => {
+                const alerts = getVehicleComplianceAlerts(selectedVehicle);
+                if (alerts.length === 0) return null;
+                const hasExpired = alerts.some((a) => a.isExpired);
+                return (
+                  <View
                     style={{
-                      fontSize: 11,
-                      color: a.isExpired ? '#b91c1c' : '#b45309',
-                      marginLeft: 21,
-                      lineHeight: 16,
+                      marginTop: 10,
+                      backgroundColor: hasExpired ? '#fef2f2' : '#fffbeb',
+                      borderColor: hasExpired ? '#fca5a5' : '#fde68a',
+                      borderWidth: 1.5,
+                      borderRadius: 10,
+                      padding: 12,
                     }}
                   >
-                    • <Text style={{ fontWeight: '600' }}>{a.name}:</Text>{' '}
-                    {a.isExpired ? `EXPIRED (${a.date})` : `Expires in ${a.days}d (${a.date})`}
-                  </Text>
-                ))}
-              </View>
-            );
-          })()}
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+                      <AlertCircle size={15} color={hasExpired ? '#dc2626' : '#d97706'} />
+                      <Text
+                        style={{
+                          fontSize: 12,
+                          fontWeight: '700',
+                          color: hasExpired ? '#991b1b' : '#92400e',
+                        }}
+                      >
+                        {hasExpired ? '⚠️ Compliance Warning — Documents Expired' : '⚠️ Expiry Notice (Within 30 Days)'}
+                      </Text>
+                    </View>
+                    {alerts.map((a, idx) => (
+                      <Text
+                        key={idx}
+                        style={{
+                          fontSize: 11,
+                          color: a.isExpired ? '#b91c1c' : '#b45309',
+                          marginLeft: 21,
+                          lineHeight: 16,
+                        }}
+                      >
+                        • <Text style={{ fontWeight: '600' }}>{a.name}:</Text>{' '}
+                        {a.isExpired ? `EXPIRED (${a.date})` : `Expires in ${a.days}d (${a.date})`}
+                      </Text>
+                    ))}
+                  </View>
+                );
+              })()}
 
-          {/* Driver Selector */}
-          <Text style={styles.fieldLabel}>Select Driver (Optional)</Text>
-          <TouchableOpacity
-            style={[styles.dropdownBtn, !selectedDriver && styles.dropdownBtnPlaceholder]}
-            onPress={() => {
-              setDriverSearch('');
-              setDriverModalVisible(true);
-            }}
-          >
-            <UserCheck size={18} color={selectedDriver ? COLORS.primary : COLORS.textLight} />
-            <Text style={[styles.dropdownText, !selectedDriver && styles.dropdownPlaceholderText]}>
-              {selectedDriver
-                ? `${selectedDriver.name}${selectedDriver.mobile_number ? ` — ${selectedDriver.mobile_number}` : ''}`
-                : 'Tap to select driver (optional)'}
-            </Text>
-            {selectedDriver ? (
-              <TouchableOpacity onPress={() => setSelectedDriver(null)} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
-                <X size={16} color={COLORS.textLight} />
+              <Text style={styles.fieldLabel}>Select Driver (Optional)</Text>
+              <TouchableOpacity
+                style={[styles.dropdownBtn, !selectedDriver && styles.dropdownBtnPlaceholder]}
+                onPress={() => {
+                  setDriverSearch('');
+                  setDriverModalVisible(true);
+                }}
+              >
+                <UserCheck size={18} color={selectedDriver ? COLORS.primary : COLORS.textLight} />
+                <Text style={[styles.dropdownText, !selectedDriver && styles.dropdownPlaceholderText]}>
+                  {selectedDriver
+                    ? `${selectedDriver.name}${selectedDriver.mobile_number ? ` — ${selectedDriver.mobile_number}` : ''}`
+                    : 'Tap to select driver (optional)'}
+                </Text>
+                {selectedDriver ? (
+                  <TouchableOpacity onPress={() => setSelectedDriver(null)} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+                    <X size={16} color={COLORS.textLight} />
+                  </TouchableOpacity>
+                ) : (
+                  <ChevronDown size={18} color={COLORS.textLight} />
+                )}
               </TouchableOpacity>
-            ) : (
-              <ChevronDown size={18} color={COLORS.textLight} />
-            )}
-          </TouchableOpacity>
-          <Text style={{ fontSize: 11, color: COLORS.textMuted, marginTop: 3, marginBottom: 6, marginLeft: 2 }}>
-            Link a driver to track per-driver advance balance across trips.
-          </Text>
+              <Text style={{ fontSize: 11, color: COLORS.textMuted, marginTop: 3, marginBottom: 6, marginLeft: 2 }}>
+                Link a driver to track per-driver advance balance across trips.
+              </Text>
+            </>
+          )}
 
           {/* Amount Field */}
           <Text style={styles.fieldLabel}>Advance Amount (₹) *</Text>
@@ -606,24 +810,69 @@ export const GiveTruckAdvanceScreen: React.FC<Props> = ({ navigation, route }) =
             </View>
           )}
 
-          {/* Submit Button to Trigger Technical Popup */}
-          {/* Submit Button to Trigger Trip Dispatch */}
-          <TouchableOpacity
-            style={[styles.submitBtn, (!selectedVehicle || !amount) && styles.submitBtnDisabled]}
-            onPress={handleProceedToTrip}
-            activeOpacity={0.85}
-          >
-            <ShieldCheck size={20} color={COLORS.white} />
-            <Text style={styles.submitBtnText}>PROCEED TO TRIP DISPATCH</Text>
-            <ArrowRight size={18} color={COLORS.white} />
-          </TouchableOpacity>
+          {/* Dynamic Submit Button Area */}
+          {advanceMode === 'WITH_TRIP' ? (
+            <>
+              <TouchableOpacity
+                style={[styles.submitBtn, (!selectedVehicle || !amount) && styles.submitBtnDisabled]}
+                onPress={handleProceedToTrip}
+                activeOpacity={0.85}
+              >
+                <Zap size={20} color={COLORS.white} />
+                <Text style={styles.submitBtnText}>PROCEED TO TRIP DISPATCH</Text>
+                <ArrowRight size={18} color={COLORS.white} />
+              </TouchableOpacity>
 
-          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, marginTop: 12 }}>
-            <ShieldCheck size={14} color="#059669" />
-            <Text style={{ fontSize: 11.5, color: '#059669', fontWeight: '600', textAlign: 'center' }}>
-              Advance will be finalized & reduced only when the trip slip is generated.
-            </Text>
-          </View>
+              <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, marginTop: 12 }}>
+                <ShieldCheck size={14} color="#0284c7" />
+                <Text style={{ fontSize: 11.5, color: '#0284c7', fontWeight: '600', textAlign: 'center' }}>
+                  Advance will be finalized & reduced only when the trip slip is generated.
+                </Text>
+              </View>
+
+              <TouchableOpacity
+                style={styles.switchModeBtn}
+                onPress={() => {
+                  setAdvanceMode('WITHOUT_TRIP');
+                  setSelectedVehicle(null);
+                  setVehicleModalVisible(false);
+                  setError('');
+                }}
+              >
+                <Text style={styles.switchModeText}>
+                  Need to give advance without trip? Switch to Direct Advance ➔
+                </Text>
+              </TouchableOpacity>
+            </>
+          ) : (
+            <>
+              <TouchableOpacity
+                style={[styles.submitBtnDirect, (!selectedDriver || !amount) && styles.submitBtnDisabled]}
+                onPress={openConfirmation}
+                activeOpacity={0.85}
+              >
+                <HandCoins size={20} color={COLORS.white} />
+                <Text style={styles.submitBtnText}>DISBURSE ADVANCE (WITHOUT TRIP)</Text>
+                <ArrowRight size={18} color={COLORS.white} />
+              </TouchableOpacity>
+
+              <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, marginTop: 12 }}>
+                <CheckCircle2 size={14} color="#059669" />
+                <Text style={{ fontSize: 11.5, color: '#059669', fontWeight: '600', textAlign: 'center' }}>
+                  Advance will be deducted immediately from your balance & recorded in driver ledger.
+                </Text>
+              </View>
+
+              <TouchableOpacity
+                style={styles.switchModeBtn}
+                onPress={() => setAdvanceMode('WITH_TRIP')}
+              >
+                <Text style={[styles.switchModeText, { color: '#059669' }]}>
+                  Starting a trip immediately instead? Switch to Trip Dispatch ➔
+                </Text>
+              </TouchableOpacity>
+            </>
+          )}
         </View>
       </ScrollView>
 
@@ -657,29 +906,16 @@ export const GiveTruckAdvanceScreen: React.FC<Props> = ({ navigation, route }) =
                 <Zap size={22} color="#06b6d4" />
               </View>
               <View style={{ flex: 1, marginLeft: 12 }}>
-                <Text style={styles.cyberMainTitle}>Authorize Truck Advance</Text>
+                <Text style={styles.cyberMainTitle}>Authorize Driver Advance</Text>
                 <Text style={styles.cyberSubTitle}>Review dispatch ledger parameters</Text>
               </View>
             </View>
 
             {/* Technical Spec Card */}
             <View style={styles.techSpecCard}>
-              {/* Asset Row */}
-              <View style={styles.techSpecRow}>
-                <Text style={styles.techSpecLabel}>TARGET FLEET ASSET</Text>
-                <View style={styles.assetBadge}>
-                  <Truck size={14} color="#38bdf8" />
-                  <Text style={styles.assetBadgeText}>{selectedVehicle?.lorry_number}</Text>
-                  {selectedVehicle?.vehicle_type ? (
-                    <Text style={styles.assetSubText}>• {selectedVehicle.vehicle_type}</Text>
-                  ) : null}
-                </View>
-              </View>
-
-              {/* Driver Row */}
               {selectedDriver && (
                 <View style={styles.techSpecRow}>
-                  <Text style={styles.techSpecLabel}>ASSIGNED DRIVER</Text>
+                  <Text style={styles.techSpecLabel}>DRIVER</Text>
                   <View style={styles.assetBadge}>
                     <UserCheck size={14} color="#38bdf8" />
                     <Text style={styles.assetBadgeText}>{selectedDriver.name}</Text>
@@ -809,7 +1045,9 @@ export const GiveTruckAdvanceScreen: React.FC<Props> = ({ navigation, route }) =
 
             <Text style={styles.successMainTitle}>Advance Dispatched!</Text>
             <Text style={styles.successSubTitle}>
-              Cash advance successfully allocated & logged to fleet ledger.
+              {createdAdvance?.withoutTrip
+                ? 'Cash advance successfully allocated & logged to the driver ledger.'
+                : 'Cash advance successfully allocated & logged to fleet ledger.'}
             </Text>
 
             {/* Colorful Receipt Voucher Card */}
@@ -832,17 +1070,19 @@ export const GiveTruckAdvanceScreen: React.FC<Props> = ({ navigation, route }) =
               </View>
 
               <View style={styles.receiptDetailsList}>
-                <View style={styles.receiptDetailRow}>
-                  <Text style={styles.receiptDetailKey}>Fleet Truck</Text>
-                  <View style={styles.receiptTruckTag}>
-                    <Truck size={13} color="#1d4ed8" />
-                    <Text style={styles.receiptTruckText}>{createdAdvance?.lorry_number}</Text>
+                {createdAdvance?.lorry_number ? (
+                  <View style={styles.receiptDetailRow}>
+                    <Text style={styles.receiptDetailKey}>Fleet Truck</Text>
+                    <View style={styles.receiptTruckTag}>
+                      <Truck size={13} color="#1d4ed8" />
+                      <Text style={styles.receiptTruckText}>{createdAdvance.lorry_number}</Text>
+                    </View>
                   </View>
-                </View>
+                ) : null}
 
                 {createdAdvance?.driver_name && (
                   <View style={styles.receiptDetailRow}>
-                    <Text style={styles.receiptDetailKey}>Assigned Driver</Text>
+                    <Text style={styles.receiptDetailKey}>Driver</Text>
                     <View style={styles.receiptTruckTag}>
                       <UserCheck size={13} color="#1d4ed8" />
                       <Text style={styles.receiptTruckText}>{createdAdvance.driver_name}</Text>
@@ -874,7 +1114,7 @@ export const GiveTruckAdvanceScreen: React.FC<Props> = ({ navigation, route }) =
                     navigation.replace('NewTrip', {
                       preselectedVehicleId: createdAdvance.vehicle_id,
                       preselectedDriverId: createdAdvance.driver_id,
-                      advancePaid: createdAdvance.amount,
+                      advancePaid: createdAdvance.withoutTrip ? undefined : createdAdvance.amount,
                     });
                   }
                 }}
@@ -913,7 +1153,7 @@ export const GiveTruckAdvanceScreen: React.FC<Props> = ({ navigation, route }) =
       {/* ========================================================================= */}
       {/* 3. VEHICLE PICKER MODAL                                                   */}
       {/* ========================================================================= */}
-      <Modal visible={vehicleModalVisible} animationType="slide" transparent onRequestClose={() => setVehicleModalVisible(false)}>
+      <Modal visible={vehicleModalVisible && advanceMode === 'WITH_TRIP'} animationType="slide" transparent onRequestClose={() => setVehicleModalVisible(false)}>
         <View style={styles.modalOverlay}>
           <View style={styles.modalContainer}>
             <View style={styles.modalHeader}>
@@ -962,6 +1202,11 @@ export const GiveTruckAdvanceScreen: React.FC<Props> = ({ navigation, route }) =
                     </View>
                     <View style={{ marginLeft: 12, flex: 1 }}>
                       <Text style={styles.modalItemTitle}>{item.lorry_number}</Text>
+                      {item.owner_name ? (
+                        <Text style={{ fontSize: 11, fontWeight: '700', color: '#4338ca', marginTop: 1 }}>
+                          👤 Owner: {item.owner_name}
+                        </Text>
+                      ) : null}
                       {item.vehicle_type && (
                         <Text style={styles.modalItemSub}>{item.vehicle_type}</Text>
                       )}
@@ -1296,8 +1541,92 @@ const styles = StyleSheet.create({
     marginTop: SPACING.xl,
     ...SHADOWS.md,
   },
+  submitBtnDirect: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 10,
+    backgroundColor: '#059669',
+    borderRadius: RADIUS.lg,
+    paddingVertical: 16,
+    marginTop: SPACING.xl,
+    ...SHADOWS.md,
+    shadowColor: '#059669',
+    shadowOpacity: 0.35,
+  },
   submitBtnDisabled: { opacity: 0.6 },
   submitBtnText: { fontSize: 16, fontWeight: '800', color: COLORS.white, letterSpacing: 0.5 },
+
+  // Mode Card Styles
+  modeCard: {
+    backgroundColor: '#ffffff',
+    borderRadius: RADIUS.lg,
+    padding: SPACING.md,
+    marginBottom: SPACING.md,
+    borderWidth: 1.5,
+    borderColor: '#e2e8f0',
+    ...SHADOWS.sm,
+  },
+  modeCardTitle: {
+    fontSize: 11,
+    fontWeight: '800',
+    color: '#64748b',
+    letterSpacing: 0.8,
+    marginBottom: 8,
+  },
+  modeToggleRow: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  modeBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 10,
+    paddingHorizontal: 10,
+    borderRadius: 12,
+    borderWidth: 1.5,
+    borderColor: '#e2e8f0',
+    backgroundColor: '#f8fafc',
+  },
+  modeBtnActiveTrip: {
+    backgroundColor: '#0284c7',
+    borderColor: '#0284c7',
+    ...SHADOWS.sm,
+  },
+  modeBtnActiveDirect: {
+    backgroundColor: '#059669',
+    borderColor: '#059669',
+    ...SHADOWS.sm,
+  },
+  modeBtnTitle: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: '#334155',
+  },
+  modeBtnTitleActive: {
+    color: '#ffffff',
+  },
+  modeBtnSub: {
+    fontSize: 10,
+    fontWeight: '500',
+    color: '#64748b',
+    marginTop: 1,
+  },
+  modeBtnSubActive: {
+    color: 'rgba(255, 255, 255, 0.85)',
+  },
+  switchModeBtn: {
+    marginTop: 10,
+    paddingVertical: 6,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  switchModeText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#0284c7',
+  },
 
   // =========================================================================
   // TECHNICAL CONFIRMATION MODAL STYLES

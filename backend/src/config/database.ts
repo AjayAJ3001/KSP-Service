@@ -22,8 +22,8 @@ export const query = async (text: string, params?: any[]) => {
   const start = Date.now();
   const res = await pool.query(text, params);
   const duration = Date.now() - start;
-  if (process.env.NODE_ENV === 'development') {
-    console.log('executed query', { text: text.substring(0, 100), duration, rows: res.rowCount });
+  if (duration >= 120) {
+    console.log('slow query', { duration, rows: res.rowCount, text: text.substring(0, 120) });
   }
   return res;
 };

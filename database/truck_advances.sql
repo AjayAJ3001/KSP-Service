@@ -19,3 +19,4 @@ CREATE INDEX IF NOT EXISTS idx_truck_advances_manager ON truck_advances(manager_
 CREATE INDEX IF NOT EXISTS idx_truck_advances_vehicle ON truck_advances(vehicle_id);
 CREATE INDEX IF NOT EXISTS idx_truck_advances_driver ON truck_advances(driver_id);
 CREATE INDEX IF NOT EXISTS idx_truck_advances_date ON truck_advances(advance_date);
+CREATE INDEX IF NOT EXISTS idx_truck_advances_trip ON truck_advances(trip_id);

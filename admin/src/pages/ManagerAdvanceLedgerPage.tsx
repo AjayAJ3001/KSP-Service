@@ -22,6 +22,7 @@ import * as XLSX from 'xlsx';
 import { truckAdvanceService, ownerAdvanceService } from '../services/adminService';
 import { formatISTDate } from '../utils/dateUtils';
 import { Link } from 'react-router-dom';
+import { PRINT_BRAND_CSS, printBrandLockup } from '../utils/printBrand';
 
 interface ManagerRow {
   manager_id: number;
@@ -145,10 +146,11 @@ export const ManagerAdvanceLedgerPage: React.FC = () => {
       const items = filtered;
       const html = `<!DOCTYPE html><html><head><meta charset="utf-8"/><title>KSP Manager Advance Ledger</title>
       <style>
+    ${PRINT_BRAND_CSS}
         *{box-sizing:border-box;-webkit-print-color-adjust:exact;print-color-adjust:exact}
         body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;margin:0;padding:20px;color:#1e293b;background:#fff;font-size:11.5px}
         @page{size:landscape;margin:10mm}
-        .header-bar{display:flex;justify-content:space-between;align-items:flex-start;padding-bottom:12px;border-bottom:2px solid #0f172a;margin-bottom:14px}
+        .header-bar{display:flex;justify-content:space-between;align-items:center;padding-bottom:10px;border-bottom:3px solid #0f172a;margin-bottom:14px}
         .company-title{font-size:20px;font-weight:800;color:#0f172a;margin:0 0 4px}
         .report-subtitle{font-size:13px;font-weight:700;color:#2563eb;margin:0;text-transform:uppercase;letter-spacing:.5px}
         .meta-text{font-size:11px;color:#64748b;margin:0}
@@ -177,7 +179,7 @@ export const ManagerAdvanceLedgerPage: React.FC = () => {
       </div>
       <div class="header-bar">
         <div>
-          <h1 class="company-title">KSP TRANSPORT &amp; LOGISTICS</h1>
+          ${printBrandLockup()}
           <div class="report-subtitle">Manager Advance Ledger — Received vs Given vs Balance</div>
         </div>
         <div style="text-align:right">
@@ -364,7 +366,7 @@ export const ManagerAdvanceLedgerPage: React.FC = () => {
             <HandCoins size={14} /> Owner Advances
           </Link>
           <Link
-            to="/driver-advances"
+            to="/driver-balance-master"
             className="btn btn-outline"
             style={{
               display: 'flex',

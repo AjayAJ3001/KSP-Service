@@ -64,6 +64,10 @@ export const LoginPage: React.FC = () => {
         }}
       />
 
+      <div className="color-orb o1" />
+      <div className="color-orb o2" />
+      <div className="color-orb o3" />
+
       {/* ── Soft & Light Ambient Overlay (Ensures background is 100% visible) ── */}
       <div
         style={{

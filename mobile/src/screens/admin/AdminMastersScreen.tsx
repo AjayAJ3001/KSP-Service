@@ -26,7 +26,13 @@ import {
   RefreshCw,
   HandCoins,
   Calendar,
+  Printer,
+  Download,
+  Banknote,
+  Wallet,
+  Truck,
 } from 'lucide-react-native';
+import { printMastersPdf, downloadMastersPdf, MastersPdfData } from '../../utils/pdfGenerator';
 import {
   adminUnitService,
   adminRouteService,
@@ -38,6 +44,10 @@ import {
   adminPartyService,
   adminOwnerAdvanceService,
   adminUserService,
+  adminTruckAdvanceService,
+  adminDriverAdvanceService,
+  adminDriverService,
+  adminVehicleService,
 } from '../../services/adminService';
 import {
   Unit,
@@ -50,16 +60,31 @@ import {
   Party,
   OwnerAdvance,
   User,
+  TruckAdvance,
+  DriverAdvance,
+  Driver,
+  Vehicle,
 } from '../../types';
 import { COLORS, SPACING, RADIUS, SHADOWS } from '../../constants/theme';
 import { formatDateDMY } from '../../utils/dateUtils';
 
-type MasterTab = 'UNITS' | 'ROUTES' | 'CLEANING' | 'UNLOADING' | 'BATA' | 'LIMITS' | 'OWNERS' | 'ADVANCES';
+type MasterTab =
+  | 'UNITS'
+  | 'ROUTES'
+  | 'CLEANING'
+  | 'UNLOADING'
+  | 'BATA'
+  | 'LIMITS'
+  | 'OWNERS'
+  | 'ADVANCES'
+  | 'TRUCK_ADVANCES'
+  | 'DRIVER_ADVANCES';
 
 export const AdminMastersScreen: React.FC<{ navigation: any; route: any }> = ({ navigation, route }) => {
   const initial = route.params?.initialTab as MasterTab | undefined;
   const [activeTab, setActiveTab] = useState<MasterTab>(initial || 'UNITS');
   const [isLoading, setIsLoading] = useState(false);
+  const [pdfLoading, setPdfLoading] = useState<'print' | 'download' | null>(null);
 
   // Data states
   const [units, setUnits] = useState<Unit[]>([]);
@@ -70,6 +95,8 @@ export const AdminMastersScreen: React.FC<{ navigation: any; route: any }> = ({ 
   const [limits, setLimits] = useState<OtherExpenseLimit[]>([]);
   const [owners, setOwners] = useState<Owner[]>([]);
   const [partiesList, setPartiesList] = useState<Party[]>([]);
+  const [truckAdvances, setTruckAdvances] = useState<TruckAdvance[]>([]);
+  const [driverAdvances, setDriverAdvances] = useState<DriverAdvance[]>([]);
 
   // Editing items
   const [editingUnit, setEditingUnit] = useState<Unit | null>(null);
@@ -123,12 +150,17 @@ export const AdminMastersScreen: React.FC<{ navigation: any; route: any }> = ({ 
   // Advances State
   const [advances, setAdvances] = useState<OwnerAdvance[]>([]);
   const [managersList, setManagersList] = useState<User[]>([]);
+  const [driversList, setDriversList] = useState<Driver[]>([]);
+  const [vehiclesList, setVehiclesList] = useState<Vehicle[]>([]);
   const [editingAdvance, setEditingAdvance] = useState<OwnerAdvance | null>(null);
 
   // Form states - ADVANCE
   const [isAdvanceModalOpen, setIsAdvanceModalOpen] = useState(false);
   const [advOwnerId, setAdvOwnerId] = useState<number | null>(null);
+  const [advRecipientType, setAdvRecipientType] = useState<'MANAGER' | 'DRIVER'>('MANAGER');
   const [advManagerId, setAdvManagerId] = useState<number | null>(null);
+  const [advDriverId, setAdvDriverId] = useState<number | null>(null);
+  const [advVehicleId, setAdvVehicleId] = useState<number | null>(null);
   const [advAmount, setAdvAmount] = useState('');
   const [advDate, setAdvDate] = useState('');
   const [advMode, setAdvMode] = useState<'CASH' | 'UPI' | 'BANK_TRANSFER' | 'CHEQUE'>('CASH');
@@ -140,7 +172,7 @@ export const AdminMastersScreen: React.FC<{ navigation: any; route: any }> = ({ 
     }
   }, [route.params?.initialTab]);
 
-  // Load parties, owners, and managers list for dropdowns
+  // Load parties, owners, managers, drivers, and vehicles list for dropdowns
   useEffect(() => {
     adminPartyService.getParties({ limit: 100 })
       .then(res => setPartiesList(res.data.items || []))
@@ -148,8 +180,14 @@ export const AdminMastersScreen: React.FC<{ navigation: any; route: any }> = ({ 
     adminOwnerService.getOwners({ limit: 100 })
       .then(res => setOwners(res.data.items || []))
       .catch(() => {});
-    adminUserService.getUsers({ limit: 100, status: 'ACTIVE' })
+    adminUserService.getUsers({ limit: 200, status: 'ACTIVE', for_advance: true })
       .then(res => setManagersList((res.data.items || []).filter(u => u.role === 'MANAGER' || u.role === 'ADMIN')))
+      .catch(() => {});
+    adminDriverService.getDrivers({ limit: 100, status: 'ACTIVE' })
+      .then(res => setDriversList(res.data.items || []))
+      .catch(() => {});
+    adminVehicleService.getVehicles({ limit: 100 })
+      .then(res => setVehiclesList(res.data.items || []))
       .catch(() => {});
   }, []);
 
@@ -180,6 +218,12 @@ export const AdminMastersScreen: React.FC<{ navigation: any; route: any }> = ({ 
       } else if (activeTab === 'ADVANCES') {
         const res = await adminOwnerAdvanceService.getOwnerAdvances({ limit: 100 });
         setAdvances(res.data.items || []);
+      } else if (activeTab === 'TRUCK_ADVANCES') {
+        const res = await adminTruckAdvanceService.getTruckAdvances({ limit: 100 });
+        setTruckAdvances(res.data.items || []);
+      } else if (activeTab === 'DRIVER_ADVANCES') {
+        const res = await adminDriverAdvanceService.getDriverAdvances({ limit: 100 });
+        setDriverAdvances(res.data.items || []);
       }
     } catch (err: any) {
       console.error('Failed to load tab data', err);
@@ -599,11 +643,14 @@ export const AdminMastersScreen: React.FC<{ navigation: any; route: any }> = ({ 
     ]);
   };
 
-  // ================= ADVANCE TO MANAGER ACTIONS =================
+  // ================= OWNER ADVANCE ACTIONS =================
   const openAddAdvance = () => {
     setEditingAdvance(null);
     setAdvOwnerId(owners.length > 0 ? owners[0].id : null);
+    setAdvRecipientType('MANAGER');
     setAdvManagerId(managersList.length > 0 ? managersList[0].id : null);
+    setAdvDriverId(driversList.length > 0 ? driversList[0].id : null);
+    setAdvVehicleId(null);
     setAdvAmount('');
     setAdvDate(new Date().toISOString().split('T')[0]);
     setAdvMode('CASH');
@@ -614,7 +661,11 @@ export const AdminMastersScreen: React.FC<{ navigation: any; route: any }> = ({ 
   const openEditAdvance = (adv: OwnerAdvance) => {
     setEditingAdvance(adv);
     setAdvOwnerId(adv.owner_id);
-    setAdvManagerId(adv.manager_id);
+    const isDriverAdv = adv.recipient_type === 'DRIVER' || Boolean(!adv.manager_id && adv.driver_id);
+    setAdvRecipientType(isDriverAdv ? 'DRIVER' : 'MANAGER');
+    setAdvManagerId(adv.manager_id || null);
+    setAdvDriverId(adv.driver_id || null);
+    setAdvVehicleId(adv.vehicle_id || null);
     setAdvAmount(String(adv.amount));
     setAdvDate(adv.advance_date ? adv.advance_date.split('T')[0] : new Date().toISOString().split('T')[0]);
     setAdvMode((adv.payment_mode as any) || 'CASH');
@@ -624,7 +675,12 @@ export const AdminMastersScreen: React.FC<{ navigation: any; route: any }> = ({ 
 
   const handleSaveAdvance = async () => {
     if (!advOwnerId) return Alert.alert('Required', 'Please select a vehicle owner');
-    if (!advManagerId) return Alert.alert('Required', 'Please select a manager');
+    if (advRecipientType === 'MANAGER' && !advManagerId) {
+      return Alert.alert('Required', 'Please select a manager');
+    }
+    if (advRecipientType === 'DRIVER' && !advDriverId) {
+      return Alert.alert('Required', 'Please select a driver');
+    }
     const amt = parseFloat(advAmount);
     if (!advAmount || isNaN(amt) || amt <= 0) return Alert.alert('Required', 'Valid advance amount required');
 
@@ -648,7 +704,10 @@ export const AdminMastersScreen: React.FC<{ navigation: any; route: any }> = ({ 
     try {
       const payload: any = {
         owner_id: advOwnerId,
-        manager_id: advManagerId,
+        recipient_type: advRecipientType,
+        manager_id: advRecipientType === 'MANAGER' ? advManagerId : null,
+        driver_id: advRecipientType === 'DRIVER' ? advDriverId : null,
+        vehicle_id: advVehicleId || null,
         amount: amt,
         advance_date: getFullAdvanceIsoTimestamp(advDate),
         payment_mode: advMode,
@@ -657,10 +716,10 @@ export const AdminMastersScreen: React.FC<{ navigation: any; route: any }> = ({ 
 
       if (editingAdvance) {
         await adminOwnerAdvanceService.updateOwnerAdvance(editingAdvance.id, payload);
-        Alert.alert('Updated', 'Advance to manager updated');
+        Alert.alert('Updated', `Advance to ${advRecipientType === 'DRIVER' ? 'driver' : 'manager'} updated`);
       } else {
         await adminOwnerAdvanceService.createOwnerAdvance(payload);
-        Alert.alert('Created', 'Advance to manager recorded');
+        Alert.alert('Created', `Advance to ${advRecipientType === 'DRIVER' ? 'driver' : 'manager'} recorded`);
       }
       setIsAdvanceModalOpen(false);
       loadActiveTabData();
@@ -688,6 +747,77 @@ export const AdminMastersScreen: React.FC<{ navigation: any; route: any }> = ({ 
     ]);
   };
 
+  const getActiveTabPdfData = (): MastersPdfData => {
+    switch (activeTab) {
+      case 'UNITS':
+        return { tab: 'UNITS', tabLabel: 'Units Master', units };
+      case 'ROUTES':
+        return { tab: 'ROUTES', tabLabel: 'Routes & Freight Rates', routes };
+      case 'CLEANING':
+        return { tab: 'CLEANING', tabLabel: 'Cleaning Expense Rates', cleaningRates };
+      case 'UNLOADING':
+        return { tab: 'UNLOADING', tabLabel: 'Unloading Rates', unloadingRates };
+      case 'BATA':
+        return { tab: 'BATA', tabLabel: 'Driver Bata Rates', bataRates };
+      case 'LIMITS':
+        return { tab: 'LIMITS', tabLabel: 'Other Expense Limits', limits };
+      case 'OWNERS':
+        return { tab: 'OWNERS', tabLabel: 'Vehicle Owners Master', owners };
+      case 'ADVANCES':
+        return { tab: 'ADVANCES', tabLabel: 'Owner Advances Ledger', advances };
+      case 'TRUCK_ADVANCES':
+        return { tab: 'TRUCK_ADVANCES', tabLabel: 'Truck Advances Master', truckAdvances };
+      case 'DRIVER_ADVANCES':
+        return { tab: 'DRIVER_ADVANCES', tabLabel: 'Driver Advances Master', driverAdvances };
+      default:
+        return { tab: 'UNITS', tabLabel: 'Master Report' };
+    }
+  };
+
+  const resolvePdfData = async (): Promise<MastersPdfData> => {
+    const data = getActiveTabPdfData();
+    if (data.tab !== 'DRIVER_ADVANCES') return data;
+    const [advRes, sumRes] = await Promise.all([
+      adminDriverAdvanceService.getDriverAdvances({ limit: 5000 }),
+      adminDriverAdvanceService.getDriverSummary({}),
+    ]);
+    return {
+      ...data,
+      tabLabel: 'Driver Advance Summary',
+      driverAdvances: advRes.data.items || data.driverAdvances || [],
+      driverSummaries: sumRes.data?.drivers || [],
+    };
+  };
+
+  const handlePrintPdf = async () => {
+    try {
+      setPdfLoading('print');
+      const data = await resolvePdfData();
+      await printMastersPdf(data);
+    } catch (err: any) {
+      console.error('Print master PDF failed', err);
+      Alert.alert('Print Error', err.message || 'Failed to print master report.');
+    } finally {
+      setPdfLoading(null);
+    }
+  };
+
+  const handleDownloadPdf = async () => {
+    try {
+      setPdfLoading('download');
+      const data = await resolvePdfData();
+      const result = await downloadMastersPdf(data);
+      if (result.success && result.savedDirectly) {
+        Alert.alert('PDF Saved', `Master report saved to device:\n${result.filename}`);
+      }
+    } catch (err: any) {
+      console.error('Download master PDF failed', err);
+      Alert.alert('Download Error', err.message || 'Failed to generate / download PDF.');
+    } finally {
+      setPdfLoading(null);
+    }
+  };
+
   return (
     <View style={styles.container}>
       {/* Top Tab Bar */}
@@ -700,7 +830,9 @@ export const AdminMastersScreen: React.FC<{ navigation: any; route: any }> = ({ 
           { id: 'BATA', label: 'Driver Bata %', icon: DollarSign },
           { id: 'LIMITS', label: 'Expense Limits', icon: Sliders },
           { id: 'OWNERS', label: 'Owners Master', icon: UserCheck },
-          { id: 'ADVANCES', label: 'Advance to Manager', icon: HandCoins },
+          { id: 'ADVANCES', label: 'Owner Advances', icon: HandCoins },
+          { id: 'TRUCK_ADVANCES', label: 'Truck Advances', icon: Banknote },
+          { id: 'DRIVER_ADVANCES', label: 'Driver Advances', icon: Wallet },
         ].map((t) => {
           const Icon = t.icon;
           const isActive = activeTab === t.id;
@@ -727,12 +859,48 @@ export const AdminMastersScreen: React.FC<{ navigation: any; route: any }> = ({ 
           {activeTab === 'BATA' && `Driver Bata Rates (${bataRates.length})`}
           {activeTab === 'LIMITS' && `Expense Limits (${limits.length})`}
           {activeTab === 'OWNERS' && `Owners Master (${owners.length})`}
-          {activeTab === 'ADVANCES' && `Advance to Manager (${advances.length})`}
+          {activeTab === 'ADVANCES' && `Owner Advances (${advances.length})`}
+          {activeTab === 'TRUCK_ADVANCES' && `Truck Advances (${truckAdvances.length})`}
+          {activeTab === 'DRIVER_ADVANCES' && `Driver Advances (${driverAdvances.length})`}
         </Text>
 
-        <View style={{ flexDirection: 'row', gap: 8 }}>
+        <View style={{ flexDirection: 'row', gap: 6, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
           <TouchableOpacity style={styles.refreshIconBtn} onPress={loadActiveTabData}>
             <RefreshCw size={15} color={COLORS.textMuted} />
+          </TouchableOpacity>
+
+          {/* Print PDF Button */}
+          <TouchableOpacity
+            style={[styles.pdfBtn, styles.printBtn, pdfLoading === 'print' && { opacity: 0.7 }]}
+            onPress={handlePrintPdf}
+            disabled={pdfLoading !== null || isLoading}
+            activeOpacity={0.8}
+          >
+            {pdfLoading === 'print' ? (
+              <ActivityIndicator size="small" color={COLORS.white} />
+            ) : (
+              <>
+                <Printer size={13} color={COLORS.white} />
+                <Text style={styles.pdfBtnText}>Print</Text>
+              </>
+            )}
+          </TouchableOpacity>
+
+          {/* Download PDF Button */}
+          <TouchableOpacity
+            style={[styles.pdfBtn, styles.downloadBtn, pdfLoading === 'download' && { opacity: 0.7 }]}
+            onPress={handleDownloadPdf}
+            disabled={pdfLoading !== null || isLoading}
+            activeOpacity={0.8}
+          >
+            {pdfLoading === 'download' ? (
+              <ActivityIndicator size="small" color={COLORS.white} />
+            ) : (
+              <>
+                <Download size={13} color={COLORS.white} />
+                <Text style={styles.pdfBtnText}>PDF</Text>
+              </>
+            )}
           </TouchableOpacity>
 
           <TouchableOpacity
@@ -746,6 +914,8 @@ export const AdminMastersScreen: React.FC<{ navigation: any; route: any }> = ({ 
               else if (activeTab === 'LIMITS') openAddLimit();
               else if (activeTab === 'OWNERS') openAddOwner();
               else if (activeTab === 'ADVANCES') openAddAdvance();
+              else if (activeTab === 'TRUCK_ADVANCES') navigation.navigate('AdminTruckAdvances');
+              else if (activeTab === 'DRIVER_ADVANCES') navigation.navigate('AdminDriverBalanceMaster');
             }}
           >
             <Plus size={15} color={COLORS.white} />
@@ -824,6 +994,9 @@ export const AdminMastersScreen: React.FC<{ navigation: any; route: any }> = ({ 
                 <View key={c.id} style={styles.itemCard}>
                   <View style={{ flex: 1 }}>
                     <Text style={styles.itemTitle}>{c.unit_name}</Text>
+                    <Text style={styles.itemSub}>
+                      {c.party_name || 'All parties'} · {c.lorry_number || 'All trucks'}
+                    </Text>
                     <Text style={[styles.itemSub, { color: '#047857', fontWeight: '800' }]}>
                       Fixed Cleaning Charge: ₹{parseFloat(String(c.cleaning_charge)).toLocaleString('en-IN')}
                     </Text>
@@ -951,7 +1124,9 @@ export const AdminMastersScreen: React.FC<{ navigation: any; route: any }> = ({ 
             (advances.length === 0 ? (
               <View style={styles.centerBox}><Text style={styles.centerText}>No advance records found</Text></View>
             ) : (
-              advances.map((adv) => (
+              advances.map((adv) => {
+                const isDriver = adv.recipient_type === 'DRIVER' || Boolean(!adv.manager_id && adv.driver_id);
+                return (
                 <View key={adv.id} style={styles.itemCard}>
                   <View style={{ flex: 1 }}>
                     <Text style={styles.itemTitle}>{adv.owner_name || `Owner #${adv.owner_id}`}</Text>
@@ -959,7 +1134,11 @@ export const AdminMastersScreen: React.FC<{ navigation: any; route: any }> = ({ 
                       Amount: ₹{parseFloat(String(adv.amount)).toLocaleString('en-IN')}
                     </Text>
                     <Text style={styles.itemSub}>
-                      To: {adv.manager_name || `Manager #${adv.manager_id}`} • {formatDateDMY(adv.advance_date)} ({adv.payment_mode || 'CASH'})
+                      {isDriver ? (
+                        <>To Driver: <Text style={{ fontWeight: '700', color: '#7c3aed' }}>{adv.driver_name || `Driver #${adv.driver_id}`}</Text>{adv.lorry_number ? ` (${adv.lorry_number})` : ''}</>
+                      ) : (
+                        <>To Manager: <Text style={{ fontWeight: '700', color: '#0284c7' }}>{adv.manager_name || `Manager #${adv.manager_id}`}</Text></>
+                      )} • {formatDateDMY(adv.advance_date)} ({adv.payment_mode || 'CASH'})
                     </Text>
                     {adv.notes ? <Text style={styles.itemSub}>Note: {adv.notes}</Text> : null}
                   </View>
@@ -968,6 +1147,157 @@ export const AdminMastersScreen: React.FC<{ navigation: any; route: any }> = ({ 
                       <Edit2 size={16} color="#2563eb" />
                     </TouchableOpacity>
                     <TouchableOpacity style={[styles.actionIconBtn, { backgroundColor: '#fef2f2' }]} onPress={() => handleDeleteAdvance(adv)}>
+                      <Trash2 size={16} color="#ef4444" />
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              );
+            })
+            ))}
+
+          {/* TRUCK ADVANCES */}
+          {activeTab === 'TRUCK_ADVANCES' &&
+            (truckAdvances.length === 0 ? (
+              <View style={styles.centerBox}><Text style={styles.centerText}>No truck advance records found</Text></View>
+            ) : (
+              truckAdvances.map((t) => (
+                <View key={t.id} style={styles.itemCard}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.itemTitle}>{t.lorry_number || `Vehicle #${t.vehicle_id}`}</Text>
+                    <Text style={[styles.itemSub, { color: '#d97706', fontWeight: '800' }]}>
+                      Amount: ₹{parseFloat(String(t.amount)).toLocaleString('en-IN')}
+                    </Text>
+                    <Text style={styles.itemSub}>
+                      {t.driver_name ? `Driver: ${t.driver_name} • ` : ''}To: {t.manager_name || `Manager #${t.manager_id}`} • {formatDateDMY(t.advance_date)}
+                    </Text>
+                    {t.notes ? <Text style={styles.itemSub}>Note: {t.notes}</Text> : null}
+                  </View>
+                  <View style={styles.cardActionsRow}>
+                    <TouchableOpacity
+                      style={[styles.actionIconBtn, { backgroundColor: '#fef2f2' }]}
+                      onPress={() => {
+                        Alert.alert('Delete Truck Advance', `Delete advance of ₹${t.amount} for ${t.lorry_number}?`, [
+                          { text: 'Cancel', style: 'cancel' },
+                          {
+                            text: 'Delete',
+                            style: 'destructive',
+                            onPress: async () => {
+                              try {
+                                await adminTruckAdvanceService.deleteTruckAdvance(t.id);
+                                loadActiveTabData();
+                              } catch (e: any) { Alert.alert('Delete Failed', e.message); }
+                            },
+                          },
+                        ]);
+                      }}
+                    >
+                      <Trash2 size={16} color="#ef4444" />
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              ))
+            ))}
+
+          {/* DRIVER ADVANCES */}
+          {activeTab === 'DRIVER_ADVANCES' &&
+            (driverAdvances.length === 0 ? (
+              <View style={styles.centerBox}><Text style={styles.centerText}>No driver advance records found</Text></View>
+            ) : (
+              driverAdvances.map((d) => (
+                <View key={d.id} style={styles.itemCard}>
+                  <View style={{ flex: 1 }}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 4, flexWrap: 'wrap' }}>
+                      {d.source_type === 'TRIP_TRUCK_ADVANCE' ? (
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3, backgroundColor: '#e0f2fe', borderWidth: 1, borderColor: '#bae6fd', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 }}>
+                          <Truck size={10} color="#0369a1" />
+                          <Text style={{ fontSize: 9, fontWeight: '800', color: '#0369a1' }}>VIA TRUCK ADVANCE</Text>
+                        </View>
+                      ) : (
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3, backgroundColor: '#ecfdf5', borderWidth: 1, borderColor: '#a7f3d0', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 }}>
+                          <UserCheck size={10} color="#047857" />
+                          <Text style={{ fontSize: 9, fontWeight: '800', color: '#047857' }}>DIRECT DRIVER ADVANCE</Text>
+                        </View>
+                      )}
+                      {d.driver_balance_in_hand !== undefined && (
+                        <View style={{ backgroundColor: Number(d.driver_balance_in_hand) < 0 ? '#fef2f2' : '#ecfdf5', borderWidth: 1, borderColor: Number(d.driver_balance_in_hand) < 0 ? '#fca5a5' : '#a7f3d0', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 }}>
+                          <Text style={{ fontSize: 9, fontWeight: '700', color: Number(d.driver_balance_in_hand) < 0 ? '#dc2626' : '#047857' }}>
+                            In Hand: ₹{parseFloat(String(d.driver_balance_in_hand)).toLocaleString('en-IN')}
+                          </Text>
+                        </View>
+                      )}
+                    </View>
+
+                    <Text style={styles.itemTitle}>{d.driver_name || `Driver #${d.driver_id}`}</Text>
+                    <Text style={[styles.itemSub, { color: '#059669', fontWeight: '800' }]}>
+                      Amount: ₹{parseFloat(String(d.amount)).toLocaleString('en-IN')} ({d.payment_mode || 'CASH'})
+                    </Text>
+                    <Text style={styles.itemSub}>
+                      {d.lorry_number ? `Truck: ${d.lorry_number} • ` : ''}To: {d.manager_name || `Manager #${d.manager_id}`} • {formatDateDMY(d.advance_date)}
+                    </Text>
+
+                    {(d.trip_id || d.party_name || d.from_location || d.source_type === 'TRIP_TRUCK_ADVANCE') ? (
+                      <View style={{ backgroundColor: '#f8fafc', borderWidth: 1, borderColor: '#e2e8f0', borderRadius: 6, padding: 6, marginTop: 4, gap: 2 }}>
+                        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <Text style={{ fontSize: 10, fontWeight: '800', color: COLORS.primary }}>
+                            {d.trip_id ? `TRIP #${d.trip_id}` : 'TRIP DETAILS'}
+                          </Text>
+                          {d.trip_status ? (
+                            <View style={{ backgroundColor: '#eff6ff', paddingHorizontal: 5, paddingVertical: 1, borderRadius: 3, borderWidth: 1, borderColor: '#bfdbfe' }}>
+                              <Text style={{ fontSize: 9, fontWeight: '700', color: '#1d4ed8' }}>{d.trip_status}</Text>
+                            </View>
+                          ) : null}
+                        </View>
+                        {d.party_name ? (
+                          <Text style={{ fontSize: 10, color: COLORS.text, fontWeight: '600' }} numberOfLines={1}>
+                            🏢 Party: {d.party_name}
+                          </Text>
+                        ) : null}
+                        {(d.from_location || d.to_location) ? (
+                          <Text style={{ fontSize: 10, color: COLORS.textMuted }} numberOfLines={1}>
+                            📍 Route: {d.from_location || '—'} → {d.to_location || '—'}
+                          </Text>
+                        ) : null}
+                        <View style={{ flexDirection: 'row', gap: 6, flexWrap: 'wrap', marginTop: 2 }}>
+                          {d.goods_weight ? (
+                            <Text style={{ fontSize: 9, color: COLORS.textMuted, fontWeight: '600' }}>
+                              Weight: <Text style={{ color: COLORS.text, fontWeight: '800' }}>{d.goods_weight} {d.unit_abbreviation || 'MT'}</Text>
+                            </Text>
+                          ) : null}
+                          {d.total_freight ? (
+                            <Text style={{ fontSize: 9, color: COLORS.textMuted, fontWeight: '600' }}>
+                              Freight: <Text style={{ color: COLORS.primary, fontWeight: '800' }}>₹{parseFloat(String(d.total_freight)).toLocaleString('en-IN')}</Text>
+                            </Text>
+                          ) : null}
+                          {d.trip_advance_paid ? (
+                            <Text style={{ fontSize: 9, color: COLORS.textMuted, fontWeight: '600' }}>
+                              Trip Adv: <Text style={{ color: '#d97706', fontWeight: '800' }}>₹{parseFloat(String(d.trip_advance_paid)).toLocaleString('en-IN')}</Text>
+                            </Text>
+                          ) : null}
+                        </View>
+                      </View>
+                    ) : null}
+
+                    {d.notes ? <Text style={styles.itemSub}>Note: {d.notes}</Text> : null}
+                  </View>
+                  <View style={styles.cardActionsRow}>
+                    <TouchableOpacity
+                      style={[styles.actionIconBtn, { backgroundColor: '#fef2f2' }]}
+                      onPress={() => {
+                        Alert.alert('Delete Driver Advance', `Delete advance of ₹${d.amount} for ${d.driver_name}?`, [
+                          { text: 'Cancel', style: 'cancel' },
+                          {
+                            text: 'Delete',
+                            style: 'destructive',
+                            onPress: async () => {
+                              try {
+                                await adminDriverAdvanceService.deleteDriverAdvance(d.id);
+                                loadActiveTabData();
+                              } catch (e: any) { Alert.alert('Delete Failed', e.message); }
+                            },
+                          },
+                        ]);
+                      }}
+                    >
                       <Trash2 size={16} color="#ef4444" />
                     </TouchableOpacity>
                   </View>
@@ -1148,12 +1478,12 @@ export const AdminMastersScreen: React.FC<{ navigation: any; route: any }> = ({ 
         </View>
       </Modal>
 
-      {/* ── Add / Edit Advance to Manager Modal ── */}
+      {/* ── Add / Edit Owner Advance Modal ── */}
       <Modal visible={isAdvanceModalOpen} transparent animationType="slide" onRequestClose={() => setIsAdvanceModalOpen(false)}>
         <View style={styles.modalOverlay}>
           <ScrollView contentContainerStyle={styles.modalContent}>
             <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>{editingAdvance ? `Edit Advance #${editingAdvance.id}` : 'Give Advance to Manager'}</Text>
+              <Text style={styles.modalTitle}>{editingAdvance ? `Edit Advance #${editingAdvance.id}` : 'Give Owner Advance'}</Text>
               <TouchableOpacity onPress={() => setIsAdvanceModalOpen(false)}><X size={20} color={COLORS.text} /></TouchableOpacity>
             </View>
 
@@ -1170,18 +1500,87 @@ export const AdminMastersScreen: React.FC<{ navigation: any; route: any }> = ({ 
               ))}
             </ScrollView>
 
-            <Text style={styles.label}>Select Receiving Manager *</Text>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flexDirection: 'row', marginBottom: 8 }}>
-              {managersList.map((m) => (
-                <TouchableOpacity
-                  key={m.id}
-                  style={[styles.partySelectChip, advManagerId === m.id && styles.partySelectChipActive]}
-                  onPress={() => setAdvManagerId(m.id)}
-                >
-                  <Text style={[styles.partySelectText, advManagerId === m.id && styles.partySelectTextActive]}>{m.name}</Text>
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
+            {/* Recipient Segmented Selector */}
+            <Text style={styles.label}>Advance Recipient *</Text>
+            <View style={{ flexDirection: 'row', gap: 8, marginBottom: 8 }}>
+              <TouchableOpacity
+                style={[
+                  styles.partySelectChip,
+                  advRecipientType === 'MANAGER' && styles.partySelectChipActive,
+                  { flex: 1, alignItems: 'center', flexDirection: 'row', justifyContent: 'center', gap: 6, paddingVertical: 8 }
+                ]}
+                onPress={() => setAdvRecipientType('MANAGER')}
+              >
+                <UserCheck size={14} color={advRecipientType === 'MANAGER' ? COLORS.white : COLORS.textMuted} />
+                <Text style={[styles.partySelectText, advRecipientType === 'MANAGER' && styles.partySelectTextActive]}>
+                  To Manager
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[
+                  styles.partySelectChip,
+                  advRecipientType === 'DRIVER' && { backgroundColor: '#7c3aed', borderColor: '#7c3aed' },
+                  { flex: 1, alignItems: 'center', flexDirection: 'row', justifyContent: 'center', gap: 6, paddingVertical: 8 }
+                ]}
+                onPress={() => setAdvRecipientType('DRIVER')}
+              >
+                <Truck size={14} color={advRecipientType === 'DRIVER' ? COLORS.white : COLORS.textMuted} />
+                <Text style={[styles.partySelectText, advRecipientType === 'DRIVER' && styles.partySelectTextActive]}>
+                  Directly to Driver
+                </Text>
+              </TouchableOpacity>
+            </View>
+
+            {advRecipientType === 'MANAGER' ? (
+              <>
+                <Text style={styles.label}>Select Receiving Manager *</Text>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flexDirection: 'row', marginBottom: 8 }}>
+                  {managersList.map((m) => (
+                    <TouchableOpacity
+                      key={m.id}
+                      style={[styles.partySelectChip, advManagerId === m.id && styles.partySelectChipActive]}
+                      onPress={() => setAdvManagerId(m.id)}
+                    >
+                      <Text style={[styles.partySelectText, advManagerId === m.id && styles.partySelectTextActive]}>{m.name}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
+              </>
+            ) : (
+              <>
+                <Text style={styles.label}>Select Receiving Driver *</Text>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flexDirection: 'row', marginBottom: 8 }}>
+                  {driversList.map((d) => (
+                    <TouchableOpacity
+                      key={d.id}
+                      style={[styles.partySelectChip, advDriverId === d.id && { backgroundColor: '#7c3aed', borderColor: '#7c3aed' }]}
+                      onPress={() => setAdvDriverId(d.id)}
+                    >
+                      <Text style={[styles.partySelectText, advDriverId === d.id && styles.partySelectTextActive]}>{d.name}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
+
+                <Text style={styles.label}>Associated Vehicle / Truck (Optional)</Text>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flexDirection: 'row', marginBottom: 8 }}>
+                  <TouchableOpacity
+                    style={[styles.partySelectChip, advVehicleId === null && styles.partySelectChipActive]}
+                    onPress={() => setAdvVehicleId(null)}
+                  >
+                    <Text style={[styles.partySelectText, advVehicleId === null && styles.partySelectTextActive]}>None</Text>
+                  </TouchableOpacity>
+                  {vehiclesList.map((v) => (
+                    <TouchableOpacity
+                      key={v.id}
+                      style={[styles.partySelectChip, advVehicleId === v.id && styles.partySelectChipActive]}
+                      onPress={() => setAdvVehicleId(v.id)}
+                    >
+                      <Text style={[styles.partySelectText, advVehicleId === v.id && styles.partySelectTextActive]}>{v.lorry_number}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
+              </>
+            )}
 
             <Text style={styles.label}>Advance Amount (₹) *</Text>
             <TextInput style={styles.input} value={advAmount} onChangeText={setAdvAmount} placeholder="e.g. 25000" keyboardType="numeric" />
@@ -1418,6 +1817,25 @@ const styles = StyleSheet.create({
   submitText: {
     fontSize: 12,
     fontWeight: '800',
+    color: COLORS.white,
+  },
+  pdfBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 9,
+    paddingVertical: 6,
+    borderRadius: RADIUS.md,
+  },
+  printBtn: {
+    backgroundColor: '#0284c7',
+  },
+  downloadBtn: {
+    backgroundColor: '#059669',
+  },
+  pdfBtnText: {
+    fontSize: 11,
+    fontWeight: '700',
     color: COLORS.white,
   },
 });

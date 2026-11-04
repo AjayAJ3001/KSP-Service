@@ -25,18 +25,33 @@ import {
   Mail,
   Shield,
   RefreshCw,
+  Printer,
+  Download,
+  RotateCcw,
 } from 'lucide-react-native';
+import { printMastersPdf, downloadMastersPdf } from '../../utils/pdfGenerator';
 import { adminUserService } from '../../services/adminService';
 import { User } from '../../types';
+import { useAuth } from '../../context/AuthContext';
 import { COLORS, SPACING, RADIUS, SHADOWS } from '../../constants/theme';
 
 export const AdminUsersScreen: React.FC<{ navigation: any }> = ({ navigation }) => {
+  const { user: authUser } = useAuth();
+  const isOwnerUser = authUser?.role === 'OWNER';
   const [users, setUsers] = useState<User[]>([]);
   const [total, setTotal] = useState(0);
   const [search, setSearch] = useState('');
   const [roleFilter, setRoleFilter] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [pdfLoading, setPdfLoading] = useState<'print' | 'download' | null>(null);
+
+  const hasActiveFilters = Boolean(search || roleFilter !== '');
+
+  const handleClearAllFilters = () => {
+    setSearch('');
+    setRoleFilter('');
+  };
 
   // Modals
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
@@ -50,7 +65,7 @@ export const AdminUsersScreen: React.FC<{ navigation: any }> = ({ navigation }) 
   const [password, setPassword] = useState('');
   const [email, setEmail] = useState('');
   const [mobileNumber, setMobileNumber] = useState('');
-  const [role, setRole] = useState<'ADMIN' | 'MANAGER' | 'TRANSPORT_USER'>('MANAGER');
+  const [role, setRole] = useState<'ADMIN' | 'MANAGER' | 'TRANSPORT_USER' | 'OWNER'>('MANAGER');
   const [resetNewPassword, setResetNewPassword] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -97,6 +112,10 @@ export const AdminUsersScreen: React.FC<{ navigation: any }> = ({ navigation }) 
   const handleSaveUser = async () => {
     if (!name.trim()) {
       Alert.alert('Required Fields', 'Full Name is required.');
+      return;
+    }
+    if (!editingUser && isOwnerUser) {
+      Alert.alert('Not Allowed', 'Owner logins cannot create managers.');
       return;
     }
     if (!editingUser) {
@@ -210,6 +229,41 @@ export const AdminUsersScreen: React.FC<{ navigation: any }> = ({ navigation }) 
     setRole('MANAGER');
   };
 
+  const handlePrintPdf = async () => {
+    try {
+      setPdfLoading('print');
+      await printMastersPdf({
+        tab: 'USERS',
+        tabLabel: 'User Accounts Directory',
+        users,
+      });
+    } catch (err: any) {
+      console.error('Print users PDF failed', err);
+      Alert.alert('Print Error', err.message || 'Failed to print users directory.');
+    } finally {
+      setPdfLoading(null);
+    }
+  };
+
+  const handleDownloadPdf = async () => {
+    try {
+      setPdfLoading('download');
+      const result = await downloadMastersPdf({
+        tab: 'USERS',
+        tabLabel: 'User Accounts Directory',
+        users,
+      });
+      if (result.success && result.savedDirectly) {
+        Alert.alert('PDF Saved', `User accounts directory saved:\n${result.filename}`);
+      }
+    } catch (err: any) {
+      console.error('Download users PDF failed', err);
+      Alert.alert('Download Error', err.message || 'Failed to download PDF.');
+    } finally {
+      setPdfLoading(null);
+    }
+  };
+
   return (
     <View style={styles.container}>
       {/* Search & Filter Header */}
@@ -229,29 +283,78 @@ export const AdminUsersScreen: React.FC<{ navigation: any }> = ({ navigation }) 
               </TouchableOpacity>
             ) : null}
           </View>
+
+          <TouchableOpacity
+            style={[styles.pdfBtn, styles.printBtn, pdfLoading === 'print' && { opacity: 0.7 }]}
+            onPress={handlePrintPdf}
+            disabled={pdfLoading !== null || isLoading}
+            activeOpacity={0.8}
+          >
+            {pdfLoading === 'print' ? (
+              <ActivityIndicator size="small" color={COLORS.white} />
+            ) : (
+              <>
+                <Printer size={13} color={COLORS.white} />
+                <Text style={styles.pdfBtnText}>Print</Text>
+              </>
+            )}
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[styles.pdfBtn, styles.downloadBtn, pdfLoading === 'download' && { opacity: 0.7 }]}
+            onPress={handleDownloadPdf}
+            disabled={pdfLoading !== null || isLoading}
+            activeOpacity={0.8}
+          >
+            {pdfLoading === 'download' ? (
+              <ActivityIndicator size="small" color={COLORS.white} />
+            ) : (
+              <>
+                <Download size={13} color={COLORS.white} />
+                <Text style={styles.pdfBtnText}>PDF</Text>
+              </>
+            )}
+          </TouchableOpacity>
+
+          {!isOwnerUser && (
           <TouchableOpacity
             style={styles.addBtn}
             onPress={openAddModal}
           >
             <UserPlus size={16} color={COLORS.white} />
-            <Text style={styles.addBtnText}>Add User</Text>
+            <Text style={styles.addBtnText}>Add</Text>
           </TouchableOpacity>
+          )}
         </View>
 
-        {/* Role Filter Chips */}
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chipRow}>
-          {['', 'ADMIN', 'MANAGER', 'TRANSPORT_USER'].map((r) => (
+        {/* Role Filter Chips & Clear */}
+        {!isOwnerUser && (
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={[styles.chipRow, { flex: 1 }]}>
+            {(isOwnerUser ? [''] : ['', 'ADMIN', 'MANAGER', 'OWNER', 'TRANSPORT_USER']).map((r) => (
+              <TouchableOpacity
+                key={r}
+                style={[styles.chip, roleFilter === r && styles.chipActive]}
+                onPress={() => setRoleFilter(roleFilter === r ? '' : r)}
+              >
+                <Text style={[styles.chipText, roleFilter === r && styles.chipTextActive]}>
+                  {r === '' ? 'All Roles' : r}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
+          {hasActiveFilters && (
             <TouchableOpacity
-              key={r}
-              style={[styles.chip, roleFilter === r && styles.chipActive]}
-              onPress={() => setRoleFilter(r)}
+              style={styles.clearFiltersBtn}
+              onPress={handleClearAllFilters}
+              activeOpacity={0.7}
             >
-              <Text style={[styles.chipText, roleFilter === r && styles.chipTextActive]}>
-                {r === '' ? 'All Roles' : r}
-              </Text>
+              <RotateCcw size={11} color="#dc2626" />
+              <Text style={styles.clearFiltersBtnText}>Clear</Text>
             </TouchableOpacity>
-          ))}
-        </ScrollView>
+          )}
+        </View>
+        )}
       </View>
 
       {/* User Count summary */}
@@ -380,7 +483,7 @@ export const AdminUsersScreen: React.FC<{ navigation: any }> = ({ navigation }) 
 
             <Text style={styles.inputLabel}>Role *</Text>
             <View style={styles.rolePickerRow}>
-              {(['MANAGER', 'ADMIN', 'TRANSPORT_USER'] as const).map((r) => (
+              {(isOwnerUser ? (['MANAGER'] as const) : (['MANAGER', 'ADMIN', 'OWNER', 'TRANSPORT_USER'] as const)).map((r) => (
                 <TouchableOpacity
                   key={r}
                   style={[styles.rolePickBtn, role === r && styles.rolePickBtnActive]}
@@ -400,6 +503,10 @@ export const AdminUsersScreen: React.FC<{ navigation: any }> = ({ navigation }) 
               onChangeText={setUsername}
               placeholder="e.g. manager_ksp"
               autoCapitalize="none"
+              autoCorrect={false}
+              autoComplete="off"
+              textContentType="none"
+              importantForAutofill="no"
               editable={!editingUser}
             />
 
@@ -420,6 +527,10 @@ export const AdminUsersScreen: React.FC<{ navigation: any }> = ({ navigation }) 
                   onChangeText={setPassword}
                   placeholder="••••••••"
                   secureTextEntry
+                  autoCorrect={false}
+                  autoComplete="off"
+                  textContentType="oneTimeCode"
+                  importantForAutofill="no"
                 />
               </>
             )}
@@ -441,6 +552,10 @@ export const AdminUsersScreen: React.FC<{ navigation: any }> = ({ navigation }) 
               placeholder="user@ksp.com"
               keyboardType="email-address"
               autoCapitalize="none"
+              autoCorrect={false}
+              autoComplete="off"
+              textContentType="none"
+              importantForAutofill="no"
             />
 
             <View style={styles.modalActions}>
@@ -496,6 +611,10 @@ export const AdminUsersScreen: React.FC<{ navigation: any }> = ({ navigation }) 
               onChangeText={setResetNewPassword}
               placeholder="Enter new 6+ char password"
               secureTextEntry
+              autoCorrect={false}
+              autoComplete="off"
+              textContentType="oneTimeCode"
+              importantForAutofill="no"
             />
 
             <View style={styles.modalActions}>
@@ -531,6 +650,8 @@ const getRoleBadgeStyle = (role: string) => {
       return { backgroundColor: '#fef3c7', borderColor: '#fde68a' };
     case 'MANAGER':
       return { backgroundColor: '#eff6ff', borderColor: '#bfdbfe' };
+    case 'OWNER':
+      return { backgroundColor: '#f3e8ff', borderColor: '#ddd6fe' };
     default:
       return { backgroundColor: '#f1f5f9', borderColor: '#e2e8f0' };
   }
@@ -542,6 +663,8 @@ const getRoleBadgeTextStyle = (role: string) => {
       return { color: '#b45309' };
     case 'MANAGER':
       return { color: '#1d4ed8' };
+    case 'OWNER':
+      return { color: '#6b21a8' };
     default:
       return { color: '#475569' };
   }
@@ -629,8 +752,8 @@ const styles = StyleSheet.create({
   },
   listContainer: {
     padding: SPACING.md,
-    gap: 10,
-    paddingBottom: 40,
+    gap: 8,
+    paddingBottom: 28,
   },
   centerBox: {
     flex: 1,
@@ -784,11 +907,13 @@ const styles = StyleSheet.create({
   },
   rolePickerRow: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     gap: 8,
     marginBottom: 8,
   },
   rolePickBtn: {
-    flex: 1,
+    flexGrow: 1,
+    minWidth: '22%',
     paddingVertical: 8,
     borderRadius: RADIUS.md,
     backgroundColor: '#f1f5f9',
@@ -845,5 +970,40 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '800',
     color: COLORS.white,
+  },
+  pdfBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 9,
+    paddingVertical: 7,
+    borderRadius: RADIUS.md,
+  },
+  printBtn: {
+    backgroundColor: '#0284c7',
+  },
+  downloadBtn: {
+    backgroundColor: '#059669',
+  },
+  pdfBtnText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: COLORS.white,
+  },
+  clearFiltersBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: '#fef2f2',
+    borderWidth: 1,
+    borderColor: '#fca5a5',
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+    borderRadius: RADIUS.md,
+  },
+  clearFiltersBtnText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#dc2626',
   },
 });

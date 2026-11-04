@@ -11,7 +11,6 @@ import {
   Modal,
   Animated,
   Easing,
-  Pressable,
 } from 'react-native';
 import {
   ShieldAlert,
@@ -25,7 +24,6 @@ import {
   Building2,
   FileText,
   History,
-  Sliders,
   ChevronRight,
   RefreshCw,
   Crown,
@@ -40,13 +38,20 @@ import {
   ArrowDownCircle,
   Percent,
   HandCoins,
+  Banknote,
+  Wallet,
+  BookOpen,
 } from 'lucide-react-native';
 import { adminDashboardService } from '../../services/adminService';
+import { useAuth } from '../../context/AuthContext';
 import { DashboardData, Trip } from '../../types';
 import { COLORS, SPACING, RADIUS, SHADOWS } from '../../constants/theme';
 import { formatDateDMY } from '../../utils/dateUtils';
 
 export const AdminDashboardScreen: React.FC<{ navigation: any }> = ({ navigation }) => {
+  const { user } = useAuth();
+  const isFullAdmin = user?.role === 'ADMIN';
+  const isOwnerUser = user?.role === 'OWNER';
   const [data, setData] = useState<DashboardData | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -64,8 +69,6 @@ export const AdminDashboardScreen: React.FC<{ navigation: any }> = ({ navigation
   const crownPulse = useRef(new Animated.Value(1)).current;
 
   // Nav tile spring scales
-  const navScales = useRef(Array.from({ length: 12 }, () => new Animated.Value(1))).current;
-
   useEffect(() => {
     // Entrance sequence
     Animated.stagger(80, [
@@ -122,7 +125,7 @@ export const AdminDashboardScreen: React.FC<{ navigation: any }> = ({ navigation
 
   const formatCurrency = (val: number | string) => {
     const num = parseFloat(String(val)) || 0;
-    return `₹${num.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    return `₹${Math.round(num).toLocaleString('en-IN')}`;
   };
 
   const getDaysLeft = (dateStr?: string | null) => {
@@ -158,8 +161,10 @@ export const AdminDashboardScreen: React.FC<{ navigation: any }> = ({ navigation
             <Crown size={22} color={COLORS.accent} />
           </Animated.View>
           <View>
-            <Text style={styles.adminBannerTitle}>KSP Administrator Portal</Text>
-            <Text style={styles.adminBannerSubtitle}>Full access to operations, finances & masters</Text>
+            <Text style={styles.adminBannerTitle}>{isOwnerUser ? 'KSP Owner Portal' : 'KSP Administrator Portal'}</Text>
+            <Text style={styles.adminBannerSubtitle}>
+              {isOwnerUser ? 'Your trucks, advances, settlements & masters' : 'Full access to operations, finances & masters'}
+            </Text>
           </View>
         </View>
         <TouchableOpacity style={styles.refreshBtn} onPress={onRefresh}>
@@ -288,56 +293,71 @@ export const AdminDashboardScreen: React.FC<{ navigation: any }> = ({ navigation
         </View>
       </Animated.View>
 
-      {/* Operations Section */}
+      {/* Operations Section - same pages as web admin */}
       <View style={styles.sectionHeadingRow}>
         <Text style={styles.sectionHeading}>Operations</Text>
       </View>
-      <Animated.View style={[styles.navGrid, { opacity: navFade, transform: [{ translateY: navSlide }] }]}>
-        <Animated.View style={{ transform: [{ scale: navScales[0] }] }}>
-          <Pressable
-            style={styles.navItem}
-            onPressIn={() => Animated.spring(navScales[0], { toValue: 0.95, speed: 60, useNativeDriver: true }).start()}
-            onPressOut={() => Animated.spring(navScales[0], { toValue: 1, speed: 30, bounciness: 7, useNativeDriver: true }).start()}
-            onPress={() => navigation.navigate('AdminTrips')}
-          >
-            <View style={[styles.navIconBox, { backgroundColor: '#eff6ff' }]}>
-              <Navigation size={20} color="#1d4ed8" />
-            </View>
-            <Text style={styles.navItemTitle}>Trips Operations</Text>
-            <Text style={styles.navItemSub}>Status & Dispatches</Text>
-          </Pressable>
-        </Animated.View>
+      <View style={styles.navGrid}>
+        <TouchableOpacity style={styles.navItem} onPress={() => navigation.navigate('AdminTrips')} activeOpacity={0.7}>
+          <View style={[styles.navIconBox, { backgroundColor: '#eff6ff' }]}>
+            <Navigation size={20} color="#1d4ed8" />
+          </View>
+          <Text style={styles.navItemTitle}>Trips</Text>
+          <Text style={styles.navItemSub}>Status & Dispatches</Text>
+        </TouchableOpacity>
 
-        <Animated.View style={{ transform: [{ scale: navScales[1] }] }}>
-          <Pressable
-            style={styles.navItem}
-            onPressIn={() => Animated.spring(navScales[1], { toValue: 0.95, speed: 60, useNativeDriver: true }).start()}
-            onPressOut={() => Animated.spring(navScales[1], { toValue: 1, speed: 30, bounciness: 7, useNativeDriver: true }).start()}
-            onPress={() => navigation.navigate('AdminOwnerAdvances')}
-          >
-            <View style={[styles.navIconBox, { backgroundColor: '#fef3c7' }]}>
-              <HandCoins size={20} color="#b45309" />
-            </View>
-            <Text style={styles.navItemTitle}>Advance to Manager</Text>
-            <Text style={styles.navItemSub}>Owner Advances</Text>
-          </Pressable>
-        </Animated.View>
+        <TouchableOpacity style={styles.navItem} onPress={() => navigation.navigate('AdminPayments')} activeOpacity={0.7}>
+          <View style={[styles.navIconBox, { backgroundColor: '#dbeafe' }]}>
+            <CreditCard size={20} color="#1d4ed8" />
+          </View>
+          <Text style={styles.navItemTitle}>Party Payments</Text>
+          <Text style={styles.navItemSub}>Collect freight</Text>
+        </TouchableOpacity>
 
-        <Animated.View style={{ transform: [{ scale: navScales[2] }] }}>
-          <Pressable
-            style={styles.navItem}
-            onPressIn={() => Animated.spring(navScales[2], { toValue: 0.95, speed: 60, useNativeDriver: true }).start()}
-            onPressOut={() => Animated.spring(navScales[2], { toValue: 1, speed: 30, bounciness: 7, useNativeDriver: true }).start()}
-            onPress={() => navigation.navigate('AdminMasters')}
-          >
-            <View style={[styles.navIconBox, { backgroundColor: '#fef2f2' }]}>
-              <Sliders size={20} color="#b91c1c" />
-            </View>
-            <Text style={styles.navItemTitle}>Rates & Hub</Text>
-            <Text style={styles.navItemSub}>Full Master Settings</Text>
-          </Pressable>
-        </Animated.View>
-      </Animated.View>
+        <TouchableOpacity style={styles.navItem} onPress={() => navigation.navigate('AdminOwnerAdvances')} activeOpacity={0.7}>
+          <View style={[styles.navIconBox, { backgroundColor: '#fef3c7' }]}>
+            <HandCoins size={20} color="#b45309" />
+          </View>
+          <Text style={styles.navItemTitle}>Owner Advances</Text>
+          <Text style={styles.navItemSub}>To Manager & Driver</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity style={styles.navItem} onPress={() => navigation.navigate('AdminManagerLedger')} activeOpacity={0.7}>
+          <View style={[styles.navIconBox, { backgroundColor: '#eef2ff' }]}>
+            <BookOpen size={20} color="#4338ca" />
+          </View>
+          <Text style={styles.navItemTitle}>Manager Advances</Text>
+          <Text style={styles.navItemSub}>Received vs given</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity style={styles.navItem} onPress={() => navigation.navigate('AdminSettlements')} activeOpacity={0.7}>
+          <View style={[styles.navIconBox, { backgroundColor: '#ecfdf5' }]}>
+            <Scale size={20} color="#047857" />
+          </View>
+          <Text style={styles.navItemTitle}>Settlements</Text>
+          <Text style={styles.navItemSub}>Driver slips</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity style={styles.navItem} onPress={() => navigation.navigate('AdminTruckAdvances')} activeOpacity={0.7}>
+          <View style={[styles.navIconBox, { backgroundColor: '#fef3c7' }]}>
+            <Banknote size={20} color="#b45309" />
+          </View>
+          <Text style={styles.navItemTitle}>Truck Advances</Text>
+          <Text style={styles.navItemSub}>Lorry advances</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={[styles.navItem, { borderWidth: 1.5, borderColor: '#6ee7b7' }]}
+          onPress={() => navigation.navigate('AdminDriverBalanceMaster')}
+          activeOpacity={0.7}
+        >
+          <View style={[styles.navIconBox, { backgroundColor: '#ecfdf5' }]}>
+            <Wallet size={20} color="#059669" />
+          </View>
+          <Text style={[styles.navItemTitle, { color: '#059669' }]}>Driver Balance Master</Text>
+          <Text style={styles.navItemSub}>Advances, cash in hand & to pay</Text>
+        </TouchableOpacity>
+      </View>
 
       {/* Master Data Section - Matching Admin Panel */}
       <View style={styles.sectionHeadingRow}>
@@ -353,8 +373,10 @@ export const AdminDashboardScreen: React.FC<{ navigation: any }> = ({ navigation
           <View style={[styles.navIconBox, { backgroundColor: '#ecfdf5' }]}>
             <Users size={20} color="#047857" />
           </View>
-          <Text style={styles.navItemTitle}>User Management</Text>
-          <Text style={styles.navItemSub}>{stats?.total_users || 0} Accounts</Text>
+          <Text style={styles.navItemTitle}>{isFullAdmin ? 'User Management' : 'Managers'}</Text>
+          {isFullAdmin ? (
+            <Text style={styles.navItemSub}>{stats?.total_users || 0} Accounts</Text>
+          ) : null}
         </TouchableOpacity>
 
         <TouchableOpacity
@@ -366,7 +388,6 @@ export const AdminDashboardScreen: React.FC<{ navigation: any }> = ({ navigation
             <UserCheck size={20} color="#4338ca" />
           </View>
           <Text style={styles.navItemTitle}>Drivers</Text>
-          <Text style={styles.navItemSub}>{stats?.total_drivers || 0} Registered</Text>
         </TouchableOpacity>
 
         <TouchableOpacity
@@ -379,18 +400,6 @@ export const AdminDashboardScreen: React.FC<{ navigation: any }> = ({ navigation
           </View>
           <Text style={styles.navItemTitle}>Owners</Text>
           <Text style={styles.navItemSub}>Vehicle Owners</Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          style={styles.navItem}
-          onPress={() => navigation.navigate('AdminOwnerAdvances')}
-          activeOpacity={0.7}
-        >
-          <View style={[styles.navIconBox, { backgroundColor: '#fffbeb' }]}>
-            <HandCoins size={20} color="#d97706" />
-          </View>
-          <Text style={styles.navItemTitle}>Advance to Manager</Text>
-          <Text style={styles.navItemSub}>Owner Advances</Text>
         </TouchableOpacity>
 
         <TouchableOpacity
@@ -507,6 +516,7 @@ export const AdminDashboardScreen: React.FC<{ navigation: any }> = ({ navigation
           <Text style={styles.navItemSub}>CSV & PDF Reports</Text>
         </TouchableOpacity>
 
+        {isFullAdmin && (
         <TouchableOpacity
           style={styles.navItem}
           onPress={() => navigation.navigate('AdminAuditLogs')}
@@ -518,6 +528,7 @@ export const AdminDashboardScreen: React.FC<{ navigation: any }> = ({ navigation
           <Text style={styles.navItemTitle}>Audit Logs</Text>
           <Text style={styles.navItemSub}>Security Activity</Text>
         </TouchableOpacity>
+        )}
       </View>
 
       {/* Recent Trips Section */}
@@ -807,7 +818,7 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   adminBanner: {
-    backgroundColor: COLORS.primaryDark,
+    backgroundColor: COLORS.indigo,
     borderRadius: RADIUS.lg,
     padding: SPACING.md,
     flexDirection: 'row',
@@ -935,7 +946,7 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
   financeCard: {
-    backgroundColor: '#0f172a',
+    backgroundColor: '#1e1b4b',
     borderRadius: RADIUS.lg,
     padding: SPACING.md,
     marginBottom: SPACING.md,
@@ -1018,8 +1029,8 @@ const styles = StyleSheet.create({
     borderRadius: RADIUS.md,
     padding: SPACING.sm + 4,
     borderWidth: 1,
-    borderColor: COLORS.border,
-    ...SHADOWS.sm,
+    borderColor: '#c7d2fe',
+    ...SHADOWS.md,
   },
   navIconBox: {
     width: 40,

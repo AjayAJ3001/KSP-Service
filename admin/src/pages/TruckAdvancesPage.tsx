@@ -1,4 +1,5 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import { useDebouncedValue } from '../hooks/useDebouncedValue';
 import {
   Truck,
   Plus,
@@ -17,16 +18,19 @@ import {
   Check,
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
-import { truckAdvanceService, vehicleService, driverService, userService, partyService, tripService } from '../services/adminService';
-import { Vehicle, Driver, User, Party, Trip } from '../types';
+import { truckAdvanceService, vehicleService, driverService, userService, partyService, tripService, ownerService } from '../services/adminService';
+import { Vehicle, Driver, User, Party, Trip, Owner } from '../types';
 import { DataTable, Column } from '../components/Common/DataTable';
 import { Modal } from '../components/Common/Modal';
 import { DateField } from '../components/Common/DateField';
 import { formatIST } from '../utils/dateUtils';
+import { PRINT_BRAND_CSS, printBrandLockup } from '../utils/printBrand';
 
 interface TruckAdvance {
   id: number;
   vehicle_id: number;
+  owner_id?: number;
+  owner_name?: string;
   driver_id?: number;
   trip_id?: number;
   manager_id: number;
@@ -83,6 +87,7 @@ const formatAdvanceDateTime = (dateStr?: string | Date | null, createdAtStr?: st
 export const TruckAdvancesPage: React.FC = () => {
   const [advances, setAdvances] = useState<TruckAdvance[]>([]);
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
+  const [owners, setOwners] = useState<Owner[]>([]);
   const [drivers, setDrivers] = useState<Driver[]>([]);
   const [managers, setManagers] = useState<User[]>([]);
   const [parties, setParties] = useState<Party[]>([]);
@@ -93,12 +98,20 @@ export const TruckAdvancesPage: React.FC = () => {
 
   // Filters
   const [search, setSearch] = useState('');
+  const debouncedSearch = useDebouncedValue(search, 400);
   const [vehicleFilter, setVehicleFilter] = useState('');
+  const [ownerFilter, setOwnerFilter] = useState('');
   const [driverFilter, setDriverFilter] = useState('');
   const [partyFilter, setPartyFilter] = useState('');
   const [managerFilter, setManagerFilter] = useState('');
   const [fromDate, setFromDate] = useState('');
   const [toDate, setToDate] = useState('');
+
+  // Vehicles filtered by selected owner
+  const filteredVehicles = useMemo(() => {
+    if (!ownerFilter) return vehicles;
+    return vehicles.filter((v) => String(v.owner_id) === String(ownerFilter));
+  }, [vehicles, ownerFilter]);
 
   const [isLoading, setIsLoading] = useState(false);
   const [isExportingExcel, setIsExportingExcel] = useState(false);
@@ -122,18 +135,20 @@ export const TruckAdvancesPage: React.FC = () => {
 
   useEffect(() => {
     loadAdvances();
-  }, [page, search, vehicleFilter, driverFilter, partyFilter, managerFilter, fromDate, toDate]);
+  }, [page, debouncedSearch, vehicleFilter, ownerFilter, driverFilter, partyFilter, managerFilter, fromDate, toDate]);
 
   const loadLookups = async () => {
     try {
-      const [vRes, dRes, uRes, pRes, trRes] = await Promise.all([
+      const [vRes, oRes, dRes, uRes, pRes, trRes] = await Promise.all([
         vehicleService.getVehicles({ limit: 500, status: 'ACTIVE' }),
+        ownerService.getOwners({ limit: 500, status: 'ACTIVE' }),
         driverService.getDrivers({ limit: 500, status: 'ACTIVE' }),
         userService.getUsers({ limit: 200, status: 'ACTIVE' }),
         partyService.getParties({ limit: 500, status: 'ACTIVE' }),
         tripService.getTrips({ limit: 100 }),
       ]);
       setVehicles(vRes.data.items || []);
+      setOwners(oRes.data.items || []);
       setDrivers(dRes.data.items || []);
       setManagers(uRes.data.items || []);
       setParties(pRes.data.items || []);
@@ -149,8 +164,9 @@ export const TruckAdvancesPage: React.FC = () => {
       const res = await truckAdvanceService.getTruckAdvances({
         page,
         limit: 10,
-        search: search || undefined,
+        search: debouncedSearch || undefined,
         vehicle_id: vehicleFilter || undefined,
+        owner_id: ownerFilter || undefined,
         driver_id: driverFilter || undefined,
         party_id: partyFilter || undefined,
         manager_id: managerFilter || undefined,
@@ -165,7 +181,7 @@ export const TruckAdvancesPage: React.FC = () => {
     } finally {
       setIsLoading(false);
     }
-  }, [page, search, vehicleFilter, driverFilter, partyFilter, managerFilter, fromDate, toDate]);
+  }, [page, debouncedSearch, vehicleFilter, ownerFilter, driverFilter, partyFilter, managerFilter, fromDate, toDate]);
 
   const handleSubmit = async () => {
     if (!formData.vehicle_id) { setFormError('Please select a vehicle.'); return; }
@@ -211,14 +227,19 @@ export const TruckAdvancesPage: React.FC = () => {
   };
 
   const resetFilters = () => {
+    const hadFilter = Boolean(search || vehicleFilter || ownerFilter || driverFilter || partyFilter || managerFilter || fromDate || toDate || page !== 1);
     setSearch('');
     setVehicleFilter('');
+    setOwnerFilter('');
     setDriverFilter('');
     setPartyFilter('');
     setManagerFilter('');
     setFromDate('');
     setToDate('');
     setPage(1);
+    if (!hadFilter) {
+      loadAdvances();
+    }
   };
 
   // ── Single Trip Download (Excel) ─────────────────────────────────
@@ -233,6 +254,7 @@ export const TruckAdvancesPage: React.FC = () => {
         { 'Detail': 'TRIP ID', 'Information': a.trip_id ? `TRIP #${a.trip_id}` : 'Direct Advance (No Trip)' },
         { 'Detail': 'DATE & TIME (IST)', 'Information': formatAdvanceDateTime(a.advance_date, a.created_at) },
         { 'Detail': 'LORRY NUMBER', 'Information': a.lorry_number },
+        { 'Detail': 'TRUCK OWNER', 'Information': a.owner_name || '—' },
         { 'Detail': 'VEHICLE TYPE', 'Information': a.vehicle_type || '—' },
         { 'Detail': 'DRIVER NAME', 'Information': a.driver_name || '—' },
         { 'Detail': 'DRIVER MOBILE', 'Information': a.driver_mobile || '—' },
@@ -273,6 +295,7 @@ export const TruckAdvancesPage: React.FC = () => {
       const singleHtml = `<!DOCTYPE html><html><head><meta charset="utf-8"/>
       <title>KSP Truck Advance Voucher #${a.id} - ${a.lorry_number}</title>
       <style>
+    ${PRINT_BRAND_CSS}
         *{box-sizing:border-box;-webkit-print-color-adjust:exact;print-color-adjust:exact}
         body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;margin:0;padding:24px;color:#1e293b;background:#fff;font-size:12px}
         @page{size:portrait;margin:12mm}
@@ -305,7 +328,7 @@ export const TruckAdvancesPage: React.FC = () => {
       <div class="voucher-box">
         <div class="v-header">
           <div>
-            <h1 class="v-title">KSP TRANSPORT &amp; LOGISTICS</h1>
+            ${printBrandLockup()}
             <div class="v-subtitle">Truck Advance Disbursement &amp; Trip Voucher</div>
             <div style="font-size:11px;color:#64748b;margin-top:4px">KSP Service Management ERP</div>
           </div>
@@ -319,6 +342,7 @@ export const TruckAdvancesPage: React.FC = () => {
           <div class="card-b">
             <div class="lbl">Vehicle / Lorry Number</div>
             <div class="val">${a.lorry_number}</div>
+            ${a.owner_name ? `<div style="font-size:12px;font-weight:700;color:#4338ca;margin-top:2px">👤 Owner: ${a.owner_name}</div>` : ''}
             <div style="font-size:11px;color:#64748b">${a.vehicle_type || 'Commercial Carrier'}</div>
             <div class="lbl" style="margin-top:8px">Assigned Driver</div>
             <div style="font-weight:700;color:#1e293b;font-size:13px">${a.driver_name || '—'}</div>
@@ -413,6 +437,7 @@ export const TruckAdvancesPage: React.FC = () => {
       const res = await truckAdvanceService.getTruckAdvances({
         page: 1, limit: 5000,
         search: search || undefined, vehicle_id: vehicleFilter || undefined,
+        owner_id: ownerFilter || undefined,
         driver_id: driverFilter || undefined, party_id: partyFilter || undefined,
         manager_id: managerFilter || undefined,
         from_date: fromDate || undefined, to_date: toDate || undefined,
@@ -426,6 +451,7 @@ export const TruckAdvancesPage: React.FC = () => {
         'S.No': i + 1,
         'Date & Time': formatAdvanceDateTime(a.advance_date, a.created_at),
         'Lorry Number': a.lorry_number,
+        'Truck Owner': a.owner_name || '-',
         'Vehicle Type': a.vehicle_type || '',
         'Trip ID': a.trip_id ? `Trip #${a.trip_id}` : '-',
         'Party Name': a.party_name || '-',
@@ -444,6 +470,7 @@ export const TruckAdvancesPage: React.FC = () => {
         'S.No': 'TOTAL',
         'Date & Time': `${items.length} Advances`,
         'Lorry Number': '',
+        'Truck Owner': '',
         'Vehicle Type': '',
         'Trip ID': '',
         'Party Name': '',
@@ -463,6 +490,7 @@ export const TruckAdvancesPage: React.FC = () => {
         { wch: 6 },  // S.No
         { wch: 22 }, // Date & Time
         { wch: 14 }, // Lorry Number
+        { wch: 18 }, // Truck Owner
         { wch: 14 }, // Vehicle Type
         { wch: 12 }, // Trip ID
         { wch: 24 }, // Party Name
@@ -490,6 +518,7 @@ export const TruckAdvancesPage: React.FC = () => {
       const res = await truckAdvanceService.getTruckAdvances({
         page: 1, limit: 5000,
         search: search || undefined, vehicle_id: vehicleFilter || undefined,
+        owner_id: ownerFilter || undefined,
         driver_id: driverFilter || undefined, party_id: partyFilter || undefined,
         manager_id: managerFilter || undefined,
         from_date: fromDate || undefined, to_date: toDate || undefined,
@@ -500,13 +529,15 @@ export const TruckAdvancesPage: React.FC = () => {
       const totalFr = items.reduce((s, a) => s + (parseFloat(String(a.total_freight)) || 0), 0);
       const totalExp = items.reduce((s, a) => s + (parseFloat(String(a.driver_expenses)) || 0), 0);
       const selectedPartyName = partyFilter ? parties.find(p => String(p.id) === String(partyFilter))?.name : 'All Parties';
+      const selectedOwnerName = ownerFilter ? owners.find(o => String(o.id) === String(ownerFilter))?.name : 'All Owners';
 
       const html = `<!DOCTYPE html><html><head><meta charset="utf-8"/><title>KSP Truck Advances</title>
       <style>
+    ${PRINT_BRAND_CSS}
         *{box-sizing:border-box;-webkit-print-color-adjust:exact;print-color-adjust:exact}
         body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;margin:0;padding:20px;color:#1e293b;background:#fff;font-size:11px}
         @page{size:landscape;margin:10mm}
-        .header-bar{display:flex;justify-content:space-between;align-items:flex-start;padding-bottom:12px;border-bottom:2px solid #0f172a;margin-bottom:14px}
+        .header-bar{display:flex;justify-content:space-between;align-items:center;padding-bottom:10px;border-bottom:3px solid #0f172a;margin-bottom:14px}
         .company-title{font-size:20px;font-weight:800;color:#0f172a;margin:0 0 4px}
         .report-subtitle{font-size:13px;font-weight:700;color:#2563eb;margin:0;text-transform:uppercase;letter-spacing:.5px}
         .meta-text{font-size:11px;color:#64748b;margin:0}.kpi-blue .kpi-value{color:#1d4ed8}
@@ -526,10 +557,10 @@ export const TruckAdvancesPage: React.FC = () => {
       </div>
       <div class="header-bar">
         <div>
-          <h1 class="company-title">KSP TRANSPORT &amp; LOGISTICS</h1>
+          ${printBrandLockup()}
           <div class="report-subtitle">Truck Advance Disbursements &amp; Trip Freight Record</div>
           <p class="meta-text" style="margin-top:4px">
-            <strong>Filters:</strong> Party: ${selectedPartyName} | Date: ${fromDate || toDate ? `${fromDate || 'Start'} to ${toDate || 'End'}` : 'All Dates'}
+            <strong>Filters:</strong> Party: ${selectedPartyName} | Owner: ${selectedOwnerName} | Date: ${fromDate || toDate ? `${fromDate || 'Start'} to ${toDate || 'End'}` : 'All Dates'}
           </p>
         </div>
         <div style="text-align:right">
@@ -542,32 +573,33 @@ export const TruckAdvancesPage: React.FC = () => {
           <th style="width:30px;text-align:center">S.No</th>
           <th style="width:110px">Date &amp; Time</th>
           <th style="width:85px">Lorry No</th>
-          <th style="width:50px;text-align:center">Trip</th>
+          <th style="width:50px;text-align:center">Trip / For What</th>
           <th>Party Name</th>
           <th style="width:70px">Weight</th>
           <th class="num" style="width:85px">Freight (₹)</th>
           <th class="num" style="width:85px">Advance (₹)</th>
           <th class="num" style="width:85px">Expenses (₹)</th>
           <th>Driver</th>
-          <th>Manager</th>
+          <th>Who Given (Manager)</th>
         </tr></thead>
         <tbody>
           ${items.map((a, i) => `<tr>
             <td style="text-align:center">${i + 1}</td>
             <td>${formatAdvanceDateTime(a.advance_date, a.created_at)}</td>
             <td><strong>${a.lorry_number}</strong></td>
-            <td style="text-align:center">${a.trip_id ? `<span style="font-weight:700;color:#2563eb">#${a.trip_id}</span>` : '—'}</td>
+            <td>${a.owner_name || '—'}</td>
+            <td style="text-align:center">${a.trip_id ? `<span style="font-weight:700;color:#2563eb">Trip #${a.trip_id}</span>` : '<span style="color:#b45309;font-size:9.5px">Without Trip</span>'}</td>
             <td><strong>${a.party_name || '—'}</strong></td>
             <td>${a.goods_weight ? `${a.goods_weight} ${a.unit_abbreviation || 'MT'}` : '—'}</td>
             <td class="num" style="color:#1d4ed8;font-weight:700">₹${(parseFloat(String(a.total_freight || 0))).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td>
             <td class="num" style="color:#16a34a;font-weight:700">₹${(parseFloat(String(a.amount || 0))).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td>
             <td class="num" style="color:#b45309;font-weight:700">₹${(parseFloat(String(a.driver_expenses || 0))).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td>
             <td>${a.driver_name || '-'}</td>
-            <td>${a.manager_name}</td>
+            <td>${a.manager_name || 'Manager'}</td>
           </tr>`).join('')}
           <tr class="footer-row">
             <td style="text-align:center">TOTAL</td>
-            <td colspan="5"><strong>Total Count: ${items.length} Advances</strong></td>
+            <td colspan="6"><strong>Total Count: ${items.length} Advances</strong></td>
             <td class="num"><strong>₹${totalFr.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</strong></td>
             <td class="num"><strong>₹${totalAdv.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</strong></td>
             <td class="num"><strong>₹${totalExp.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</strong></td>
@@ -608,6 +640,13 @@ export const TruckAdvancesPage: React.FC = () => {
           <span style={{ fontWeight: 700, color: '#1e40af', background: '#eff6ff', padding: '2px 8px', borderRadius: '4px', display: 'inline-flex', alignItems: 'center', gap: '5px' }}>
             <Truck size={12} /> {a.lorry_number}
           </span>
+          {a.owner_name && (
+            <div style={{ marginTop: '2px' }}>
+              <span style={{ fontSize: '11px', fontWeight: 700, color: '#6366f1' }}>
+                👤 {a.owner_name}
+              </span>
+            </div>
+          )}
           {a.trip_id && (
             <div style={{ marginTop: '3px' }}>
               <span style={{ fontSize: '11px', fontWeight: 700, color: '#4338ca', background: '#e0e7ff', padding: '1px 6px', borderRadius: '4px' }}>
@@ -747,17 +786,54 @@ export const TruckAdvancesPage: React.FC = () => {
 
           <div style={{ width: '160px', flexShrink: 0 }}>
             <label style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-muted)', display: 'block', marginBottom: '4px' }}>
+              Truck Owner
+            </label>
+            <select
+              value={ownerFilter}
+              onChange={(e) => {
+                const val = e.target.value;
+                setOwnerFilter(val);
+                setPage(1);
+                if (val && vehicleFilter) {
+                  const cur = vehicles.find((v) => String(v.id) === String(vehicleFilter));
+                  if (cur && String(cur.owner_id) !== String(val)) {
+                    setVehicleFilter('');
+                  }
+                }
+              }}
+              className="form-control form-select"
+              style={{ height: '38px', width: '100%' }}
+            >
+              <option value="">All Owners</option>
+              {owners.map((o) => (
+                <option key={o.id} value={o.id}>{o.name}</option>
+              ))}
+            </select>
+          </div>
+
+          <div style={{ width: '160px', flexShrink: 0 }}>
+            <label style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-muted)', display: 'block', marginBottom: '4px' }}>
               Vehicle
             </label>
             <select
               value={vehicleFilter}
-              onChange={(e) => { setVehicleFilter(e.target.value); setPage(1); }}
+              onChange={(e) => {
+                const val = e.target.value;
+                setVehicleFilter(val);
+                setPage(1);
+                if (val && !ownerFilter) {
+                  const cur = vehicles.find((v) => String(v.id) === String(val));
+                  if (cur && cur.owner_id) {
+                    setOwnerFilter(String(cur.owner_id));
+                  }
+                }
+              }}
               className="form-control form-select"
               style={{ height: '38px', width: '100%' }}
             >
-              <option value="">All Vehicles</option>
-              {vehicles.map((v) => (
-                <option key={v.id} value={v.id}>{v.lorry_number}</option>
+              <option value="">{ownerFilter ? 'All Vehicles of Owner' : 'All Vehicles'}</option>
+              {filteredVehicles.map((v) => (
+                <option key={v.id} value={v.id}>{v.lorry_number} {v.owner_name ? `• ${v.owner_name}` : ''}</option>
               ))}
             </select>
           </div>
@@ -855,9 +931,17 @@ export const TruckAdvancesPage: React.FC = () => {
           <button
             type="button"
             onClick={resetFilters}
-            disabled={!search && !vehicleFilter && !driverFilter && !partyFilter && !managerFilter && !fromDate && !toDate}
+            disabled={!search && !vehicleFilter && !ownerFilter && !driverFilter && !partyFilter && !managerFilter && !fromDate && !toDate}
             className="btn btn-outline"
-            style={{ height: '38px', display: 'flex', alignItems: 'center', gap: '6px', flexShrink: 0 }}
+            style={{
+              height: '38px',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              flexShrink: 0,
+              cursor: (!search && !vehicleFilter && !ownerFilter && !driverFilter && !partyFilter && !managerFilter && !fromDate && !toDate) ? 'not-allowed' : 'pointer',
+              opacity: (!search && !vehicleFilter && !ownerFilter && !driverFilter && !partyFilter && !managerFilter && !fromDate && !toDate) ? 0.6 : 1,
+            }}
             title="Clear all filters"
           >
             <RefreshCw size={14} /> Clear Filters
@@ -992,8 +1076,21 @@ export const TruckAdvancesPage: React.FC = () => {
             <select className="form-control" value={formData.vehicle_id}
               onChange={(e) => setFormData(p => ({ ...p, vehicle_id: e.target.value }))}>
               <option value="">— Select Vehicle —</option>
-              {vehicles.map(v => <option key={v.id} value={v.id}>{v.lorry_number} {v.vehicle_type ? `(${v.vehicle_type})` : ''}</option>)}
+              {vehicles.map(v => (
+                <option key={v.id} value={v.id}>
+                  {v.lorry_number} {v.owner_name ? `• ${v.owner_name}` : ''} {v.vehicle_type ? `(${v.vehicle_type})` : ''}
+                </option>
+              ))}
             </select>
+            {(() => {
+              const sel = vehicles.find(v => v.id === Number(formData.vehicle_id));
+              if (!sel || !sel.owner_name) return null;
+              return (
+                <div style={{ marginTop: '6px', fontSize: '12px', color: '#4338ca', background: '#e0e7ff', padding: '6px 10px', borderRadius: '6px', border: '1px solid #c7d2fe', fontWeight: 700 }}>
+                  👤 Truck Owner: <strong>{sel.owner_name}</strong>
+                </div>
+              );
+            })()}
           </div>
 
           <div className="form-group">

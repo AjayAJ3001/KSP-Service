@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { NavLink, Outlet, useNavigate } from 'react-router-dom';
+import { NavLink, Outlet, useNavigate, useLocation } from 'react-router-dom';
 import {
   LayoutDashboard,
   Users,
@@ -25,7 +25,6 @@ import {
   AlertTriangle,
   Banknote,
   BookOpen,
-  Wallet,
   Menu,
   X,
 } from 'lucide-react';
@@ -36,6 +35,9 @@ import { driverService, vehicleService } from '../../services/adminService';
 
 export const AdminLayout: React.FC = () => {
   const { user, logout } = useAuth();
+  const location = useLocation();
+  const isOwnerUser = user?.role === 'OWNER';
+  const isFullAdmin = user?.role === 'ADMIN';
   const navigate = useNavigate();
   const [showExpiryModal, setShowExpiryModal] = useState(false);
   const [showVehicleExpiryModal, setShowVehicleExpiryModal] = useState(false);
@@ -107,7 +109,7 @@ export const AdminLayout: React.FC = () => {
             <div className="brand-icon-box">KSP</div>
             <div className="brand-text">
               <h1>KSP Transport</h1>
-              <span>Admin Portal</span>
+              <span>{isOwnerUser ? 'Owner Portal' : 'Admin Portal'}</span>
             </div>
           </div>
           <button
@@ -122,70 +124,72 @@ export const AdminLayout: React.FC = () => {
 
         <nav className="sidebar-nav">
           <div className="nav-section-title">Overview</div>
-          <NavLink to="/dashboard" onClick={handleNavClick} className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
+          <NavLink to="/dashboard" onClick={handleNavClick} className={({ isActive }) => `nav-item hue-indigo ${isActive ? 'active' : ''}`}>
             <LayoutDashboard /> Dashboard
           </NavLink>
 
           <div className="nav-section-title">Operations</div>
-          <NavLink to="/trips" onClick={handleNavClick} className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
+          <NavLink to="/trips" onClick={handleNavClick} className={({ isActive }) => `nav-item hue-sky ${isActive ? 'active' : ''}`}>
             <Navigation /> Trips
           </NavLink>
-          <NavLink to="/payments" onClick={handleNavClick} className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
+          <NavLink to="/payments" onClick={handleNavClick} className={({ isActive }) => `nav-item hue-emerald ${isActive ? 'active' : ''}`}>
             <CreditCard /> Party Payments
           </NavLink>
-          <NavLink to="/owner-advances" onClick={handleNavClick} className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
+          <NavLink to="/owner-advances" onClick={handleNavClick} className={({ isActive }) => `nav-item hue-amber ${isActive ? 'active' : ''}`}>
             <HandCoins /> Owner Advances
           </NavLink>
-          <NavLink to="/manager-ledger" onClick={handleNavClick} className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
+          <NavLink to="/manager-ledger" onClick={handleNavClick} className={({ isActive }) => `nav-item hue-violet ${isActive ? 'active' : ''}`}>
             <BookOpen /> Manager Advances
           </NavLink>
-          <NavLink to="/truck-advances" onClick={handleNavClick} className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
+          <NavLink to="/settlements" onClick={handleNavClick} className={({ isActive }) => `nav-item hue-rose ${isActive ? 'active' : ''}`}>
+            <FileCheck /> Settlements
+          </NavLink>
+          <NavLink to="/truck-advances" onClick={handleNavClick} className={({ isActive }) => `nav-item hue-teal ${isActive ? 'active' : ''}`}>
             <Banknote /> Truck Advances
           </NavLink>
-          <NavLink to="/driver-advances" onClick={handleNavClick} className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
-            <Wallet /> Driver Advances
-          </NavLink>
-          <NavLink to="/settlements" onClick={handleNavClick} className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
-            <FileCheck /> Settlements
+          <NavLink to="/driver-balance-master" onClick={handleNavClick} className={({ isActive }) => `nav-item hue-sky ${isActive ? 'active' : ''}`}>
+            <Scale /> Driver Balance Master
           </NavLink>
 
           <div className="nav-section-title">Master Data</div>
-          <NavLink to="/users" onClick={handleNavClick} className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
-            <Users /> User Management
+          <NavLink to="/users" onClick={handleNavClick} className={({ isActive }) => `nav-item hue-indigo ${isActive ? 'active' : ''}`}>
+            <Users /> {isOwnerUser ? 'Managers' : 'User Management'}
           </NavLink>
-          <NavLink to="/drivers" onClick={handleNavClick} className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
+          <NavLink to="/drivers" onClick={handleNavClick} className={({ isActive }) => `nav-item hue-emerald ${isActive ? 'active' : ''}`}>
             <UserCheck /> Drivers
           </NavLink>
-          <NavLink to="/owners" onClick={handleNavClick} className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
+          <NavLink to="/owners" onClick={handleNavClick} className={({ isActive }) => `nav-item hue-violet ${isActive ? 'active' : ''}`}>
             <Briefcase /> Owners
           </NavLink>
-          <NavLink to="/vehicles" onClick={handleNavClick} className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
+          <NavLink to="/vehicles" onClick={handleNavClick} className={({ isActive }) => `nav-item hue-orange ${isActive ? 'active' : ''}`}>
             <Truck /> Vehicles / Lorries
           </NavLink>
-          <NavLink to="/parties" onClick={handleNavClick} className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
+          <NavLink to="/parties" onClick={handleNavClick} className={({ isActive }) => `nav-item hue-teal ${isActive ? 'active' : ''}`}>
             <Building2 /> Parties and Units
           </NavLink>
-          <NavLink to="/cleaning-expenses" onClick={handleNavClick} className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
+          <NavLink to="/cleaning-expenses" onClick={handleNavClick} className={({ isActive }) => `nav-item hue-sky ${isActive ? 'active' : ''}`}>
             <Droplets /> Cleaning Expenses
           </NavLink>
-          <NavLink to="/unloading-rates" onClick={handleNavClick} className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
+          <NavLink to="/unloading-rates" onClick={handleNavClick} className={({ isActive }) => `nav-item hue-violet ${isActive ? 'active' : ''}`}>
             <ArrowDownCircle /> Unloading Rates
           </NavLink>
-          <NavLink to="/driver-bata" onClick={handleNavClick} className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
+          <NavLink to="/driver-bata" onClick={handleNavClick} className={({ isActive }) => `nav-item hue-rose ${isActive ? 'active' : ''}`}>
             <Percent /> Driver Bata
           </NavLink>
-          <NavLink to="/other-expense-limit" onClick={handleNavClick} className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
+          <NavLink to="/other-expense-limit" onClick={handleNavClick} className={({ isActive }) => `nav-item hue-orange ${isActive ? 'active' : ''}`}>
             <ShieldAlert /> Other Expense Limit
           </NavLink>
 
           <div className="nav-section-title">Analytics & Security</div>
-          <NavLink to="/reports" onClick={handleNavClick} className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
+          <NavLink to="/reports" onClick={handleNavClick} className={({ isActive }) => `nav-item hue-amber ${isActive ? 'active' : ''}`}>
             <BarChart3 /> Reports
           </NavLink>
-          <NavLink to="/audit-logs" onClick={handleNavClick} className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
+          {isFullAdmin && (
+          <NavLink to="/audit-logs" onClick={handleNavClick} className={({ isActive }) => `nav-item hue-violet ${isActive ? 'active' : ''}`}>
             <History /> Audit Logs
           </NavLink>
-          <NavLink to="/profile" onClick={handleNavClick} className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
+          )}
+          <NavLink to="/profile" onClick={handleNavClick} className={({ isActive }) => `nav-item hue-indigo ${isActive ? 'active' : ''}`}>
             <UserCircle /> Profile
           </NavLink>
         </nav>
@@ -269,7 +273,9 @@ export const AdminLayout: React.FC = () => {
         </header>
 
         <main className="content-body">
-          <Outlet />
+          <div key={location.pathname} className="page-enter">
+            <Outlet />
+          </div>
         </main>
       </div>
 

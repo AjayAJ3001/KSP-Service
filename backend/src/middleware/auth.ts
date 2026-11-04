@@ -3,6 +3,7 @@ import jwt from 'jsonwebtoken';
 import { query } from '../config/database';
 import { AppError } from './errorHandler';
 import { JWTPayload } from '../types';
+import { loadOwnerScope } from '../utils/ownerScope';
 
 export interface AuthRequest extends Request {
   user?: {
@@ -10,8 +11,14 @@ export interface AuthRequest extends Request {
     username: string;
     role: string;
     name: string;
+    ownerIds?: number[];
+    vehicleIds?: number[];
   };
 }
+
+type CachedAuth = { user: NonNullable<AuthRequest['user']>; expires: number };
+const authCache = new Map<number, CachedAuth>();
+const AUTH_CACHE_MS = 20000;
 
 export const authenticate = async (
   req: AuthRequest,
@@ -30,6 +37,13 @@ export const authenticate = async (
 
     const decoded = jwt.verify(token, secret) as JWTPayload;
 
+    const cached = authCache.get(decoded.userId);
+    if (cached && cached.expires > Date.now()) {
+      req.user = cached.user;
+      next();
+      return;
+    }
+
     // Verify user still exists and is active
     const result = await query(
       'SELECT id, username, role, name, status FROM users WHERE id = $1',
@@ -45,7 +59,16 @@ export const authenticate = async (
       throw new AppError('Your account is inactive. Please contact the administrator.', 401);
     }
 
-    req.user = { id: user.id, username: user.username, role: user.role, name: user.name };
+    const scope = await loadOwnerScope(user.id, user.role);
+    req.user = {
+      id: user.id,
+      username: user.username,
+      role: user.role,
+      name: user.name,
+      ownerIds: scope.ownerIds,
+      vehicleIds: scope.vehicleIds,
+    };
+    authCache.set(user.id, { user: req.user, expires: Date.now() + AUTH_CACHE_MS });
     next();
   } catch (error) {
     next(error);

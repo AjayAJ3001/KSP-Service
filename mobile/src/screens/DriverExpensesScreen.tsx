@@ -26,10 +26,14 @@ import {
   X,
   RotateCcw,
   Building2,
+  Share2,
+  Download,
+  Printer,
 } from 'lucide-react-native';
 import { mobileExpenseService, mobileSettlementService, mobileLookupService } from '../services/mobileService';
 import { Trip, DriverExpense, Settlement } from '../types';
 import { COLORS, SPACING, RADIUS, SHADOWS } from '../constants/theme';
+import { printTripPdf, shareTripPdf, downloadTripPdf } from '../utils/pdfGenerator';
 
 export interface KrishiUnit {
   unitNumber: number; // 1 to 9
@@ -39,9 +43,42 @@ export interface KrishiUnit {
   keywords: string[];
 }
 
+const pickCleaningRate = (
+  rates: { unit_name?: string; cleaning_charge: number; party_id?: number | null; vehicle_id?: number | null }[],
+  opts: { keywords: string[]; toLocation?: string; partyId?: number; vehicleId?: number }
+) => {
+  let best: (typeof rates)[0] | undefined;
+  let bestScore = -1;
+  for (const cr of rates) {
+    if (!cr.unit_name) continue;
+    const un = cr.unit_name.toUpperCase();
+    const keywordHit = opts.keywords.some(
+      (kw) => un.includes(kw.toUpperCase()) || kw.toUpperCase().includes(un)
+    );
+    let locHit = false;
+    if (opts.toLocation) {
+      const locUpper = opts.toLocation.toUpperCase();
+      locHit =
+        locUpper.includes(un) ||
+        un.split(/[\s\-–]+/).some((word: string) => word.length > 1 && locUpper.includes(word));
+    }
+    if (!keywordHit && !locHit) continue;
+    if (cr.vehicle_id && Number(cr.vehicle_id) !== Number(opts.vehicleId || 0)) continue;
+    if (cr.party_id && Number(cr.party_id) !== Number(opts.partyId || 0)) continue;
+    let score = 1;
+    if (cr.party_id) score += 2;
+    if (cr.vehicle_id) score += 4;
+    if (score > bestScore) {
+      bestScore = score;
+      best = cr;
+    }
+  }
+  return best;
+};
+
 // Fallback defaults — actual rates are fetched from admin panel's unloading_rates table at runtime
 export const KRISHI_UNITS: KrishiUnit[] = [
-  { unitNumber: 1, name: 'SIPCOT', routeId: 7, ratePerTon: 50, keywords: ['SIPCOT'] },
+  { unitNumber: 1, name: 'SIPCOT', routeId: 7, ratePerTon: 50, keywords: ['SIPCOT', 'SPICOT'] },
   { unitNumber: 2, name: 'RGS - VAVIKADAI', routeId: 8, ratePerTon: 50, keywords: ['RGS', 'VAVIKADAI'] },
   { unitNumber: 3, name: 'GOBI - SAKTHI FEEDS', routeId: 9, ratePerTon: 50, keywords: ['GOBI', 'SAKTHI'] },
   { unitNumber: 4, name: 'PALLADAM - PPK HATCHERIES', routeId: 10, ratePerTon: 50, keywords: ['PALLADAM', 'PPK'] },
@@ -120,7 +157,9 @@ export const DriverExpensesScreen: React.FC<{ route: any; navigation: any }> = (
   const [totalExpenses, setTotalExpenses] = useState(0);
   const [advancePaid, setAdvancePaid] = useState(trip.advance_paid || 0);
   const [balanceToDriver, setBalanceToDriver] = useState(0);
+  const [isSettled, setIsSettled] = useState(trip.status === 'SETTLED');
   const [isLoading, setIsLoading] = useState(true);
+  const [pdfAction, setPdfAction] = useState<'print' | 'share' | 'download' | null>(null);
 
   // Driver's carry-forward advance balance from prior trips (fetched from drivers API)
   const [driverCarryForwardBalance, setDriverCarryForwardBalance] = useState<number>(0);
@@ -158,22 +197,22 @@ export const DriverExpensesScreen: React.FC<{ route: any; navigation: any }> = (
   const krishiUnloadingRate = activeKrishiUnit ? activeKrishiUnit.ratePerTon : 0;
   // If not Krishi party, unloading is strictly 0
   const krishiUnloadingAmount = isKrishiParty && activeKrishiUnit
-    ? Math.round(goodsWeight * krishiUnloadingRate * 100) / 100
+    ? Math.round(goodsWeight * krishiUnloadingRate)
     : 0;
 
   // Total Freight Amount from Step 1
   const totalFreight = (() => {
     const tf = parseFloat(String(trip.total_freight || 0)) || 0;
-    if (tf > 0) return tf;
+    if (tf > 0) return Math.round(tf);
     const gw = parseFloat(String(trip.goods_weight || 0)) || 0;
     const fr = parseFloat(String(trip.freight_rate || 0)) || 0;
-    return Math.round(gw * fr * 100) / 100;
+    return Math.round(gw * fr);
   })();
 
   // Driver Bata Rate Configuration (Default 15% / 0.1500 Multiplier, configurable in Admin Master)
   const [driverBataPercentage, setDriverBataPercentage] = useState<number>(15);
   const [driverBataMultiplier, setDriverBataMultiplier] = useState<number>(0.15);
-  const driverBataAmount = Math.round(totalFreight * driverBataMultiplier * 100) / 100;
+  const driverBataAmount = Math.round(totalFreight * driverBataMultiplier);
 
   // Other Expense Maximum Limit (Default 200, configurable in Admin Master)
   const [maxOtherExpenseLimit, setMaxOtherExpenseLimit] = useState<number>(200);
@@ -208,152 +247,109 @@ export const DriverExpensesScreen: React.FC<{ route: any; navigation: any }> = (
     try {
       setIsLoading(true);
 
-      // Fetch driver's carry-forward advance balance (balance from prior trips still in hand)
-      try {
-        const driversRes = await mobileLookupService.getDrivers();
-        const matchedDriver = driversRes.data.items.find((d) => d.id === trip.driver_id);
-        if (matchedDriver && Number(matchedDriver.remaining_advance_balance || 0) > 0) {
-          setDriverCarryForwardBalance(parseFloat(String(matchedDriver.remaining_advance_balance)));
-        } else {
-          setDriverCarryForwardBalance(0);
-        }
-      } catch (e) {
-        console.log('Could not fetch driver carry-forward balance:', e);
+      const [
+        driversRes,
+        res,
+        settleRes,
+        cleaningRates,
+        vRes,
+        unloadingRes,
+        bataRes,
+        limitRes,
+      ] = await Promise.all([
+        mobileLookupService.getDrivers().catch(() => null),
+        mobileExpenseService.getTripExpenses(trip.id),
+        mobileSettlementService.getSettlementByTripId(trip.id).catch(() => null),
+        isKrishiParty ? mobileLookupService.getCleaningExpenseRates().catch(() => null) : Promise.resolve(null),
+        trip.vehicle_id ? mobileLookupService.getVehicles().catch(() => null) : Promise.resolve(null),
+        isKrishiParty ? mobileLookupService.getUnloadingRates(trip.party_id).catch(() => null) : Promise.resolve(null),
+        mobileLookupService.getEffectiveDriverBataRate(trip.party_id).catch(() => null),
+        mobileLookupService.getEffectiveOtherExpenseLimit(trip.party_id).catch(() => null),
+      ]);
+
+      const matchedDriver = driversRes?.data?.items?.find((d) => d.id === trip.driver_id);
+      if (matchedDriver && Number(matchedDriver.remaining_advance_balance || 0) > 0) {
+        setDriverCarryForwardBalance(parseFloat(String(matchedDriver.remaining_advance_balance)));
+      } else {
+        setDriverCarryForwardBalance(0);
       }
 
-      const res = await mobileExpenseService.getTripExpenses(trip.id);
       const fetchedExpenses = res.data.expenses || [];
       setExpenses(fetchedExpenses);
       setTotalExpenses(res.data.total_expenses || 0);
       setAdvancePaid(res.data.advance_paid || 0);
       setBalanceToDriver(res.data.balance_to_driver || 0);
 
-      // 2. Resolve cleaning charge:
-      //    - Krishi parties → look up from master cleaning_expense_rates table
-      //    - All other parties → fixed ₹100 cleaning charge
+      if (settleRes?.data?.settlement_status === 'SETTLED') {
+        setIsSettled(true);
+      }
+
       let cleaningExp = 0;
       if (isKrishiParty) {
-        // Krishi: match from master table by unit keywords or to_location
-        try {
-          const cleaningRates = await mobileLookupService.getCleaningExpenseRates();
-          if (cleaningRates.data && cleaningRates.data.length > 0) {
-            let matched: typeof cleaningRates.data[0] | undefined;
-
-            // Priority 1: match using all keywords of the active Krishi unit
-            if (activeKrishiUnit) {
-              matched = cleaningRates.data.find((cr) =>
-                cr.unit_name &&
-                activeKrishiUnit.keywords.some((kw) =>
-                  cr.unit_name.toUpperCase().includes(kw.toUpperCase()) ||
-                  kw.toUpperCase().includes(cr.unit_name.toUpperCase())
-                )
-              );
-            }
-
-            // Priority 2: match by trip's to_location against unit_name
-            if (!matched && trip.to_location) {
-              const locUpper = trip.to_location.toUpperCase();
-              matched = cleaningRates.data.find((cr) =>
-                cr.unit_name &&
-                (locUpper.includes(cr.unit_name.toUpperCase()) ||
-                 cr.unit_name.toUpperCase().split(/[\s\-–]+/).some((word: string) => locUpper.includes(word)))
-              );
-            }
-
-            if (matched) {
-              cleaningExp = parseFloat(String(matched.cleaning_charge)) || 0;
-            }
+        if (cleaningRates?.data && cleaningRates.data.length > 0) {
+          const matched = pickCleaningRate(cleaningRates.data, {
+            keywords: activeKrishiUnit?.keywords || [],
+            toLocation: trip.to_location,
+            partyId: trip.party_id,
+            vehicleId: trip.vehicle_id,
+          });
+          if (matched) {
+            cleaningExp = parseFloat(String(matched.cleaning_charge)) || 0;
           }
-        } catch (e) {
-          console.log('Could not fetch cleaning expense rates:', e);
         }
       } else {
-        // Non-Krishi parties: fixed ₹100 cleaning charge
         cleaningExp = 100;
       }
       setTruckCleaningAmount(cleaningExp);
 
-      // 1. Resolve truck loading amount — ALWAYS from the selected truck's goodshed_loading_expense
-      //    Loading is truck-specific. cleaning_expense_rates.loading_expense is NOT used here.
       let loadingExp = 0;
-      if (trip.vehicle_id) {
-        // Primary: fetch the selected truck's loading expense directly
-        try {
-          const vRes = await mobileLookupService.getVehicles();
-          const vehicle = vRes.data.items.find((v) => v.id === trip.vehicle_id);
-          if (vehicle && vehicle.goodshed_loading_expense) {
-            loadingExp = parseFloat(String(vehicle.goodshed_loading_expense)) || 0;
-          }
-        } catch (e) {
-          console.log('Could not fetch vehicle lookup:', e);
+      if (trip.vehicle_id && vRes?.data?.items) {
+        const vehicle = vRes.data.items.find((v) => v.id === trip.vehicle_id);
+        if (vehicle && vehicle.goodshed_loading_expense) {
+          loadingExp = Math.round(parseFloat(String(vehicle.goodshed_loading_expense)) || 0);
         }
       }
-      // Fallback: trip-level loading expense (if vehicle lookup failed)
       if (loadingExp <= 0) {
-        loadingExp = parseFloat(String(trip.goodshed_loading_expense || 0)) || 0;
+        loadingExp = Math.round(parseFloat(String(trip.goodshed_loading_expense || 0)) || 0);
       }
-
       setTruckLoadingAmount(loadingExp);
 
-      // 3b. Fetch unloading rates from admin panel and override KRISHI_UNITS ratePerTon
       let updatedUnits: KrishiUnit[] = [];
-      if (isKrishiParty) {
-        try {
-          const unloadingRes = await mobileLookupService.getUnloadingRates(trip.party_id);
-          if (unloadingRes.data && unloadingRes.data.length > 0) {
-            // Merge fetched rates into KRISHI_UNITS by matching route_id or unit_name keywords
-            updatedUnits = KRISHI_UNITS.map((ku) => {
-              // Try to match by route_id first
-              let fetched = unloadingRes.data.find(
-                (ur) => ur.route_id !== null && ur.route_id === ku.routeId
-              );
-              // Fallback: match by unit_name keyword
-              if (!fetched) {
-                fetched = unloadingRes.data.find((ur) =>
-                  ur.unit_name &&
-                  ku.keywords.some((kw) =>
-                    ur.unit_name.toUpperCase().includes(kw.toUpperCase()) ||
-                    kw.toUpperCase().includes(ur.unit_name.toUpperCase())
-                  )
-                );
-              }
-              if (fetched && fetched.rate_per_ton !== undefined) {
-                return { ...ku, ratePerTon: parseFloat(String(fetched.rate_per_ton)) || ku.ratePerTon };
-              }
-              return ku;
-            });
-            setDynamicKrishiUnits(updatedUnits);
+      if (isKrishiParty && unloadingRes?.data && unloadingRes.data.length > 0) {
+        updatedUnits = KRISHI_UNITS.map((ku) => {
+          let fetched = unloadingRes.data.find(
+            (ur) => ur.route_id !== null && ur.route_id === ku.routeId
+          );
+          if (!fetched) {
+            fetched = unloadingRes.data.find((ur) =>
+              ur.unit_name &&
+              ku.keywords.some((kw) =>
+                ur.unit_name.toUpperCase().includes(kw.toUpperCase()) ||
+                kw.toUpperCase().includes(ur.unit_name.toUpperCase())
+              )
+            );
           }
-        } catch (e) {
-          console.log('Could not fetch unloading rates from admin panel, using defaults:', e);
-        }
+          if (fetched && fetched.rate_per_ton !== undefined) {
+            return { ...ku, ratePerTon: parseFloat(String(fetched.rate_per_ton)) || ku.ratePerTon };
+          }
+          return ku;
+        });
+        setDynamicKrishiUnits(updatedUnits);
       }
 
-      // 3. Resolve Driver Bata rate from master (default 15% / 0.1500)
       let bataMultiplier = 0.15;
       let bataPct = 15;
-      try {
-        const bataRes = await mobileLookupService.getEffectiveDriverBataRate(trip.party_id);
-        if (bataRes.data) {
-          bataMultiplier = parseFloat(String(bataRes.data.rate_multiplier)) || 0.15;
-          bataPct = parseFloat(String(bataRes.data.rate_percentage)) || (bataMultiplier * 100);
-        }
-      } catch (e) {
-        console.log('Using default 15% bata rate:', e);
+      if (bataRes?.data) {
+        bataMultiplier = parseFloat(String(bataRes.data.rate_multiplier)) || 0.15;
+        bataPct = parseFloat(String(bataRes.data.rate_percentage)) || (bataMultiplier * 100);
       }
       setDriverBataMultiplier(bataMultiplier);
       setDriverBataPercentage(bataPct);
 
-      const calculatedBata = Math.round(totalFreight * bataMultiplier * 100) / 100;
+      const calculatedBata = Math.round(totalFreight * bataMultiplier);
 
-      // 4. Fetch effective Other Expense Limit from Master
-      try {
-        const limitRes = await mobileLookupService.getEffectiveOtherExpenseLimit(trip.party_id);
-        if (limitRes.data && limitRes.data.max_amount !== undefined) {
-          setMaxOtherExpenseLimit(parseFloat(String(limitRes.data.max_amount)) || 200);
-        }
-      } catch (e) {
-        console.log('Using default other expense limit 200:', e);
+      if (limitRes?.data && limitRes.data.max_amount !== undefined) {
+        setMaxOtherExpenseLimit(parseFloat(String(limitRes.data.max_amount)) || 200);
       }
 
       // 4. Pre-fill Loading, Driver Bata and Cleaning Charge drafts immediately
@@ -428,7 +424,7 @@ export const DriverExpensesScreen: React.FC<{ route: any; navigation: any }> = (
           matchedUnit = unitsList.find((u) => u.keywords.some((kw) => dest.includes(kw.toUpperCase()))) || unitsList[0];
         }
         const effectiveUnloadingRate = matchedUnit?.ratePerTon || 0;
-        const unloadingAmt = isKrishiParty && matchedUnit ? Math.round(goodsWeight * effectiveUnloadingRate * 100) / 100 : 0;
+        const unloadingAmt = isKrishiParty && matchedUnit ? Math.round(goodsWeight * effectiveUnloadingRate) : 0;
 
         if (isKrishiParty && unloadingAmt > 0 && !fetchedExpenses.some((e: any) => e.expense_type === 'UNLOADING')) {
           try {
@@ -612,17 +608,17 @@ export const DriverExpensesScreen: React.FC<{ route: any; navigation: any }> = (
 
   const handleAddExpense = async (catKey: string) => {
     const input = categoryInputs[catKey] || { amount: '', description: '' };
-    let amt = parseFloat(input.amount);
+    let amt = Math.round(parseFloat(input.amount));
     let desc = input.description.trim();
 
     // If Loading and truck rate exists, strictly enforce the truck loading rate
     if (catKey === 'LOADING' && truckLoadingAmount > 0) {
-      amt = truckLoadingAmount;
+      amt = Math.round(truckLoadingAmount);
     }
 
     // If Driver Bata and calculated rate exists, strictly enforce the Driver Bata rate
     if (catKey === 'DRIVER_BATA' && driverBataAmount > 0) {
-      amt = driverBataAmount;
+      amt = Math.round(driverBataAmount);
       if (!desc) {
         desc = `Driver Bata (${driverBataPercentage}% of Total Freight ₹${totalFreight})`;
       }
@@ -630,7 +626,7 @@ export const DriverExpensesScreen: React.FC<{ route: any; navigation: any }> = (
 
     // If Cleaning Charge: enforce fixed ₹100 for non-Krishi, or master rate for Krishi
     if (catKey === 'CLEANING_CHARGE' && truckCleaningAmount > 0) {
-      amt = truckCleaningAmount;
+      amt = Math.round(truckCleaningAmount);
       if (!desc) {
         desc = isKrishiParty
           ? `Cleaning charge for ${trip.to_location || trip.lorry_number || 'truck'}`
@@ -642,13 +638,18 @@ export const DriverExpensesScreen: React.FC<{ route: any; navigation: any }> = (
     if (catKey === 'OTHER' && !isNaN(amt) && amt > maxOtherExpenseLimit) {
       Alert.alert(
         'Amount Exceeds Allowed Limit',
-        `Maximum allowed amount for Other Expenses is ₹${maxOtherExpenseLimit} (as configured in Admin Master). You entered ₹${amt}.\n\nPlease enter an amount less than or equal to ₹${maxOtherExpenseLimit}.`
+        `The other expense limit is ₹${maxOtherExpenseLimit}. Please contact admin to increase the limit.`
       );
-      setError(`Other expense amount cannot exceed the master table limit of ₹${maxOtherExpenseLimit}.`);
+      setError('Please contact admin to increase the other expense limit.');
       return;
     }
 
     if (isNaN(amt) || amt <= 0) {
+      if (catKey === 'OTHER') {
+        setError('');
+        setOpenCategory(null);
+        return;
+      }
       setError(`Please enter a valid amount > 0 for ${catKey.replace(/_/g, ' ')}.`);
       return;
     }
@@ -681,7 +682,9 @@ export const DriverExpensesScreen: React.FC<{ route: any; navigation: any }> = (
         }
       }
 
-      if (nextKey) {
+      if (nextKey === 'OTHER') {
+        setOpenCategory(null);
+      } else if (nextKey) {
         // Auto-fill LOADING amount if advancing INTO it
         if (nextKey === 'LOADING' && truckLoadingAmount > 0) {
           setCategoryInputs((inputs) => ({
@@ -773,7 +776,13 @@ export const DriverExpensesScreen: React.FC<{ route: any; navigation: any }> = (
         settlement = existRes.data;
       }
 
-      navigation.navigate('SettlementReceipt', { trip, settlement });
+      navigation.reset({
+        index: 1,
+        routes: [
+          { name: 'MainTabs' },
+          { name: 'SettlementReceipt', params: { trip, settlement, fromGenerate: true } },
+        ],
+      });
     } catch (err: any) {
       setError(err.message || 'Failed to generate settlement slip.');
     } finally {
@@ -783,7 +792,55 @@ export const DriverExpensesScreen: React.FC<{ route: any; navigation: any }> = (
 
   const formatCurrency = (val: number | string) => {
     const num = parseFloat(String(val)) || 0;
-    return `₹${num.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    return `₹${Math.round(num).toLocaleString('en-IN')}`;
+  };
+
+  const tripForPdf: Trip = {
+    ...trip,
+    advance_paid: advancePaid,
+    total_expenses: totalExpenses,
+    expense_items: expenses.map((e) => ({
+      id: e.id,
+      expense_type: e.expense_type,
+      description: e.description,
+      amount: e.amount,
+    })),
+  };
+
+  const handlePrintTrip = async () => {
+    try {
+      setPdfAction('print');
+      await printTripPdf(tripForPdf);
+    } catch (err: any) {
+      Alert.alert('Print Error', err.message || 'Could not print trip PDF.');
+    } finally {
+      setPdfAction(null);
+    }
+  };
+
+  const handleShareTrip = async () => {
+    try {
+      setPdfAction('share');
+      await shareTripPdf(tripForPdf);
+    } catch (err: any) {
+      Alert.alert('Share Error', err.message || 'Could not share trip PDF.');
+    } finally {
+      setPdfAction(null);
+    }
+  };
+
+  const handleDownloadTrip = async () => {
+    try {
+      setPdfAction('download');
+      const result = await downloadTripPdf(tripForPdf);
+      if (result.savedDirectly) {
+        Alert.alert('Download Successful', `Trip PDF saved as:\n${result.filename}`);
+      }
+    } catch (err: any) {
+      Alert.alert('Download Error', err.message || 'Could not download trip PDF.');
+    } finally {
+      setPdfAction(null);
+    }
   };
 
   const getCategoryItems = (cat: CategoryConfig) => {
@@ -791,7 +848,7 @@ export const DriverExpensesScreen: React.FC<{ route: any; navigation: any }> = (
   };
 
   const getCategoryTotal = (cat: CategoryConfig) => {
-    return getCategoryItems(cat).reduce((sum, exp) => sum + (parseFloat(String(exp.amount)) || 0), 0);
+    return Math.round(getCategoryItems(cat).reduce((sum, exp) => sum + (parseFloat(String(exp.amount)) || 0), 0));
   };
 
   if (isLoading) {
@@ -809,6 +866,36 @@ export const DriverExpensesScreen: React.FC<{ route: any; navigation: any }> = (
       <Text style={styles.screenSub}>
         Trip #{trip.id} • Driver: {trip.driver_name || 'Driver'} ({trip.lorry_number || ''})
       </Text>
+
+      <View style={styles.pdfActionRow}>
+        <TouchableOpacity
+          style={[styles.pdfActionBtn, styles.pdfPrintBtn, pdfAction === 'print' && { opacity: 0.7 }]}
+          onPress={handlePrintTrip}
+          disabled={pdfAction !== null}
+          activeOpacity={0.8}
+        >
+          {pdfAction === 'print' ? <ActivityIndicator color="#fff" size="small" /> : <Printer size={15} color="#fff" />}
+          <Text style={styles.pdfActionBtnText}>Print</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.pdfActionBtn, styles.pdfShareBtn, pdfAction === 'share' && { opacity: 0.7 }]}
+          onPress={handleShareTrip}
+          disabled={pdfAction !== null}
+          activeOpacity={0.8}
+        >
+          {pdfAction === 'share' ? <ActivityIndicator color="#fff" size="small" /> : <Share2 size={15} color="#fff" />}
+          <Text style={styles.pdfActionBtnText}>Share</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.pdfActionBtn, styles.pdfDownloadBtn, pdfAction === 'download' && { opacity: 0.7 }]}
+          onPress={handleDownloadTrip}
+          disabled={pdfAction !== null}
+          activeOpacity={0.8}
+        >
+          {pdfAction === 'download' ? <ActivityIndicator color="#fff" size="small" /> : <Download size={15} color="#fff" />}
+          <Text style={styles.pdfActionBtnText}>Download</Text>
+        </TouchableOpacity>
+      </View>
 
       {error ? (
         <View style={styles.errorBox}>
@@ -853,7 +940,7 @@ export const DriverExpensesScreen: React.FC<{ route: any; navigation: any }> = (
               {formatCurrency(driverCarryForwardBalance)}
             </Text>
             <Text style={{ fontSize: 11, color: '#3b82f6', marginTop: 2 }}>
-              Driver already holds this from prior trips — deducted during settlement
+              Driver already holds this from previous trips — deducted during settlement
             </Text>
           </View>
           <View
@@ -873,30 +960,84 @@ export const DriverExpensesScreen: React.FC<{ route: any; navigation: any }> = (
       <View
         style={[
           styles.balanceBanner,
-          balanceToDriver >= 0
-            ? styles.balanceBannerPositive
-            : { backgroundColor: '#eff6ff', borderColor: '#93c5fd' },
+          isSettled
+            ? { backgroundColor: '#f0fdf4', borderColor: '#86efac', borderWidth: 1.5 }
+            : balanceToDriver > 0
+            ? { backgroundColor: '#fef2f2', borderColor: '#fca5a5', borderWidth: 1.5 }
+            : balanceToDriver < 0
+            ? { backgroundColor: '#f0fdf4', borderColor: '#86efac', borderWidth: 1.5 }
+            : { backgroundColor: '#f8fafc', borderColor: '#cbd5e1', borderWidth: 1 },
         ]}
       >
-        <View style={{ flex: 1 }}>
+        <View style={{ flex: 1, paddingRight: 8 }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+            <Text
+              style={[
+                styles.balanceBannerTitle,
+                isSettled
+                  ? { color: '#15803d' }
+                  : balanceToDriver > 0
+                  ? { color: '#dc2626' }
+                  : balanceToDriver < 0
+                  ? { color: '#15803d' }
+                  : { color: '#64748b' },
+              ]}
+            >
+              {isSettled
+                ? '✓ SETTLED — BALANCE PAID TO DRIVER'
+                : balanceToDriver > 0
+                ? 'BALANCE NEED TO PAY TO DRIVER'
+                : balanceToDriver < 0
+                ? 'REMAINING ADVANCE IN DRIVER HAND'
+                : 'ALL SETTLED (₹0 BALANCE)'}
+            </Text>
+            {isSettled ? (
+              <View style={{ backgroundColor: '#dcfce7', borderColor: '#86efac', borderWidth: 1, paddingHorizontal: 6, paddingVertical: 1, borderRadius: 4 }}>
+                <Text style={{ color: '#15803d', fontSize: 10, fontWeight: '800' }}>SETTLED</Text>
+              </View>
+            ) : balanceToDriver > 0 ? (
+              <View style={{ backgroundColor: '#fee2e2', borderColor: '#fca5a5', borderWidth: 1, paddingHorizontal: 6, paddingVertical: 1, borderRadius: 4 }}>
+                <Text style={{ color: '#dc2626', fontSize: 10, fontWeight: '800' }}>NEED TO PAY</Text>
+              </View>
+            ) : balanceToDriver < 0 ? (
+              <View style={{ backgroundColor: '#dcfce7', borderColor: '#86efac', borderWidth: 1, paddingHorizontal: 6, paddingVertical: 1, borderRadius: 4 }}>
+                <Text style={{ color: '#15803d', fontSize: 10, fontWeight: '800' }}>IN HAND</Text>
+              </View>
+            ) : null}
+          </View>
           <Text
             style={[
-              styles.balanceBannerTitle,
-              balanceToDriver < 0 && { color: '#1d4ed8' },
+              styles.balanceBannerSub,
+              isSettled
+                ? { color: '#166534' }
+                : balanceToDriver > 0
+                ? { color: '#991b1b' }
+                : balanceToDriver < 0
+                ? { color: '#166534' }
+                : { color: '#64748b' },
             ]}
           >
-            {balanceToDriver >= 0 ? 'BALANCE TO PAY DRIVER' : 'REMAINING ADVANCE IN DRIVER HAND'}
-          </Text>
-          <Text style={styles.balanceBannerSub}>
-            {balanceToDriver >= 0
-              ? `Expenses ${formatCurrency(totalExpenses)} - Advance ${formatCurrency(advancePaid)}${driverCarryForwardBalance > 0 ? ` - Prior Balance ${formatCurrency(driverCarryForwardBalance)}` : ''}`
-              : `Advance ${formatCurrency(advancePaid)} - Expenses ${formatCurrency(totalExpenses)} (Cash in driver hand)`}
+            {isSettled
+              ? `Trip settlement completed. Balance of ${formatCurrency(Math.abs(balanceToDriver))} settled with driver.`
+              : balanceToDriver > 0
+              ? `Expenses ${formatCurrency(totalExpenses)} - Advance ${formatCurrency(advancePaid)}${driverCarryForwardBalance > 0 ? ` - Previous Trip Balance ${formatCurrency(driverCarryForwardBalance)}` : ''} = Admin / Manager needs to pay ${formatCurrency(balanceToDriver)} to driver`
+              : balanceToDriver < 0
+              ? `Advance ${formatCurrency(advancePaid)} - Expenses ${formatCurrency(totalExpenses)} = ${formatCurrency(Math.abs(balanceToDriver))} cash remaining in driver hand for next trips`
+              : 'Advance received and trip expenses are completely balanced.'}
           </Text>
         </View>
         <Text
           style={[
             styles.balanceBannerAmount,
-            { color: balanceToDriver >= 0 ? COLORS.successDark : '#1d4ed8' },
+            {
+              color: isSettled
+                ? '#15803d'
+                : balanceToDriver > 0
+                ? '#dc2626'
+                : balanceToDriver < 0
+                ? '#15803d'
+                : '#64748b',
+            },
           ]}
         >
           {formatCurrency(Math.abs(balanceToDriver))}
@@ -951,16 +1092,12 @@ export const DriverExpensesScreen: React.FC<{ route: any; navigation: any }> = (
                       </Text>
                     ) : (
                       <Text style={[styles.autoRateHintText, { color: COLORS.textMuted }]}>
-                        Not applicable (Krishi only)
+                        Not applicable
                       </Text>
                     )
                   ) : cat.key === 'DRIVER_BATA' && driverBataAmount > 0 ? (
                     <Text style={styles.autoRateHintText}>
                       Auto ({driverBataPercentage}% of Freight): {formatCurrency(driverBataAmount)}
-                    </Text>
-                  ) : cat.key === 'OTHER' ? (
-                    <Text style={[styles.autoRateHintText, { color: COLORS.textMuted }]}>
-                      Manual (Max: {formatCurrency(maxOtherExpenseLimit)})
                     </Text>
                   ) : null}
                 </View>
@@ -988,10 +1125,6 @@ export const DriverExpensesScreen: React.FC<{ route: any; navigation: any }> = (
                 ) : cat.key === 'DRIVER_BATA' && driverBataAmount > 0 ? (
                   <View style={styles.totalBadgeAuto}>
                     <Text style={styles.totalBadgeAutoText}>Rate: {formatCurrency(driverBataAmount)}</Text>
-                  </View>
-                ) : cat.key === 'OTHER' ? (
-                  <View style={[styles.totalBadgeAuto, { backgroundColor: '#fef3c7', borderColor: '#fde68a' }]}>
-                    <Text style={[styles.totalBadgeAutoText, { color: '#b45309' }]}>Max: {formatCurrency(maxOtherExpenseLimit)}</Text>
                   </View>
                 ) : (
                   <View style={styles.totalBadgeMuted}>
@@ -1186,10 +1319,10 @@ export const DriverExpensesScreen: React.FC<{ route: any; navigation: any }> = (
                       <AlertCircle size={20} color={COLORS.textMuted} />
                       <View style={{ flex: 1 }}>
                         <Text style={styles.nonKrishiNoticeTitle}>
-                          Unloading is only for Krishi Nutrition Company units
+                          Not applicable
                         </Text>
                         <Text style={styles.nonKrishiNoticeSub}>
-                          This trip is for "{trip.party_name || 'other party'}". Unloading charges are only applicable for Krishi parties and their 9 units.
+                          Unloading is not applicable for this party.
                         </Text>
                       </View>
                     </View>
@@ -1285,13 +1418,13 @@ export const DriverExpensesScreen: React.FC<{ route: any; navigation: any }> = (
                     {/* OTHER category: manual entry with SAVE ENTRY button */}
                     {cat.key === 'OTHER' && (
                       <>
-                        <Text style={styles.entryFormTitle}>+ Add {cat.shortName} Entry</Text>
+                        <Text style={styles.entryFormTitle}>+ Add {cat.shortName}</Text>
                         <View style={styles.formGroup}>
                           <View style={styles.inputLabelRow}>
-                            <Text style={styles.inputLabel}>Amount (₹) *</Text>
+                            <Text style={styles.inputLabel}>Amount (₹)</Text>
                             <View style={[styles.lockedBadgeSmall, { backgroundColor: '#fef3c7', borderColor: '#fde68a' }]}>
                               <Text style={[styles.lockedBadgeSmallText, { color: '#b45309' }]}>
-                                📌 Max Limit: ₹{maxOtherExpenseLimit}
+                                Max: ₹{maxOtherExpenseLimit}
                               </Text>
                             </View>
                           </View>
@@ -1304,7 +1437,7 @@ export const DriverExpensesScreen: React.FC<{ route: any; navigation: any }> = (
                                 backgroundColor: '#fff1f2',
                               },
                             ]}
-                            placeholder="e.g. 200"
+                            placeholder="0"
                             placeholderTextColor={COLORS.textLight}
                             keyboardType="decimal-pad"
                             value={currentDraft.amount}
@@ -1314,18 +1447,7 @@ export const DriverExpensesScreen: React.FC<{ route: any; navigation: any }> = (
                               if (!isNaN(val) && val > maxOtherExpenseLimit) {
                                 Alert.alert(
                                   'Amount Exceeds Allowed Limit',
-                                  `Only allowed up to the master table value of ₹${maxOtherExpenseLimit}. You entered ₹${val}.\n\nPlease enter an amount less than or equal to ₹${maxOtherExpenseLimit}.`,
-                                  [
-                                    {
-                                      text: 'Set to Max Limit',
-                                      onPress: () => handleInputChange('OTHER', 'amount', String(maxOtherExpenseLimit)),
-                                    },
-                                    {
-                                      text: 'Clear',
-                                      style: 'destructive',
-                                      onPress: () => handleInputChange('OTHER', 'amount', ''),
-                                    },
-                                  ]
+                                  `The other expense limit is ₹${maxOtherExpenseLimit}. Please contact admin to increase the limit.`
                                 );
                               }
                             }}
@@ -1340,8 +1462,8 @@ export const DriverExpensesScreen: React.FC<{ route: any; navigation: any }> = (
                             ]}
                           >
                             {parseFloat(currentDraft.amount) > maxOtherExpenseLimit
-                              ? `⚠️ Amount ₹${currentDraft.amount} exceeds allowed limit of ₹${maxOtherExpenseLimit} (Admin Master).`
-                              : `Type amount manually. Maximum allowed limit is ₹${maxOtherExpenseLimit} (configured in Admin Master).`}
+                              ? `Amount exceeds the limit of ₹${maxOtherExpenseLimit}. Contact admin to increase the limit.`
+                              : `Maximum allowed limit is ₹${maxOtherExpenseLimit}.`}
                           </Text>
                         </View>
 
@@ -1368,9 +1490,12 @@ export const DriverExpensesScreen: React.FC<{ route: any; navigation: any }> = (
                           </TouchableOpacity>
 
                           <TouchableOpacity
-                            style={[styles.addEntryBtn, isAdding && { opacity: 0.7 }]}
+                            style={[
+                              styles.addEntryBtn,
+                              (isAdding || !currentDraft.amount || parseFloat(currentDraft.amount) <= 0) && { opacity: 0.45 },
+                            ]}
                             onPress={() => handleAddExpense('OTHER')}
-                            disabled={isAdding}
+                            disabled={isAdding || !currentDraft.amount || parseFloat(currentDraft.amount) <= 0}
                             activeOpacity={0.8}
                           >
                             {isAdding ? (
@@ -1448,7 +1573,30 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: COLORS.textMuted,
     marginTop: 2,
+    marginBottom: SPACING.sm,
+  },
+  pdfActionRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
     marginBottom: SPACING.md,
+  },
+  pdfActionBtn: {
+    flex: 1,
+    height: 40,
+    borderRadius: RADIUS.md,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+  },
+  pdfPrintBtn: { backgroundColor: '#1d4ed8' },
+  pdfShareBtn: { backgroundColor: '#047857' },
+  pdfDownloadBtn: { backgroundColor: '#0f172a' },
+  pdfActionBtnText: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: '800',
   },
   errorBox: {
     flexDirection: 'row',
@@ -1567,6 +1715,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 12,
     flex: 1,
+    minWidth: 0,
   },
   categoryIconBadge: {
     width: 36,
@@ -1603,6 +1752,10 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
+    flexShrink: 0,
+    maxWidth: '48%',
+    flexWrap: 'wrap',
+    justifyContent: 'flex-end',
   },
   totalBadgeActive: {
     backgroundColor: COLORS.successLight,

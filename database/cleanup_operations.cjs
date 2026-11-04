@@ -31,7 +31,7 @@ async function cleanupOperations() {
     console.log('Cleaning up operations-related audit logs...');
     const auditRes = await client.query(`
       DELETE FROM audit_logs 
-      WHERE module IN ('TRIPS', 'PAYMENTS', 'SETTLEMENTS', 'TRUCK_ADVANCES', 'DRIVER_ADVANCES', 'OWNER_ADVANCES');
+      WHERE module IN ('TRIPS', 'PAYMENTS', 'SETTLEMENTS', 'TRUCK_ADVANCES', 'DRIVER_ADVANCES', 'OWNER_ADVANCES', 'EXPENSES');
     `);
     console.log(`Deleted ${auditRes.rowCount} operational audit logs.`);
 

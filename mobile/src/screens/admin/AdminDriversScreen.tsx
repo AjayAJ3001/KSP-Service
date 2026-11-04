@@ -28,8 +28,12 @@ import {
   Sparkles,
   ScanLine,
   ChevronDown,
+  Printer,
+  Download,
+  RotateCcw,
 } from 'lucide-react-native';
 import * as ImagePicker from 'expo-image-picker';
+import { printMastersPdf, downloadMastersPdf } from '../../utils/pdfGenerator';
 import { adminDriverService } from '../../services/adminService';
 import { Driver } from '../../types';
 import { COLORS, SPACING, RADIUS, SHADOWS } from '../../constants/theme';
@@ -58,7 +62,7 @@ const pickImage = async (): Promise<string | null> => {
     return null;
   }
   const result = await ImagePicker.launchImageLibraryAsync({
-    mediaTypes: ImagePicker.MediaTypeOptions.Images,
+    mediaTypes: ['images'],
     allowsEditing: false,
     quality: 0.85,
     base64: true,
@@ -162,6 +166,14 @@ export const AdminDriversScreen: React.FC<{ navigation: any }> = ({ navigation }
   const [search, setSearch] = useState('');
   const [filterType, setFilterType] = useState<DriverFilter>('ALL');
   const [isLoading, setIsLoading] = useState(false);
+  const [pdfLoading, setPdfLoading] = useState<'print' | 'download' | null>(null);
+
+  const hasActiveFilters = Boolean(search || filterType !== 'ALL');
+
+  const handleClearAllFilters = () => {
+    setSearch('');
+    setFilterType('ALL');
+  };
 
   // Modal state
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -382,6 +394,41 @@ export const AdminDriversScreen: React.FC<{ navigation: any }> = ({ navigation }
     ]);
   };
 
+  const handlePrintPdf = async () => {
+    try {
+      setPdfLoading('print');
+      await printMastersPdf({
+        tab: 'DRIVERS',
+        tabLabel: 'Drivers Directory',
+        drivers: filteredDrivers,
+      });
+    } catch (err: any) {
+      console.error('Print drivers PDF failed', err);
+      Alert.alert('Print Error', err.message || 'Failed to print drivers.');
+    } finally {
+      setPdfLoading(null);
+    }
+  };
+
+  const handleDownloadPdf = async () => {
+    try {
+      setPdfLoading('download');
+      const result = await downloadMastersPdf({
+        tab: 'DRIVERS',
+        tabLabel: 'Drivers Directory',
+        drivers: filteredDrivers,
+      });
+      if (result.success && result.savedDirectly) {
+        Alert.alert('PDF Saved', `Drivers directory saved:\n${result.filename}`);
+      }
+    } catch (err: any) {
+      console.error('Download drivers PDF failed', err);
+      Alert.alert('Download Error', err.message || 'Failed to download PDF.');
+    } finally {
+      setPdfLoading(null);
+    }
+  };
+
   // ─── Render ─────────────────────────────────────────────────────────────────
   return (
     <View style={styles.container}>
@@ -403,29 +450,74 @@ export const AdminDriversScreen: React.FC<{ navigation: any }> = ({ navigation }
               </TouchableOpacity>
             ) : null}
           </View>
+
+          <TouchableOpacity
+            style={[styles.pdfBtn, styles.printBtn, pdfLoading === 'print' && { opacity: 0.7 }]}
+            onPress={handlePrintPdf}
+            disabled={pdfLoading !== null || isLoading}
+            activeOpacity={0.8}
+          >
+            {pdfLoading === 'print' ? (
+              <ActivityIndicator size="small" color={COLORS.white} />
+            ) : (
+              <>
+                <Printer size={13} color={COLORS.white} />
+                <Text style={styles.pdfBtnText}>Print</Text>
+              </>
+            )}
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[styles.pdfBtn, styles.downloadBtn, pdfLoading === 'download' && { opacity: 0.7 }]}
+            onPress={handleDownloadPdf}
+            disabled={pdfLoading !== null || isLoading}
+            activeOpacity={0.8}
+          >
+            {pdfLoading === 'download' ? (
+              <ActivityIndicator size="small" color={COLORS.white} />
+            ) : (
+              <>
+                <Download size={13} color={COLORS.white} />
+                <Text style={styles.pdfBtnText}>PDF</Text>
+              </>
+            )}
+          </TouchableOpacity>
+
           <TouchableOpacity style={styles.addBtn} onPress={openAddModal}>
             <Plus size={16} color={COLORS.white} />
             <Text style={styles.addBtnText}>Add</Text>
           </TouchableOpacity>
         </View>
 
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.filterPills}>
-          {(['ALL', 'EXPIRING', 'ACTIVE', 'INACTIVE'] as DriverFilter[]).map(f => (
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={[styles.filterPills, { flex: 1 }]}>
+            {(['ALL', 'EXPIRING', 'ACTIVE', 'INACTIVE'] as DriverFilter[]).map(f => (
+              <TouchableOpacity
+                key={f}
+                style={[styles.pill, filterType === f && (f === 'EXPIRING' ? styles.pillExpiring : styles.pillActive)]}
+                onPress={() => setFilterType(filterType === f ? 'ALL' : f)}
+              >
+                {f === 'EXPIRING' && <AlertTriangle size={12} color={filterType === 'EXPIRING' ? '#b91c1c' : '#ea580c'} />}
+                <Text style={[
+                  styles.pillText,
+                  filterType === f && (f === 'EXPIRING' ? { color: '#b91c1c', fontWeight: '800' } : styles.pillTextActive)
+                ]}>
+                  {f === 'ALL' ? `All (${drivers.length})` : f === 'EXPIRING' ? `Expiring <30d (${expiringCount})` : f}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
+          {hasActiveFilters && (
             <TouchableOpacity
-              key={f}
-              style={[styles.pill, filterType === f && (f === 'EXPIRING' ? styles.pillExpiring : styles.pillActive)]}
-              onPress={() => setFilterType(f)}
+              style={styles.clearFiltersBtn}
+              onPress={handleClearAllFilters}
+              activeOpacity={0.7}
             >
-              {f === 'EXPIRING' && <AlertTriangle size={12} color={filterType === 'EXPIRING' ? '#b91c1c' : '#ea580c'} />}
-              <Text style={[
-                styles.pillText,
-                filterType === f && (f === 'EXPIRING' ? { color: '#b91c1c', fontWeight: '800' } : styles.pillTextActive)
-              ]}>
-                {f === 'ALL' ? `All (${drivers.length})` : f === 'EXPIRING' ? `Expiring <30d (${expiringCount})` : f}
-              </Text>
+              <RotateCcw size={11} color="#dc2626" />
+              <Text style={styles.clearFiltersBtnText}>Clear</Text>
             </TouchableOpacity>
-          ))}
-        </ScrollView>
+          )}
+        </View>
       </View>
 
       {/* Driver List */}
@@ -795,7 +887,7 @@ const styles = StyleSheet.create({
   pillTextActive: { color: COLORS.white, fontWeight: '700' },
   centerBox: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 12, padding: 40 },
   centerText: { fontSize: 15, color: COLORS.textMuted, fontWeight: '600' },
-  listContainer: { padding: SPACING.md, gap: SPACING.md },
+  listContainer: { padding: SPACING.md, gap: 8 },
   driverCard: { backgroundColor: COLORS.white, borderRadius: RADIUS.lg, padding: SPACING.md, ...SHADOWS.sm },
   cardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 8 },
   cardLeft: { flexDirection: 'row', gap: 10, alignItems: 'flex-start', flex: 1 },
@@ -850,6 +942,41 @@ const styles = StyleSheet.create({
   nextBtnText: { fontSize: 13, fontWeight: '700', color: '#1d4ed8' },
   saveBtn: { paddingHorizontal: 22, paddingVertical: 10, borderRadius: RADIUS.md, backgroundColor: COLORS.accent, alignItems: 'center', justifyContent: 'center', minWidth: 110 },
   saveBtnText: { fontSize: 14, fontWeight: '800', color: COLORS.white },
+  pdfBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 9,
+    paddingVertical: 7,
+    borderRadius: RADIUS.md,
+  },
+  printBtn: {
+    backgroundColor: '#0284c7',
+  },
+  downloadBtn: {
+    backgroundColor: '#059669',
+  },
+  pdfBtnText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: COLORS.white,
+  },
+  clearFiltersBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: '#fef2f2',
+    borderWidth: 1,
+    borderColor: '#fca5a5',
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+    borderRadius: RADIUS.md,
+  },
+  clearFiltersBtnText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#dc2626',
+  },
 });
 
 const docStyles = StyleSheet.create({

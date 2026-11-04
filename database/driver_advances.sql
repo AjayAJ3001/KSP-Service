@@ -19,3 +19,4 @@ CREATE INDEX IF NOT EXISTS idx_driver_advances_driver ON driver_advances(driver_
 CREATE INDEX IF NOT EXISTS idx_driver_advances_manager ON driver_advances(manager_id);
 CREATE INDEX IF NOT EXISTS idx_driver_advances_vehicle ON driver_advances(vehicle_id);
 CREATE INDEX IF NOT EXISTS idx_driver_advances_date ON driver_advances(advance_date);
+CREATE INDEX IF NOT EXISTS idx_driver_advances_trip ON driver_advances(trip_id);

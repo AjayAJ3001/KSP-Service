@@ -499,7 +499,7 @@ const styles = StyleSheet.create({
   },
   listContainer: {
     padding: SPACING.md,
-    gap: 10,
+    gap: 8,
     paddingBottom: 40,
   },
   logCard: {

@@ -1,17 +1,19 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
+import { useDebouncedValue } from '../hooks/useDebouncedValue';
 import * as XLSX from 'xlsx';
 import {
   CheckCircle, Printer, Eye, PlusCircle, Trash2,
   Banknote, Smartphone, Clock, IndianRupee, History, Download, Share2,
   Calendar, RefreshCw, FileSpreadsheet, Database, Search, Loader2,
 } from 'lucide-react';
-import { settlementService, tripService, driverService, vehicleService, partyService } from '../services/adminService';
-import { Settlement, Trip, DriverSettlementPayment, Driver, Vehicle, Party } from '../types';
+import { settlementService, tripService, driverService, vehicleService, ownerService, partyService } from '../services/adminService';
+import { Settlement, Trip, DriverSettlementPayment, Driver, Vehicle, Owner, Party } from '../types';
 import { DataTable, Column } from '../components/Common/DataTable';
 import { Modal } from '../components/Common/Modal';
 import { StatusBadge } from '../components/Common/StatusBadge';
 import { formatDateDMY } from '../utils/dateUtils';
 import { DateField } from '../components/Common/DateField';
+import { PRINT_BRAND_CSS, printBrandLockup } from '../utils/printBrand';
 
 function getThisWeekRange() {
   const today = new Date();
@@ -36,6 +38,7 @@ export const SettlementsPage: React.FC = () => {
   const [statusFilter, setStatusFilter] = useState('');
   const [driverFilter, setDriverFilter] = useState('');
   const [vehicleFilter, setVehicleFilter] = useState('');
+  const [ownerFilter, setOwnerFilter] = useState('');
   const [partyFilter, setPartyFilter] = useState('');
   const [fromDate, setFromDate] = useState('');
   const [toDate, setToDate] = useState('');
@@ -44,6 +47,7 @@ export const SettlementsPage: React.FC = () => {
   // Lookups
   const [drivers, setDrivers] = useState<Driver[]>([]);
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
+  const [owners, setOwners] = useState<Owner[]>([]);
   const [parties, setParties] = useState<Party[]>([]);
 
   // Modals
@@ -72,6 +76,7 @@ export const SettlementsPage: React.FC = () => {
 
   // Search & Excel Export with Local Storage tracking
   const [searchTerm, setSearchTerm] = useState('');
+  const debouncedSearch = useDebouncedValue(searchTerm, 400);
   const [isExportingExcel, setIsExportingExcel] = useState(false);
   const [isPrintingMaster, setIsPrintingMaster] = useState(false);
   const [excelNotice, setExcelNotice] = useState<string | null>(null);
@@ -81,19 +86,26 @@ export const SettlementsPage: React.FC = () => {
   const thisWeek = getThisWeekRange();
   const isThisWeekActive = fromDate === thisWeek.from && toDate === thisWeek.to;
 
+  const filteredVehicles = useMemo(() => {
+    if (!ownerFilter) return vehicles;
+    return vehicles.filter((v) => String(v.owner_id) === String(ownerFilter));
+  }, [vehicles, ownerFilter]);
+
   useEffect(() => {
     loadLookups();
   }, []);
 
   const loadLookups = async () => {
     try {
-      const [dRes, vRes, pRes] = await Promise.all([
+      const [dRes, vRes, oRes, pRes] = await Promise.all([
         driverService.getDrivers({ limit: 200 }),
         vehicleService.getVehicles({ limit: 200 }),
+        ownerService.getOwners({ limit: 200 }),
         partyService.getParties({ limit: 200 }),
       ]);
       setDrivers(dRes.data.items || (Array.isArray(dRes.data) ? dRes.data : []));
       setVehicles(vRes.data.items || (Array.isArray(vRes.data) ? vRes.data : []));
+      setOwners(oRes.data.items || (Array.isArray(oRes.data) ? oRes.data : []));
       setParties(pRes.data.items || (Array.isArray(pRes.data) ? pRes.data : []));
     } catch (err) {
       console.error('Failed to load lookups', err);
@@ -102,8 +114,11 @@ export const SettlementsPage: React.FC = () => {
 
   useEffect(() => {
     loadSettlements();
+  }, [page, statusFilter, driverFilter, vehicleFilter, ownerFilter, partyFilter, fromDate, toDate, debouncedSearch]);
+
+  useEffect(() => {
     loadUnsettledTrips();
-  }, [page, statusFilter, driverFilter, vehicleFilter, partyFilter, fromDate, toDate, searchTerm]);
+  }, [statusFilter, driverFilter, vehicleFilter, ownerFilter, partyFilter, fromDate, toDate]);
 
   const loadSettlements = async () => {
     try {
@@ -114,10 +129,11 @@ export const SettlementsPage: React.FC = () => {
         status: statusFilter || undefined,
         driver_id: driverFilter || undefined,
         vehicle_id: vehicleFilter || undefined,
+        owner_id: ownerFilter || undefined,
         party_id: partyFilter || undefined,
         from_date: fromDate || undefined,
         to_date: toDate || undefined,
-        search: searchTerm || undefined,
+        search: debouncedSearch || undefined,
       });
       setSettlements(res.data.items);
       setTotal(res.data.total);
@@ -140,14 +156,19 @@ export const SettlementsPage: React.FC = () => {
   };
 
   const resetFilters = () => {
+    const hadFilter = Boolean(fromDate || toDate || statusFilter || driverFilter || vehicleFilter || ownerFilter || partyFilter || searchTerm || page !== 1);
     setFromDate('');
     setToDate('');
     setStatusFilter('');
     setDriverFilter('');
     setVehicleFilter('');
+    setOwnerFilter('');
     setPartyFilter('');
     setSearchTerm('');
     setPage(1);
+    if (!hadFilter) {
+      loadSettlements();
+    }
   };
 
   // ── Download Excel Option & Save Record into Local Storage ──
@@ -161,6 +182,7 @@ export const SettlementsPage: React.FC = () => {
         status: statusFilter || undefined,
         driver_id: driverFilter || undefined,
         vehicle_id: vehicleFilter || undefined,
+        owner_id: ownerFilter || undefined,
         party_id: partyFilter || undefined,
         from_date: fromDate || undefined,
         to_date: toDate || undefined,
@@ -177,7 +199,11 @@ export const SettlementsPage: React.FC = () => {
       const totalCount = items.length;
       const totalWeight = items.reduce((sum, s) => sum + Number(s.goods_weight || 0), 0);
       const totalFreight = items.reduce((sum, s) => sum + Number(s.total_freight || 0), 0);
-      const totalAdvance = items.reduce((sum, s) => sum + Number(s.advance_paid || 0), 0);
+      const totalAdvance = items.reduce((sum, s) => {
+          const manager = Number(s.manager_advance ?? s.initial_trip_advance ?? 0);
+          const leftover = Number(s.owner_leftover_used ?? 0);
+          return sum + (manager > 0 ? manager : leftover);
+        }, 0);
       const totalExpenses = items.reduce((sum, s) => sum + Number(s.total_expenses || 0), 0);
       const totalBalance = items.reduce((sum, s) => sum + Number(s.balance_to_driver || 0), 0);
       const totalPaid = items.reduce((sum, s) => sum + Number(s.paid_amount || 0), 0);
@@ -188,6 +214,7 @@ export const SettlementsPage: React.FC = () => {
         'Trip ID': `TRIP-${s.trip_id}`,
         'Trip Date': s.trip_date ? s.trip_date.slice(0, 10) : '-',
         'Lorry Number': s.lorry_number || '-',
+        'Truck Owner': s.owner_name || '-',
         'Driver Name': s.driver_name || '-',
         'Driver Mobile': s.driver_mobile || '-',
         'Party Name': s.party_name || '-',
@@ -196,10 +223,12 @@ export const SettlementsPage: React.FC = () => {
         'Goods Weight (MT)': Number(s.goods_weight || 0),
         'Freight Rate (Rs)': Number(s.freight_rate || 0),
         'Total Freight (Rs)': Number(s.total_freight || 0),
-        'Advance Paid (Rs)': Number(s.advance_paid || 0),
+        'Advance Paid (Rs)': (Number(s.manager_advance ?? s.initial_trip_advance ?? 0) > 0
+          ? Number(s.manager_advance ?? s.initial_trip_advance ?? 0)
+          : Number(s.owner_leftover_used ?? 0)),
         'Prior Advance in Hand (Rs)': Number(s.previous_driver_balance || 0),
         'Total Expenses (Rs)': Number(s.total_expenses || 0),
-        'Already in Hand Taken (Rs)': Number(s.previous_driver_balance || 0) > 0 ? Math.min(Number(s.previous_driver_balance || 0), Math.max(0, Number(s.total_expenses || 0) - Number(s.advance_paid || 0))) : 0,
+        'Already in Hand Taken (Rs)': Number(s.previous_driver_balance || 0) > 0 ? Math.min(Number(s.previous_driver_balance || 0), Math.max(0, Number(s.total_expenses || 0) - Number(s.initial_trip_advance ?? 0))) : 0,
         'Balance Need to Pay (Rs)': (s.net_balance_to_driver !== undefined && Number(s.net_balance_to_driver) > 0) ? Number(s.net_balance_to_driver) : Number(s.balance_to_driver || 0),
         'Balance in Driver Hand (Rs)': (s.net_balance_to_driver !== undefined && Number(s.net_balance_to_driver) < 0) ? Math.abs(Number(s.net_balance_to_driver)) : 0,
         'Settlement Status': s.settlement_status,
@@ -218,6 +247,7 @@ export const SettlementsPage: React.FC = () => {
         'Trip ID': '',
         'Trip Date': '',
         'Lorry Number': '',
+        'Truck Owner': '',
         'Driver Name': '',
         'Driver Mobile': '',
         'Party Name': '',
@@ -245,6 +275,7 @@ export const SettlementsPage: React.FC = () => {
         'Trip ID': `Total Count: ${totalCount}`,
         'Trip Date': `Count: ${totalCount} Settlements`,
         'Lorry Number': `Count: ${totalCount}`,
+        'Truck Owner': '',
         'Driver Name': '',
         'Driver Mobile': '',
         'Party Name': '',
@@ -275,6 +306,7 @@ export const SettlementsPage: React.FC = () => {
         { wch: 18 }, // Trip ID
         { wch: 22 }, // Trip Date / Count
         { wch: 16 }, // Lorry Number
+        { wch: 20 }, // Truck Owner
         { wch: 22 }, // Driver Name
         { wch: 15 }, // Driver Mobile
         { wch: 24 }, // Party Name
@@ -302,6 +334,7 @@ export const SettlementsPage: React.FC = () => {
 
       // Create Executive Summary Sheet
       const selectedTruck = vehicleFilter ? vehicles.find(v => String(v.id) === String(vehicleFilter))?.lorry_number : 'All';
+      const selectedOwner = ownerFilter ? owners.find(o => String(o.id) === String(ownerFilter))?.name : 'All';
       const selectedDriver = driverFilter ? drivers.find(d => String(d.id) === String(driverFilter))?.name : 'All';
       const selectedParty = partyFilter ? parties.find(p => String(p.id) === String(partyFilter))?.name : 'All';
 
@@ -315,6 +348,7 @@ export const SettlementsPage: React.FC = () => {
         { 'Summary Field': 'Total Paid Amount', 'Value': `₹${totalPaid.toLocaleString('en-IN', { minimumFractionDigits: 2 })}` },
         { 'Summary Field': 'Status Filter', 'Value': statusFilter || 'All' },
         { 'Summary Field': 'Lorry Filter', 'Value': selectedTruck || 'All' },
+        { 'Summary Field': 'Truck Owner Filter', 'Value': selectedOwner || 'All' },
         { 'Summary Field': 'Driver Filter', 'Value': selectedDriver || 'All' },
         { 'Summary Field': 'Party Filter', 'Value': selectedParty || 'All' },
         { 'Summary Field': 'From Date', 'Value': fromDate ? formatDateDMY(fromDate) : 'All' },
@@ -392,6 +426,7 @@ export const SettlementsPage: React.FC = () => {
         status: statusFilter || undefined,
         driver_id: driverFilter || undefined,
         vehicle_id: vehicleFilter || undefined,
+        owner_id: ownerFilter || undefined,
         party_id: partyFilter || undefined,
         from_date: fromDate || undefined,
         to_date: toDate || undefined,
@@ -408,12 +443,18 @@ export const SettlementsPage: React.FC = () => {
       const totalCount = items.length;
       const totalWeight = items.reduce((sum, s) => sum + Number(s.goods_weight || 0), 0);
       const totalFreight = items.reduce((sum, s) => sum + Number(s.total_freight || 0), 0);
-      const totalAdvance = items.reduce((sum, s) => sum + Number(s.advance_paid || 0), 0);
+      const totalAdvance = items.reduce((sum, s) => {
+          const manager = Number(s.manager_advance ?? s.initial_trip_advance ?? 0);
+          const leftover = Number(s.owner_leftover_used ?? 0);
+          return sum + (manager > 0 ? manager : leftover);
+        }, 0);
       const totalExpenses = items.reduce((sum, s) => sum + Number(s.total_expenses || 0), 0);
-      const totalBalance = items.reduce((sum, s) => sum + Number(s.balance_to_driver || 0), 0);
+      const totalNeedToPay = items.reduce((sum, s) => sum + settlementOutcome(s).needToPay, 0);
+      const totalInHand = items.reduce((sum, s) => sum + settlementOutcome(s).inHand, 0);
       const totalPaid = items.reduce((sum, s) => sum + Number(s.paid_amount || 0), 0);
 
       const selectedTruck = vehicleFilter ? vehicles.find((v) => String(v.id) === String(vehicleFilter))?.lorry_number : 'All';
+      const selectedOwner = ownerFilter ? owners.find((o) => String(o.id) === String(ownerFilter))?.name : 'All';
       const selectedDriver = driverFilter ? drivers.find((d) => String(d.id) === String(driverFilter))?.name : 'All';
       const selectedParty = partyFilter ? parties.find((p) => String(p.id) === String(partyFilter))?.name : 'All';
       const dateRangeText = fromDate && toDate ? `${formatDateDMY(fromDate)} to ${formatDateDMY(toDate)}` : fromDate ? `From ${formatDateDMY(fromDate)}` : toDate ? `Up to ${formatDateDMY(toDate)}` : 'All Dates';
@@ -425,10 +466,11 @@ export const SettlementsPage: React.FC = () => {
   <meta charset="utf-8" />
   <title>KSP Logistics - Settlements Master Audit Report</title>
   <style>
+    ${PRINT_BRAND_CSS}
     * { box-sizing: border-box; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
     body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif; margin: 0; padding: 20px; color: #1e293b; background: #fff; font-size: 11.5px; }
     @page { size: landscape; margin: 10mm; }
-    .header-bar { display: flex; justify-content: space-between; align-items: flex-start; padding-bottom: 12px; border-bottom: 2px solid #0f172a; margin-bottom: 14px; }
+    .header-bar { display: flex; justify-content: space-between; align-items: center; padding-bottom: 10px; border-bottom: 3px solid #0f172a; margin-bottom: 14px; }
     .company-title { font-size: 20px; font-weight: 800; color: #0f172a; letter-spacing: 0.5px; margin: 0 0 4px 0; }
     .report-subtitle { font-size: 13px; font-weight: 700; color: #059669; margin: 0 0 4px 0; text-transform: uppercase; letter-spacing: 0.5px; }
     .meta-text { font-size: 11px; color: #64748b; margin: 0; }
@@ -461,10 +503,10 @@ export const SettlementsPage: React.FC = () => {
 
   <div class="header-bar">
     <div>
-      <h1 class="company-title">KSP TRANSPORT &amp; LOGISTICS</h1>
+      ${printBrandLockup()}
       <div class="report-subtitle">SETTLEMENTS MASTER AUDIT REPORT</div>
       <p class="meta-text">
-        <strong>Filters:</strong> Lorry: ${selectedTruck} | Driver: ${selectedDriver} | Party: ${selectedParty} | Status: ${statusFilter || 'All'} | Date: ${dateRangeText}
+        <strong>Filters:</strong> Lorry: ${selectedTruck} | Owner: ${selectedOwner} | Driver: ${selectedDriver} | Party: ${selectedParty} | Status: ${statusFilter || 'All'} | Date: ${dateRangeText}
       </p>
     </div>
     <div style="text-align: right;">
@@ -479,13 +521,15 @@ export const SettlementsPage: React.FC = () => {
         <th style="width: 75px;">Settlement ID</th>
         <th style="width: 75px;">Date</th>
         <th style="width: 85px;">Lorry No</th>
+        <th style="width: 95px;">Truck Owner</th>
         <th>Driver Name</th>
         <th>Party Name</th>
         <th>Destination</th>
         <th class="num" style="width: 75px;">Freight (₹)</th>
         <th class="num" style="width: 70px;">Advance (₹)</th>
         <th class="num" style="width: 70px;">Expenses (₹)</th>
-        <th class="num" style="width: 75px;">Balance (₹)</th>
+        <th class="num" style="width: 80px;">Need to Pay (₹)</th>
+        <th class="num" style="width: 85px;">Balance in Hand (₹)</th>
         <th class="num" style="width: 70px;">Paid (₹)</th>
         <th class="center" style="width: 80px;">Status</th>
       </tr>
@@ -502,16 +546,34 @@ export const SettlementsPage: React.FC = () => {
           <td><strong>SET-${s.id}</strong></td>
           <td>${s.trip_date ? s.trip_date.slice(0, 10) : '-'}</td>
           <td><strong>${s.lorry_number || '-'}</strong></td>
+          <td>${s.owner_name || '-'}</td>
           <td>${s.driver_name || '-'}</td>
           <td>${s.party_name || '-'}</td>
           <td>${s.to_location || s.from_location || '-'}</td>
           <td class="num">${Number(s.total_freight || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td>
-          <td class="num">${Number(s.advance_paid || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}${Number(s.previous_driver_balance || 0) > 0 ? `<div style="font-size:9px;color:#1d4ed8">+₹${Number(s.previous_driver_balance).toLocaleString('en-IN')} in hand</div>` : ''}</td>
+          <td class="num">${(() => {
+            const manager = Number(s.manager_advance ?? s.initial_trip_advance ?? 0);
+            const leftover = Number(s.owner_leftover_used ?? 0);
+            const adv = manager > 0 ? manager : leftover;
+            const ownerBal = Number(s.owner_balance ?? 0);
+            const ownerAdv = Number(s.owner_given || 0);
+            const leftoverOnly = leftover > 0 && ownerAdv <= 0 && manager <= 0;
+            const ownName = String(s.advance_owner_name || '').trim();
+            const ownAdvLabel = ownName ? `Owner Advance (${ownName})` : 'Owner Advance';
+            const ownBalLabel = ownName ? `Advance Balance in Hand (${ownName})` : 'Advance Balance in Hand';
+            const lessAmt = Number(s.owner_applied || 0);
+            const priorDeficit = Number(s.prior_deficit_deduction || 0);
+            return `<div style="font-size:9px;color:#1d4ed8">Advance: ₹${manager.toLocaleString('en-IN')}</div>${!leftoverOnly && ownerAdv > 0 ? `<div style="font-size:9px;color:#6d28d9">${ownAdvLabel}: ₹${ownerAdv.toLocaleString('en-IN')}</div>` : ''}${priorDeficit > 0 ? `<div style="font-size:9px;color:#c2410c">Less (prior dues): ₹${priorDeficit.toLocaleString('en-IN')}</div>` : ''}${!leftoverOnly && lessAmt > 0 ? `<div style="font-size:9px;color:#c2410c">Less: ₹${lessAmt.toLocaleString('en-IN')}</div>` : ''}${ownerBal > 0 ? `<div style="font-size:9px;color:#047857">${ownBalLabel}: ₹${ownerBal.toLocaleString('en-IN')}</div>` : ''}${leftoverOnly ? `<div style="font-size:9px;color:#047857">${ownBalLabel}: ₹${leftover.toLocaleString('en-IN')}</div>` : ''}`;
+          })()}</td>
           <td class="num">${Number(s.total_expenses || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td>
-          <td class="num">
-            ${Number(s.previous_driver_balance || 0) > 0 ? `<div style="font-size:9px;color:#475569">Taken: ₹${Math.min(Number(s.previous_driver_balance), Number(s.total_expenses)).toLocaleString('en-IN')}</div>` : ''}
-            <strong>${Number(s.net_balance_to_driver ?? s.balance_to_driver ?? 0) > 0 ? `+₹${Number(s.net_balance_to_driver ?? s.balance_to_driver).toLocaleString('en-IN', { minimumFractionDigits: 2 })}` : `₹${Math.abs(Number(s.net_balance_to_driver ?? 0)).toLocaleString('en-IN', { minimumFractionDigits: 2 })} (In Hand)`}</strong>
-          </td>
+          <td class="num" style="color:#b91c1c;font-weight:800">${(() => {
+            const o = settlementOutcome(s);
+            return `₹${o.needToPay.toLocaleString('en-IN', { minimumFractionDigits: 2 })}`;
+          })()}</td>
+          <td class="num" style="color:#047857;font-weight:800">${(() => {
+            const o = settlementOutcome(s);
+            return `₹${o.inHand.toLocaleString('en-IN', { minimumFractionDigits: 2 })}`;
+          })()}</td>
           <td class="num">${Number(s.paid_amount || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td>
           <td class="center"><span class="badge ${badgeClass}">${s.settlement_status}</span></td>
         </tr>
@@ -519,11 +581,12 @@ export const SettlementsPage: React.FC = () => {
       }).join('')}
       <tr class="footer-row">
         <td class="center" colspan="2">TOTAL</td>
-        <td colspan="5"><strong>Total Count: ${totalCount} Settlements</strong></td>
+        <td colspan="6"><strong>Total Count: ${totalCount} Settlements</strong></td>
         <td class="num"><strong>₹${totalFreight.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</strong></td>
         <td class="num"><strong>₹${totalAdvance.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</strong></td>
         <td class="num"><strong>₹${totalExpenses.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</strong></td>
-        <td class="num"><strong>₹${totalBalance.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</strong></td>
+        <td class="num" style="color:#b91c1c"><strong>₹${totalNeedToPay.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</strong></td>
+        <td class="num" style="color:#047857"><strong>₹${totalInHand.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</strong></td>
         <td class="num"><strong>₹${totalPaid.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</strong></td>
         <td class="center"><strong>${totalCount} Settlements</strong></td>
       </tr>
@@ -632,11 +695,60 @@ export const SettlementsPage: React.FC = () => {
     setIsSlipModalOpen(true);
   };
 
+  const settlementOutcome = (s: Settlement) => {
+    const net = getNetBalance(s);
+    const needToPay = net > 0 ? net : 0;
+    const inHand = net < 0 ? Math.abs(net) : Math.max(0, Math.round(Number(s.owner_balance || 0)));
+    return { needToPay, inHand };
+  };
+
+  const getSlipCalc = (s: Settlement) => {
+    const expenses = Math.round(Number(s.total_expenses || 0));
+    const tripAdvance = Math.round(Number(s.manager_advance ?? s.initial_trip_advance ?? 0));
+    const ownerAdvance = Math.round(Number(s.owner_given || 0));
+    const ownerApplied = Math.round(Number(s.owner_applied || 0));
+    const leftoverUsed = Math.round(Number(s.owner_leftover_used || 0));
+    const ownerBalance = Math.round(Number(s.owner_balance || 0));
+    const priorDeficit = Math.round(Number(s.prior_deficit_deduction || 0));
+    const effectiveAdvance = Math.max(0, tripAdvance - priorDeficit);
+    const paidAmount = Math.round(Number(s.paid_amount || 0));
+    const mode = String(s.payment_mode || '').toUpperCase();
+    const isCashDisbursement = ['CASH', 'UPI', 'BANK_TRANSFER'].includes(mode);
+    const laterAdvanceAdjusted = paidAmount > 0 && !isCashDisbursement;
+    const { needToPay, inHand } = settlementOutcome(s);
+    const ownerName = String(s.advance_owner_name || '').trim();
+    return {
+      expenses, tripAdvance, ownerAdvance, ownerApplied, leftoverUsed, ownerBalance,
+      priorDeficit, effectiveAdvance, paidAmount, isCashDisbursement, laterAdvanceAdjusted,
+      needToPay, inHand, ownerName, mode,
+    };
+  };
+
   const getNetBalance = (s: Settlement) => {
+    const expenses = Math.round(Number(s.total_expenses || 0));
+    const managerGiven = Math.round(Number(s.manager_advance ?? s.initial_trip_advance ?? 0));
+    const priorDeficit = Math.round(Number(s.prior_deficit_deduction || 0));
+    const manager = (s as any).effective_manager_advance != null
+      ? Math.round(Number((s as any).effective_manager_advance))
+      : Math.max(0, managerGiven - priorDeficit);
+    const ownerGiven = Math.round(Number(s.owner_given || 0));
+    const leftoverUsed = Math.round(Number(s.owner_leftover_used || 0));
+    const ownerBal = Math.round(Number(s.owner_balance || 0));
+    const cashPaid = s.payment_mode !== 'ADJUSTED_ADVANCE' ? Math.round(Number(s.paid_amount || 0)) : 0;
+    if (s.owner_applied != null || s.owner_given != null || s.owner_balance != null || (s as any).effective_manager_advance != null) {
+      if (ownerBal > 0) return -ownerBal;
+      return Math.max(0, expenses - manager - ownerGiven - leftoverUsed - cashPaid);
+    }
     if (s.net_balance_to_driver !== undefined && s.net_balance_to_driver !== null) {
       return parseFloat(String(s.net_balance_to_driver)) || 0;
     }
     return parseFloat(String(s.balance_to_driver || 0)) || 0;
+  };
+
+  const getTripAdvancePaid = (s: Settlement) => {
+    const manager = Math.round(parseFloat(String(s.manager_advance ?? s.initial_trip_advance ?? 0)) || 0);
+    const leftoverUsed = Math.round(parseFloat(String(s.owner_leftover_used ?? 0)) || 0);
+    return manager > 0 ? manager : leftoverUsed;
   };
 
   const openPayModal = (settlement: Settlement) => {
@@ -660,7 +772,12 @@ export const SettlementsPage: React.FC = () => {
   const handleSettleFromAdvance = async (settlement: Settlement) => {
     const netBal = getNetBalance(settlement);
     const surplus = Math.abs(netBal);
-    const msg = surplus > 0
+    const driverCurrentBal = parseFloat(String(settlement.driver_current_balance ?? 0));
+    const isCoveredByAdvance = netBal > 0 && driverCurrentBal >= 0;
+
+    const msg = isCoveredByAdvance
+      ? `Settle Trip #${settlement.trip_id} by adjusting ₹${netBal.toLocaleString('en-IN')} pending dues from driver advance balance?\n\nDriver currently holds ₹${driverCurrentBal.toLocaleString('en-IN')} advance balance.\nNo cash payout required.`
+      : surplus > 0
       ? `Settle Trip #${settlement.trip_id} by deducting ₹${Number(settlement.total_expenses).toLocaleString('en-IN')} expenses from driver advance balance?\n\nDriver holds ₹${surplus.toLocaleString('en-IN')} remaining advance in hand.\nNo cash payout will be made.`
       : `Settle Trip #${settlement.trip_id} by deducting expenses from driver advance balance?\nNo cash payout required.`;
     
@@ -672,8 +789,10 @@ export const SettlementsPage: React.FC = () => {
       await settlementService.settlePayment(settlement.id, {
         payment_mode: 'ADJUSTED_ADVANCE' as any,
         payment_date: new Date().toISOString().split('T')[0],
-        paid_amount: 0,
-        notes: `Trip expenses of ₹${Number(settlement.total_expenses).toFixed(2)} deducted from driver advance balance. Remaining driver advance: ₹${surplus.toFixed(2)}.`,
+        paid_amount: isCoveredByAdvance ? netBal : 0,
+        notes: isCoveredByAdvance
+          ? `Pending dues of ₹${netBal.toFixed(2)} adjusted and settled from driver advance balance.`
+          : `Trip expenses of ₹${Number(settlement.total_expenses).toFixed(2)} deducted from driver advance balance. Remaining driver advance: ₹${surplus.toFixed(2)}.`,
       });
       loadSettlements();
     } catch (err: any) {
@@ -752,7 +871,14 @@ export const SettlementsPage: React.FC = () => {
     const tripDate = s.trip_date ? formatDateDMY(s.trip_date) : '—';
     const payDate = s.payment_date ? formatDateDMY(s.payment_date) : '';
     const netPayable = getNetBalance(s);
-    const isPositive = netPayable > 0;
+    const { needToPay, inHand } = settlementOutcome(s);
+    const priorDeficitDeduction = Math.round(parseFloat(String(s.prior_deficit_deduction || 0)));
+    const initialTripAdvance = Math.round(parseFloat(String(s.initial_trip_advance || 0)));
+    const advancePaid = initialTripAdvance;
+    const additionalAdvance = 0;
+    const effectiveAdvance = Math.max(0, advancePaid - priorDeficitDeduction);
+    const totalExpenses = Math.round(parseFloat(String(s.total_expenses || 0)));
+    const paidAmount = Math.round(parseFloat(String(s.paid_amount || 0)));
 
     const expenseRows = (s.expense_items && s.expense_items.length > 0)
       ? s.expense_items.map((item, idx) => `
@@ -778,6 +904,7 @@ export const SettlementsPage: React.FC = () => {
   <meta charset="utf-8">
   <title>KSP Settlement Challan #${s.id} - Trip #${s.trip_id}</title>
   <style>
+    ${PRINT_BRAND_CSS}
     @page { size: A4 portrait; margin: 10mm 12mm; }
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
@@ -1020,8 +1147,7 @@ export const SettlementsPage: React.FC = () => {
     <table class="header-table" cellpadding="0" cellspacing="0">
       <tr>
         <td style="vertical-align: top;">
-          <div class="company-title">KSP TRANSPORT</div>
-          <div class="company-sub">Fleet Logistics &amp; Transport Contractors</div>
+          ${printBrandLockup('Fleet Logistics &amp; Transport Contractors')}
           <div class="company-meta">
             Head Office: Namakkal • Tamil Nadu<br />
             Fleet Operations &amp; Freight Settlement Dept.<br />
@@ -1049,7 +1175,10 @@ export const SettlementsPage: React.FC = () => {
     <table class="info-table" cellpadding="0" cellspacing="0">
       <tr>
         <td class="info-label">Lorry Number</td>
-        <td class="info-val"><span class="plate-box">${s.lorry_number}</span></td>
+        <td class="info-val">
+          <span class="plate-box">${s.lorry_number}</span>
+          ${s.owner_name ? `<div style="font-size: 10px; color: #4338ca; font-weight: 700; margin-top: 3px;">👤 ${s.owner_name}${s.owner_mobile ? ` (${s.owner_mobile})` : ''}</div>` : ''}
+        </td>
         <td class="info-label">Party / Consignor</td>
         <td class="info-val">${s.party_name}</td>
       </tr>
@@ -1092,40 +1221,61 @@ export const SettlementsPage: React.FC = () => {
       2. Final Settlement Account Statement
     </div>
     <div class="calc-box">
-      <div class="calc-row">
-        <span>Total Gross Freight Billed:</span>
-        <strong>${formatCurrency(s.total_freight)}</strong>
-      </div>
-      <div class="calc-row">
-        <span>Less: Total Driver Expenses Incurred:</span>
-        <strong style="color: #b45309;">(-) ${formatCurrency(s.total_expenses)}</strong>
-      </div>
-      ${Number(s.previous_driver_balance || 0) > 0 ? `
-      <div class="calc-row">
-        <span>Driver Advance Brought Forward from Prior Trips:</span>
-        <strong style="color: #1d4ed8;">${formatCurrency(s.previous_driver_balance || 0)}</strong>
-      </div>
-      ` : ''}
-      <div class="calc-row">
-        <span>Trip Advance Paid to Driver:</span>
-        <strong style="color: #475569;">${formatCurrency(s.advance_paid)}</strong>
-      </div>
-      ${netPayable <= 0 ? `
-      <div class="calc-row" style="background: #eff6ff; color: #1d4ed8; font-weight: 700;">
-        <span>REMAINING ADVANCE IN DRIVER HAND:</span>
-        <span>₹${Math.abs(netPayable).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
-      </div>
-      <div class="calc-row highlight" style="background: #f0fdf4; color: #15803d;">
-        <span>NET CASH PAYABLE BY OFFICE:</span>
-        <span>₹0.00 (Covered by Advance)</span>
-      </div>
-      ` : `
-      <div class="calc-row highlight">
-        <span>NET BALANCE PAYABLE TO DRIVER:</span>
-        <span>+${formatCurrency(netPayable)}</span>
-      </div>
-      `}
+      ${(() => {
+        const c = getSlipCalc(s);
+        const row = (label: string, valueHtml: string, extra = '') =>
+          `<div class="calc-row"${extra}><span>${label}</span><strong>${valueHtml}</strong></div>`;
+        let html = row('Total Driver Expenses Incurred:', `<span style="color:#b45309">${formatCurrency(c.expenses)}</span>`);
+        if (c.tripAdvance > 0 && c.priorDeficit <= 0) {
+          html += row('Less: Trip Advance:', `<span style="color:#1d4ed8">(-) ${formatCurrency(c.tripAdvance)}</span>`);
+        } else if (c.tripAdvance > 0) {
+          html += row('Trip Advance (given):', `<span style="color:#1d4ed8">${formatCurrency(c.tripAdvance)}</span>`);
+        }
+        if (c.ownerAdvance > 0) {
+          html += row(`Advance from Owner${c.ownerName ? ` (${c.ownerName})` : ''}:`, `<span style="color:#6d28d9">${formatCurrency(c.ownerAdvance)}</span>`, ' style="background:#f5f3ff"');
+        }
+        if (c.priorDeficit > 0) {
+          html += row('Less: This trip advance adjusted to prior trip dues:', `<span style="color:#dc2626">(-) ${formatCurrency(c.priorDeficit)}</span>`, ' style="background:#fff7ed;color:#c2410c"');
+          html += row('Effective Advance Available for This Trip:', formatCurrency(c.effectiveAdvance), ' style="background:#f8fafc;font-weight:700"');
+        }
+        if (c.ownerApplied > 0) {
+          html += row('Less: Owner advance used on this trip:', `<span style="color:#c2410c">(-) ${formatCurrency(c.ownerApplied)}</span>`, ' style="background:#fff7ed;color:#c2410c"');
+        }
+        if (c.leftoverUsed > 0 && c.priorDeficit <= 0) {
+          html += row('Less: Previous surplus used on this trip:', `<span style="color:#c2410c">(-) ${formatCurrency(c.leftoverUsed)}</span>`, ' style="background:#fff7ed;color:#c2410c"');
+        }
+        if (c.laterAdvanceAdjusted) {
+          html += row('Less: Adjusted from later trip advance:', `<span style="color:#c2410c">(-) ${formatCurrency(c.paidAmount)}</span>`, ' style="background:#fff7ed;color:#c2410c"');
+        }
+        if (c.isCashDisbursement && c.paidAmount > 0) {
+          html += row(`Less: Paid to Driver (${c.mode}):`, `<span style="color:#16a34a">(-) ${formatCurrency(c.paidAmount)}</span>`, ' style="background:#f0fdf4;color:#15803d"');
+        }
+        if (c.needToPay > 0 || c.inHand === 0) {
+          html += row('Need to Pay:', `<span style="color:#b91c1c">${formatCurrency(c.needToPay)}</span>`, ' style="background:#fef2f2;color:#b91c1c;font-weight:800;border-top:1.5px solid #fecaca"');
+        }
+        if (c.inHand > 0) {
+          html += `<div class="calc-row highlight" style="background:#ecfdf5;color:#047857"><span>Balance in Hand:</span><span>${formatCurrency(c.inHand)}</span></div>`;
+        }
+        return html;
+      })()}
     </div>
+
+    ${priorDeficitDeduction > 0 ? `
+    <div style="background: #fffbeb; border: 1px solid #fde68a; border-radius: 4px; padding: 8px 12px; margin-bottom: 14px; font-size: 11px; color: #92400e; line-height: 1.45;">
+      <strong>⚠ Advance Adjustment Notice:</strong> Trip advance of ${formatCurrency(advancePaid)} was reduced by <strong>${formatCurrency(priorDeficitDeduction)}</strong> to settle prior trip dues. Effective advance available for this trip was ${formatCurrency(effectiveAdvance)}. Full trip expenses of ${formatCurrency(totalExpenses)} are payable to driver for this trip.
+    </div>
+    ` : ''}
+
+    ${getSlipCalc(s).laterAdvanceAdjusted ? `
+    <div style="background: #fffbeb; border: 1px solid #fde68a; border-radius: 4px; padding: 8px 12px; margin-bottom: 14px; font-size: 11px; color: #92400e; line-height: 1.45;">
+      <strong>✔ Later Trip Advance Adjustment:</strong> <strong>${formatCurrency(getSlipCalc(s).paidAmount)}</strong> from a later trip advance was applied to this trip's pending dues. Remaining need to pay: <strong>${formatCurrency(needToPay)}</strong>.
+    </div>
+    ` : ''}
+    ${getSlipCalc(s).isCashDisbursement && paidAmount > 0 ? `
+    <div style="background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 4px; padding: 8px 12px; margin-bottom: 14px; font-size: 11px; color: #166534; line-height: 1.45;">
+      <strong>✔ Payment Recorded:</strong> <strong>${formatCurrency(paidAmount)}</strong> paid to driver via ${s.payment_mode}. Remaining balance payable to driver: <strong>${formatCurrency(needToPay)}</strong>.
+    </div>
+    ` : ''}
 
     ${isSettled && s.payment_mode ? `
       <div class="discharge-box">
@@ -1236,86 +1386,131 @@ export const SettlementsPage: React.FC = () => {
 
   const columns: Column<Settlement>[] = [
     {
-      header: 'Settlement ID',
-      accessor: (s) => <strong>#{s.id}</strong>,
-    },
-    {
-      header: 'Trip & Lorry',
+      header: 'Trip',
       accessor: 'lorry_number',
       render: (s) => (
-        <div>
-          <strong>Trip #{s.trip_id}</strong> — {s.lorry_number}
-          <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
-            {s.driver_name} | <span style={{ fontWeight: 600, color: '#1e40af' }}>{s.to_location || s.from_location}</span>
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: '2px', minWidth: 0 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '5px', flexWrap: 'wrap' }}>
+            <span style={{ fontSize: '10.5px', fontWeight: 700, color: '#64748b' }}>#{s.id}</span>
+            <strong style={{ color: '#0f172a', fontSize: '12.5px' }}>T{s.trip_id}</strong>
+            <span style={{ fontWeight: 800, color: '#1d4ed8', letterSpacing: '0.2px', fontSize: '12.5px' }}>{s.lorry_number}</span>
+          </div>
+          <div style={{ fontSize: '11px', color: '#475569', fontWeight: 600, lineHeight: 1.35 }}>
+            {[s.driver_name, s.owner_name, s.to_location || s.from_location].filter(Boolean).join(' · ')}
           </div>
         </div>
       ),
     },
     {
-      header: 'Trip Date',
-      accessor: (s) => (s.trip_date ? formatDateDMY(s.trip_date) : '—'),
+      header: 'Date',
+      width: '92px',
+      render: (s) => (
+        <span style={{ whiteSpace: 'nowrap', fontSize: '12px' }}>
+          {s.trip_date ? formatDateDMY(s.trip_date) : '—'}
+        </span>
+      ),
     },
-    { header: 'Total Freight', render: (s) => formatCurrency(s.total_freight) },
-    { header: 'Total Expenses', render: (s) => formatCurrency(s.total_expenses) },
+    { header: 'Freight', width: '100px', render: (s) => <span style={{ whiteSpace: 'nowrap' }}>{formatCurrency(s.total_freight)}</span> },
+    { header: 'Expenses', width: '100px', render: (s) => <span style={{ whiteSpace: 'nowrap' }}>{formatCurrency(s.total_expenses)}</span> },
     {
-      header: 'Advance Paid',
+      header: 'Advance',
       render: (s) => {
-        const adv = parseFloat(String(s.advance_paid || 0));
-        const prevInHand = parseFloat(String(s.previous_driver_balance || 0));
+        const manager = Math.round(parseFloat(String(s.manager_advance ?? s.initial_trip_advance ?? 0)) || 0);
+        const leftoverUsed = Math.round(parseFloat(String(s.owner_leftover_used ?? 0)) || 0);
+        const ownerAdvance = Math.round(Number(s.owner_given || 0));
+        const ownerAdvanceBal = Math.round(parseFloat(String(s.owner_balance ?? 0)) || 0);
+        const isOwnerLeftover = leftoverUsed > 0 && ownerAdvance <= 0 && manager <= 0;
+        const rows: { label: string; value: number; color: string; bg: string }[] = [
+          { label: 'Advance', value: manager, color: '#1d4ed8', bg: '#eff6ff' },
+        ];
+        const ownName = String(s.advance_owner_name || '').trim();
+        const ownAdvLabel = ownName ? `Owner` : 'Owner';
+        const ownBalLabel = 'In hand';
+        const lessAmt = Math.round(Number(s.owner_applied || 0));
+        const priorDeficit = Math.round(Number(s.prior_deficit_deduction || 0));
+        if (!isOwnerLeftover && ownerAdvance > 0) {
+          rows.push({ label: ownAdvLabel, value: ownerAdvance, color: '#6d28d9', bg: '#f5f3ff' });
+        }
+        if (priorDeficit > 0) {
+          rows.push({ label: 'Prior dues', value: priorDeficit, color: '#c2410c', bg: '#fff7ed' });
+        }
+        if (!isOwnerLeftover && lessAmt > 0) {
+          rows.push({ label: 'Less', value: lessAmt, color: '#c2410c', bg: '#fff7ed' });
+        }
+        if (ownerAdvanceBal > 0) {
+          rows.push({ label: ownBalLabel, value: ownerAdvanceBal, color: '#047857', bg: '#ecfdf5' });
+        }
+        if (isOwnerLeftover) {
+          rows.push({ label: ownBalLabel, value: leftoverUsed, color: '#047857', bg: '#ecfdf5' });
+        }
         return (
-          <div>
-            <div style={{ fontWeight: 700, color: '#b45309' }}>{formatCurrency(adv)}</div>
-            {prevInHand > 0 && (
-              <div
-                style={{
-                  fontSize: '10px',
-                  fontWeight: 700,
-                  color: '#1d4ed8',
-                  background: '#eff6ff',
-                  padding: '1px 5px',
-                  borderRadius: '3px',
-                  border: '1px solid #bfdbfe',
-                  marginTop: '2px',
-                  display: 'inline-block',
-                  whiteSpace: 'nowrap',
-                }}
-                title="Advance balance brought forward in driver hand from prior trips"
-              >
-                In Hand: {formatCurrency(prevInHand)}
+          <div className="adv-stack">
+            {rows.map((row) => (
+              <div key={row.label} className="adv-chip" style={{ background: row.bg }} title={ownName || row.label}>
+                <span style={{ fontSize: '10px', fontWeight: 700, color: row.color }}>{row.label}</span>
+                <span style={{ fontSize: '11px', fontWeight: 800, color: row.color, whiteSpace: 'nowrap' }}>{formatCurrency(row.value)}</span>
               </div>
-            )}
+            ))}
           </div>
         );
       },
     },
     {
-      header: 'Balance to Driver',
+      header: 'Balance',
       render: (s) => {
         const netBal = getNetBalance(s);
-        const prevInHand = parseFloat(String(s.previous_driver_balance || 0));
-        const tripExp = parseFloat(String(s.total_expenses || 0));
-        const tripAdv = parseFloat(String(s.advance_paid || 0));
         const isSettled = s.settlement_status === 'SETTLED';
-        const takenFromHand = prevInHand > 0 ? Math.min(prevInHand, Math.max(0, tripExp - tripAdv)) : 0;
+        const paidAmt = parseFloat(String(s.paid_amount || 0));
+        const driverCurrentBalance = parseFloat(String(s.driver_current_balance ?? 0));
+        const isCoveredByAdvance = !isSettled && netBal > 0 && driverCurrentBalance >= 0;
+
+        if (isSettled) {
+          if (s.payment_mode === 'ADJUSTED_ADVANCE' && paidAmt > 0) {
+            return (
+              <div>
+                <strong style={{ color: '#059669', fontSize: '12.5px' }}>{formatCurrency(paidAmt)}</strong>
+                <div style={{ fontSize: '10px', color: '#059669', fontWeight: 700 }}>Settled</div>
+              </div>
+            );
+          }
+          if (paidAmt > 0) {
+            return (
+              <div>
+                <strong style={{ color: '#15803d', fontSize: '12.5px' }}>{formatCurrency(paidAmt)}</strong>
+                <div style={{ fontSize: '10px', color: '#15803d', fontWeight: 700 }}>Paid</div>
+              </div>
+            );
+          }
+          if (netBal < 0) {
+            return (
+              <div>
+                <span style={{ color: '#1d4ed8', fontWeight: 800, fontSize: '12.5px' }}>{formatCurrency(Math.abs(netBal))}</span>
+                <div style={{ fontSize: '10px', color: '#1d4ed8', fontWeight: 700 }}>In hand</div>
+              </div>
+            );
+          }
+          return (
+            <div>
+              <strong style={{ color: '#059669', fontSize: '12.5px' }}>{formatCurrency(0)}</strong>
+              <div style={{ fontSize: '10px', color: '#059669', fontWeight: 700 }}>Settled</div>
+            </div>
+          );
+        }
+
+        if (isCoveredByAdvance) {
+          return (
+            <div>
+              <strong style={{ color: '#059669', fontSize: '12.5px' }}>{formatCurrency(netBal)}</strong>
+              <div style={{ fontSize: '10px', color: '#059669', fontWeight: 700 }}>Covered</div>
+            </div>
+          );
+        }
 
         if (netBal > 0) {
           return (
             <div>
-              {prevInHand > 0 && (
-                <div style={{ fontSize: '11px', color: '#475569', fontWeight: 600 }}>
-                  Already in hand taken: <strong style={{ color: '#1d4ed8' }}>{formatCurrency(prevInHand)}</strong>
-                </div>
-              )}
-              <div style={{ marginTop: '2px' }}>
-                <strong style={{ color: isSettled ? '#15803d' : '#b91c1c', fontSize: '13px' }}>
-                  {isSettled ? 'Paid ' : 'Balance: '}{formatCurrency(isSettled ? (s.paid_amount || netBal) : netBal)} {isSettled ? '' : 'Need to Pay'}
-                </strong>
-                {isSettled ? (
-                  <div style={{ fontSize: '10.5px', color: '#15803d', fontWeight: 700 }}>✓ Settled (Paid to Driver)</div>
-                ) : (
-                  <div style={{ fontSize: '10.5px', color: '#b91c1c', fontWeight: 700 }}>Payable to Driver</div>
-                )}
-              </div>
+              <strong style={{ color: '#b91c1c', fontSize: '12.5px' }}>{formatCurrency(netBal)}</strong>
+              <div style={{ fontSize: '10px', color: '#b91c1c', fontWeight: 700 }}>Need to pay</div>
             </div>
           );
         }
@@ -1323,19 +1518,8 @@ export const SettlementsPage: React.FC = () => {
         const inHand = Math.abs(netBal);
         return (
           <div>
-            {takenFromHand > 0 && (
-              <div style={{ fontSize: '11px', color: '#475569', fontWeight: 600 }}>
-                Already in hand taken: <strong style={{ color: '#1d4ed8' }}>{formatCurrency(takenFromHand)}</strong>
-              </div>
-            )}
-            <div style={{ marginTop: '2px' }}>
-              <span style={{ color: '#1d4ed8', fontWeight: 800, fontSize: '13px' }}>
-                {formatCurrency(inHand)}
-              </span>
-              <div style={{ fontSize: '10.5px', color: '#1d4ed8', fontWeight: 700 }}>
-                {isSettled ? 'in Driver Hand (Settled)' : 'in Driver Hand'}
-              </div>
-            </div>
+            <span style={{ color: '#1d4ed8', fontWeight: 800, fontSize: '12.5px' }}>{formatCurrency(inHand)}</span>
+            <div style={{ fontSize: '10px', color: '#1d4ed8', fontWeight: 700 }}>In hand</div>
           </div>
         );
       },
@@ -1352,35 +1536,74 @@ export const SettlementsPage: React.FC = () => {
         ) : <span style={{ color: 'var(--text-muted)', fontSize: '12px' }}>—</span>
       ),
     },
-    { header: 'Status', accessor: 'settlement_status', render: (s) => <StatusBadge status={s.settlement_status} /> },
+    {
+      header: 'Status',
+      accessor: 'settlement_status',
+      render: (s) => {
+        const netBal = getNetBalance(s);
+        const isSettled = s.settlement_status === 'SETTLED';
+        const driverCurrentBal = parseFloat(String(s.driver_current_balance ?? 0));
+        const isCoveredByAdvance = !isSettled && netBal > 0 && driverCurrentBal >= 0;
+
+        if (isCoveredByAdvance) {
+          return (
+            <span
+              style={{
+                display: 'inline-block',
+                padding: '3px 8px',
+                borderRadius: '4px',
+                fontSize: '11px',
+                fontWeight: 700,
+                background: '#ecfdf5',
+                color: '#059669',
+                border: '1px solid #a7f3d0',
+                whiteSpace: 'nowrap',
+              }}
+            >
+              COVERED
+            </span>
+          );
+        }
+        return <StatusBadge status={s.settlement_status} />;
+      },
+    },
     {
       header: 'Actions',
+      width: '150px',
+      className: 'actions-cell',
       render: (s) => (
-        <div style={{ display: 'flex', gap: '5px', flexWrap: 'wrap' }}>
+        <div className="table-actions">
           <button onClick={() => openSlipModal(s)} className="btn btn-outline btn-sm" title="View Settlement Slip">
-            <Eye size={13} /> Slip
+            <Eye size={13} />
           </button>
-          {(s.settlement_status === 'PENDING' || s.settlement_status === 'VERIFIED') && (
-            (getNetBalance(s) > 0) ? (
-              <button
-                onClick={() => openPayModal(s)}
-                className="btn btn-sm"
-                title="Pay Driver"
-                style={{ background: '#15803d', color: '#fff', border: 'none', borderRadius: '6px', padding: '4px 10px', display: 'flex', alignItems: 'center', gap: '4px', fontSize: '12px', cursor: 'pointer' }}
-              >
-                <IndianRupee size={13} /> Pay Driver (₹{getNetBalance(s).toLocaleString('en-IN')})
-              </button>
-            ) : (
+          {(s.settlement_status === 'PENDING' || s.settlement_status === 'VERIFIED') && (() => {
+            const netBal = getNetBalance(s);
+            const driverCurrentBal = parseFloat(String(s.driver_current_balance ?? 0));
+            const isCoveredByAdvance = netBal > 0 && driverCurrentBal >= 0;
+
+            if (netBal > 0 && !isCoveredByAdvance) {
+              return (
+                <button
+                  onClick={() => openPayModal(s)}
+                  className="btn btn-sm"
+                  title={`Pay driver ${formatCurrency(netBal)}`}
+                  style={{ background: '#15803d', color: '#fff', border: 'none', borderRadius: '6px', padding: '4px 8px', display: 'flex', alignItems: 'center', gap: '3px', fontSize: '11px', cursor: 'pointer', whiteSpace: 'nowrap' }}
+                >
+                  <IndianRupee size={12} /> {formatCurrency(netBal)}
+                </button>
+              );
+            }
+            return (
               <button
                 onClick={() => handleSettleFromAdvance(s)}
                 className="btn btn-sm"
-                title="Settle (Adjusted from Driver Advance Balance)"
-                style={{ background: '#2563eb', color: '#fff', border: 'none', borderRadius: '6px', padding: '4px 10px', display: 'flex', alignItems: 'center', gap: '4px', fontSize: '12px', cursor: 'pointer' }}
+                title={isCoveredByAdvance ? 'Amount covered by driver advance — click to settle' : 'Settle (Adjusted from Driver Advance Balance)'}
+                style={{ background: isCoveredByAdvance ? '#059669' : '#2563eb', color: '#fff', border: 'none', borderRadius: '6px', padding: '4px 8px', display: 'flex', alignItems: 'center', gap: '3px', fontSize: '11px', cursor: 'pointer', whiteSpace: 'nowrap' }}
               >
-                <CheckCircle size={13} /> Settle (Advance Adjusted)
+                <CheckCircle size={12} /> Settle
               </button>
-            )
-          )}
+            );
+          })()}
           <button
             onClick={() => handleDeleteSettlement(s)}
             className="btn btn-danger btn-sm"
@@ -1394,8 +1617,8 @@ export const SettlementsPage: React.FC = () => {
   ];
 
   return (
-    <div>
-      <div className="card-header" style={{ marginBottom: '24px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '14px' }}>
+    <div className="settlements-page">
+      <div className="card-header" style={{ marginBottom: '12px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
         <div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
             <h2 style={{ fontSize: '22px', fontWeight: 800, margin: 0 }}>Trip Settlements</h2>
@@ -1457,13 +1680,12 @@ export const SettlementsPage: React.FC = () => {
 
       <div className="card">
         {/* ── Professional Filter Toolbar (Date, Status, Truck, Driver, Party, Search) ─── */}
-        <div style={{ padding: '16px 18px', background: 'var(--surface-color, #ffffff)', border: '1px solid var(--border-color, #e5e7eb)', borderRadius: '8px', marginBottom: '18px' }}>
-          {/* Row 1: Status, Truck, Driver, Party, Search */}
-          <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '10px', marginBottom: '10px' }}>
+        <div className="settlements-filters" style={{ padding: '10px 12px', background: 'var(--surface-color, #ffffff)', border: '1px solid var(--border-color, #e5e7eb)', borderRadius: '8px', marginBottom: '10px' }}>
+          <div className="filter-grid" style={{ marginBottom: '8px' }}>
             {/* Status Dropdown */}
             <select
               className="form-control form-select"
-              style={{ width: '160px', height: '36px', fontSize: '13px', flexShrink: 0 }}
+              style={{ width: '100%', height: '34px', fontSize: '13px' }}
               value={statusFilter}
               onChange={(e) => { setStatusFilter(e.target.value); setPage(1); }}
             >
@@ -1473,23 +1695,56 @@ export const SettlementsPage: React.FC = () => {
               <option value="SETTLED">SETTLED</option>
             </select>
 
+            {/* Truck Owner Dropdown */}
+            <select
+              className="form-control form-select"
+              style={{ width: '100%', height: '34px', fontSize: '13px' }}
+              value={ownerFilter}
+              onChange={(e) => {
+                const val = e.target.value;
+                setOwnerFilter(val);
+                if (val && vehicleFilter) {
+                  const currVehicle = vehicles.find((v) => String(v.id) === String(vehicleFilter));
+                  if (currVehicle && String(currVehicle.owner_id) !== String(val)) {
+                    setVehicleFilter('');
+                  }
+                }
+                setPage(1);
+              }}
+            >
+              <option value="">All Truck Owners</option>
+              {owners.map((o) => (
+                <option key={o.id} value={o.id}>{o.name} {o.mobile_number ? `(${o.mobile_number})` : ''}</option>
+              ))}
+            </select>
+
             {/* Truck Dropdown */}
             <select
               className="form-control form-select"
-              style={{ width: '160px', height: '36px', fontSize: '13px', flexShrink: 0 }}
+              style={{ width: '100%', height: '34px', fontSize: '13px' }}
               value={vehicleFilter}
-              onChange={(e) => { setVehicleFilter(e.target.value); setPage(1); }}
+              onChange={(e) => {
+                const val = e.target.value;
+                setVehicleFilter(val);
+                if (val && !ownerFilter) {
+                  const cur = vehicles.find((v) => String(v.id) === String(val));
+                  if (cur?.owner_id) {
+                    setOwnerFilter(String(cur.owner_id));
+                  }
+                }
+                setPage(1);
+              }}
             >
-              <option value="">All Trucks / Lorries</option>
-              {vehicles.map((v) => (
-                <option key={v.id} value={v.id}>{v.lorry_number}</option>
+              <option value="">{ownerFilter ? 'All Vehicles of Owner' : 'All Trucks / Lorries'}</option>
+              {filteredVehicles.map((v) => (
+                <option key={v.id} value={v.id}>{v.lorry_number} {v.owner_name ? `• ${v.owner_name}` : ''}</option>
               ))}
             </select>
 
             {/* Driver Dropdown */}
             <select
               className="form-control form-select"
-              style={{ width: '160px', height: '36px', fontSize: '13px', flexShrink: 0 }}
+              style={{ width: '100%', height: '34px', fontSize: '13px' }}
               value={driverFilter}
               onChange={(e) => { setDriverFilter(e.target.value); setPage(1); }}
             >
@@ -1502,7 +1757,7 @@ export const SettlementsPage: React.FC = () => {
             {/* Party Dropdown */}
             <select
               className="form-control form-select"
-              style={{ width: '160px', height: '36px', fontSize: '13px', flexShrink: 0 }}
+              style={{ width: '100%', height: '34px', fontSize: '13px' }}
               value={partyFilter}
               onChange={(e) => { setPartyFilter(e.target.value); setPage(1); }}
             >
@@ -1513,7 +1768,7 @@ export const SettlementsPage: React.FC = () => {
             </select>
 
             {/* Keyword Search */}
-            <div style={{ position: 'relative', width: '200px', flexShrink: 0 }}>
+            <div style={{ position: 'relative', width: '100%' }}>
               <input
                 type="text"
                 className="form-control"
@@ -1978,6 +2233,12 @@ export const SettlementsPage: React.FC = () => {
                       <span style={{ display: 'inline-block', background: '#f1f5f9', border: '1px solid #94a3b8', padding: '2px 8px', borderRadius: '3px', fontFamily: 'monospace', fontSize: '12px', fontWeight: 900, letterSpacing: '1px' }}>
                         {selectedSettlement.lorry_number}
                       </span>
+                      {selectedSettlement.owner_name && (
+                        <div style={{ fontSize: '11px', color: '#6b21a8', fontWeight: 700, marginTop: '3px', display: 'flex', alignItems: 'center', gap: '3px' }}>
+                          <span>👤</span>
+                          <span>{selectedSettlement.owner_name}{selectedSettlement.owner_mobile ? ` (${selectedSettlement.owner_mobile})` : ''}</span>
+                        </div>
+                      )}
                     </td>
                     <td style={{ padding: '6px 10px', fontSize: '10.5px', fontWeight: 700, background: '#f8fafc', color: '#475569', textTransform: 'uppercase', width: '20%', border: '1px solid #cbd5e1' }}>
                       Party / Consignor
@@ -2061,41 +2322,88 @@ export const SettlementsPage: React.FC = () => {
               </div>
               <div style={{ border: '1.5px solid #0f172a', background: '#fafafa', marginBottom: '14px', borderRadius: '4px', overflow: 'hidden' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', padding: '7px 14px', fontSize: '12px', borderBottom: '1px solid #e2e8f0' }}>
-                  <span>Total Gross Freight Billed:</span>
-                  <strong>{formatCurrency(selectedSettlement.total_freight)}</strong>
+                  <span>Total Driver Expenses Incurred:</span>
+                  <strong style={{ color: '#b45309' }}>{formatCurrency(selectedSettlement.total_expenses)}</strong>
                 </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', padding: '7px 14px', fontSize: '12px', borderBottom: '1px solid #e2e8f0' }}>
-                  <span>Less: Total Driver Expenses Incurred:</span>
-                  <strong style={{ color: '#b45309' }}>(-) {formatCurrency(selectedSettlement.total_expenses)}</strong>
-                </div>
-                {Number(selectedSettlement.previous_driver_balance || 0) > 0 && (
-                  <div style={{ display: 'flex', justifyContent: 'space-between', padding: '7px 14px', fontSize: '12px', borderBottom: '1px solid #e2e8f0' }}>
-                    <span>Driver Advance Brought Forward from Prior Trips:</span>
-                    <strong style={{ color: '#1d4ed8' }}>{formatCurrency(selectedSettlement.previous_driver_balance || 0)}</strong>
-                  </div>
-                )}
-                <div style={{ display: 'flex', justifyContent: 'space-between', padding: '7px 14px', fontSize: '12px', borderBottom: '1px solid #e2e8f0' }}>
-                  <span>Trip Advance Paid to Driver:</span>
-                  <strong style={{ color: '#475569' }}>{formatCurrency(selectedSettlement.advance_paid)}</strong>
-                </div>
-                {getNetBalance(selectedSettlement) <= 0 ? (
-                  <>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 14px', background: '#eff6ff', fontWeight: 800, fontSize: '13px', color: '#1d4ed8', borderTop: '1px solid #bfdbfe' }}>
-                      <span>REMAINING ADVANCE IN DRIVER HAND:</span>
-                      <span>₹{Math.abs(getNetBalance(selectedSettlement)).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
+                {(() => {
+                  const c = getSlipCalc(selectedSettlement);
+                  const row = (label: string, value: number, opts?: { bg?: string; color?: string; minus?: boolean; bold?: boolean }) => (
+                    <div style={{
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      padding: '7px 14px',
+                      fontSize: opts?.bold ? '13px' : '12px',
+                      fontWeight: opts?.bold ? 800 : 500,
+                      borderBottom: '1px solid #e2e8f0',
+                      background: opts?.bg,
+                      color: opts?.color,
+                    }}>
+                      <span>{label}</span>
+                      <strong style={{ color: opts?.color }}>{opts?.minus ? '(-) ' : ''}{formatCurrency(value)}</strong>
                     </div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', padding: '9px 14px', background: '#f0fdf4', fontWeight: 900, fontSize: '14px', color: '#15803d', borderTop: '1px solid #bbf7d0' }}>
-                      <span>NET CASH PAYABLE BY OFFICE:</span>
-                      <span>₹0.00 (Covered by Advance)</span>
-                    </div>
-                  </>
-                ) : (
-                  <div style={{ display: 'flex', justifyContent: 'space-between', padding: '10px 14px', background: '#fef2f2', fontWeight: 900, fontSize: '14.5px', color: '#b91c1c', borderTop: '1.5px solid #0f172a' }}>
-                    <span>NET BALANCE PAYABLE TO DRIVER:</span>
-                    <span>+{formatCurrency(getNetBalance(selectedSettlement))}</span>
-                  </div>
-                )}
+                  );
+                  return (
+                    <>
+                      {c.tripAdvance > 0 && c.priorDeficit <= 0 && row('Less: Trip Advance:', c.tripAdvance, { color: '#1d4ed8', minus: true })}
+                      {c.tripAdvance > 0 && c.priorDeficit > 0 && row('Trip Advance (given):', c.tripAdvance, { color: '#1d4ed8' })}
+                      {c.ownerAdvance > 0 && row(`Advance from Owner${c.ownerName ? ` (${c.ownerName})` : ''}:`, c.ownerAdvance, { bg: '#f5f3ff', color: '#6d28d9' })}
+                      {c.priorDeficit > 0 && row('Less: This trip advance adjusted to prior trip dues:', c.priorDeficit, { bg: '#fff7ed', color: '#c2410c', minus: true })}
+                      {c.priorDeficit > 0 && row('Effective Advance Available for This Trip:', c.effectiveAdvance, { bg: '#f8fafc', color: '#0f172a', bold: true })}
+                      {c.ownerApplied > 0 && row('Less: Owner advance used on this trip:', c.ownerApplied, { bg: '#fff7ed', color: '#c2410c', minus: true })}
+                      {c.leftoverUsed > 0 && c.priorDeficit <= 0 && row('Less: Previous surplus used on this trip:', c.leftoverUsed, { bg: '#fff7ed', color: '#c2410c', minus: true })}
+                      {c.laterAdvanceAdjusted && row('Less: Adjusted from later trip advance:', c.paidAmount, { bg: '#fff7ed', color: '#c2410c', minus: true })}
+                      {c.isCashDisbursement && c.paidAmount > 0 && row(`Less: Paid to Driver (${c.mode}):`, c.paidAmount, { bg: '#f0fdf4', color: '#15803d', minus: true })}
+                      {(c.needToPay > 0 || c.inHand === 0) && row('Need to Pay:', c.needToPay, { bg: '#fef2f2', color: '#b91c1c', bold: true })}
+                      {c.inHand > 0 && row('Balance in Hand:', c.inHand, { bg: '#ecfdf5', color: '#047857', bold: true })}
+                    </>
+                  );
+                })()}
               </div>
+
+              {Number(selectedSettlement.prior_deficit_deduction || 0) > 0 && (
+                <div style={{
+                  background: '#fffbeb',
+                  border: '1px solid #fde68a',
+                  borderRadius: '4px',
+                  padding: '9px 12px',
+                  marginBottom: '14px',
+                  fontSize: '11.5px',
+                  color: '#92400e',
+                  lineHeight: 1.45,
+                }}>
+                  <strong>⚠ Advance Adjustment Notice:</strong> This trip's advance of {formatCurrency(selectedSettlement.manager_advance ?? selectedSettlement.initial_trip_advance ?? selectedSettlement.advance_paid)} was applied to prior trip dues ({formatCurrency(selectedSettlement.prior_deficit_deduction || 0)}). Effective advance for this trip is {formatCurrency(Math.max(0, Number(selectedSettlement.manager_advance ?? selectedSettlement.initial_trip_advance ?? 0) - Number(selectedSettlement.prior_deficit_deduction || 0)))}. This trip's expenses of {formatCurrency(selectedSettlement.total_expenses)} are payable to the driver.
+                </div>
+              )}
+
+              {getSlipCalc(selectedSettlement).laterAdvanceAdjusted && (
+                <div style={{
+                  background: '#fffbeb',
+                  border: '1px solid #fde68a',
+                  borderRadius: '4px',
+                  padding: '9px 12px',
+                  marginBottom: '14px',
+                  fontSize: '11.5px',
+                  color: '#92400e',
+                  lineHeight: 1.45,
+                }}>
+                  <strong>✔ Later Trip Advance Adjustment:</strong> <strong>{formatCurrency(getSlipCalc(selectedSettlement).paidAmount)}</strong> from a later trip advance was applied to this trip's pending dues. Remaining need to pay: <strong>{formatCurrency(settlementOutcome(selectedSettlement).needToPay)}</strong>.
+                </div>
+              )}
+
+              {getSlipCalc(selectedSettlement).isCashDisbursement && Number(selectedSettlement.paid_amount || 0) > 0 && (
+                <div style={{
+                  background: '#f0fdf4',
+                  border: '1px solid #bbf7d0',
+                  borderRadius: '4px',
+                  padding: '9px 12px',
+                  marginBottom: '14px',
+                  fontSize: '11.5px',
+                  color: '#166534',
+                  lineHeight: 1.45,
+                }}>
+                  <strong>✔ Payment Recorded:</strong> <strong>{formatCurrency(selectedSettlement.paid_amount || 0)}</strong> paid to driver via {selectedSettlement.payment_mode}. Remaining balance payable to driver: <strong>{formatCurrency(settlementOutcome(selectedSettlement).needToPay)}</strong>.
+                </div>
+              )}
 
               {/* Payment Info if SETTLED */}
               {selectedSettlement.settlement_status === 'SETTLED' && selectedSettlement.payment_mode && (

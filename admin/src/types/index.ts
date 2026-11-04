@@ -4,7 +4,10 @@ export interface User {
   name: string;
   email?: string;
   mobile_number?: string;
-  role: 'ADMIN' | 'MANAGER' | 'TRANSPORT_USER';
+  role: 'ADMIN' | 'MANAGER' | 'TRANSPORT_USER' | 'OWNER';
+  owners?: { id: number; name: string }[];
+  ownerIds?: number[];
+  vehicleIds?: number[];
   driver_id?: number;
   driver_name?: string;
   status: 'ACTIVE' | 'INACTIVE';
@@ -33,12 +36,17 @@ export interface Driver {
   total_advance_given?: number;
   total_expenses_reported?: number;
   remaining_advance_balance?: number;
+  driver_balance?: number;
+  pending_owed_to_driver?: number;
 }
 
 export interface Vehicle {
   id: number;
   lorry_number: string;
   truck_image_url?: string;
+  owner_id?: number;
+  owner_name?: string;
+  owner_mobile?: string;
   vehicle_type?: string;
   capacity_tons?: number;
   goodshed_loading_expense?: number;
@@ -94,6 +102,12 @@ export interface Owner {
   name: string;
   mobile_number?: string;
   status: 'ACTIVE' | 'INACTIVE';
+  vehicle_count?: number;
+  vehicles?: {
+    id: number;
+    lorry_number: string;
+    vehicle_type?: string;
+  }[];
   created_at: string;
   updated_at: string;
 }
@@ -102,8 +116,14 @@ export interface OwnerAdvance {
   id: number;
   owner_id: number;
   owner_name?: string;
-  manager_id: number;
-  manager_name?: string;
+  recipient_type?: 'MANAGER' | 'DRIVER';
+  manager_id?: number | null;
+  manager_name?: string | null;
+  driver_id?: number | null;
+  driver_name?: string | null;
+  driver_mobile?: string | null;
+  vehicle_id?: number | null;
+  lorry_number?: string | null;
   amount: number;
   advance_date: string;
   payment_mode?: string;
@@ -114,6 +134,7 @@ export interface OwnerAdvance {
   created_at: string;
   updated_at: string;
 }
+
 
 
 export interface Unit {
@@ -176,6 +197,10 @@ export interface CleaningExpenseRate {
   cleaning_charge: number;
   description?: string;
   status: 'ACTIVE' | 'INACTIVE';
+  party_id?: number | null;
+  vehicle_id?: number | null;
+  party_name?: string;
+  lorry_number?: string;
   created_at: string;
   updated_at: string;
 }
@@ -234,6 +259,9 @@ export interface Trip {
   advance_paid: number;
   status: 'NEW' | 'PAYMENT_PENDING' | 'PARTIALLY_PAID' | 'SETTLED' | 'CANCELLED';
   lorry_number?: string;
+  owner_id?: number;
+  owner_name?: string;
+  owner_mobile?: string;
   driver_name?: string;
   driver_mobile?: string;
   party_name?: string;
@@ -250,8 +278,27 @@ export interface Trip {
   previous_driver_balance?: number;
   net_balance_to_driver?: number;
   settlement_paid_amount?: number;
+  settlement_payment_mode?: string;
+  prior_deficit_deduction?: number;
+  initial_trip_advance?: number;
+  additional_advance_paid?: number;
+  balance_to_driver?: number;
   total_expenses?: number;
   trip_driver_balance?: number;
+  expense_items?: {
+    id: number;
+    expense_type: string;
+    description?: string;
+    amount: number;
+    created_at?: string;
+  }[];
+  truck_advances?: {
+    id: number;
+    amount: number;
+    advance_date?: string;
+    notes?: string;
+    manager_name?: string;
+  }[];
   created_by?: number;
   created_at: string;
   updated_at: string;
@@ -301,6 +348,15 @@ export interface Settlement {
   total_freight: number;
   total_expenses: number;
   advance_paid: number;
+  initial_trip_advance?: number;
+  additional_advance_paid?: number;
+  manager_advance?: number;
+  owner_applied?: number;
+  owner_balance?: number;
+  owner_leftover_used?: number;
+  owner_given?: number;
+  advance_owner_name?: string;
+  driver_id?: number;
   balance_to_driver: number;
   previous_driver_balance?: number;
   net_balance_to_driver?: number;
@@ -311,6 +367,7 @@ export interface Settlement {
   payment_mode?: 'CASH' | 'UPI' | 'BANK_TRANSFER' | 'ADJUSTED_ADVANCE' | string;
   payment_date?: string;
   paid_amount?: number;
+  prior_deficit_deduction?: number;
   reference_no?: string;
   notes?: string;
   settled_by?: number;
@@ -319,6 +376,9 @@ export interface Settlement {
   created_by?: number;
   trip_date?: string;
   lorry_number?: string;
+  owner_id?: number;
+  owner_name?: string;
+  owner_mobile?: string;
   driver_name?: string;
   driver_mobile?: string;
   party_name?: string;
@@ -404,6 +464,9 @@ export interface DriverAdvance {
   manager_email?: string;
   lorry_number?: string;
   vehicle_type?: string;
+  owner_id?: number;
+  owner_name?: string;
+  owner_mobile?: string;
   created_by_name?: string;
   created_at: string;
   // Trip details
@@ -421,7 +484,12 @@ export interface DriverAdvance {
   trip_driver_expenses?: number | string;
   // Live balance
   driver_balance_in_hand?: number;
-  source_type?: 'DIRECT_DRIVER_ADVANCE' | 'TRIP_TRUCK_ADVANCE' | string;
+  source_type?: 'DIRECT_DRIVER_ADVANCE' | 'TRIP_TRUCK_ADVANCE' | 'OWNER_DIRECT_ADVANCE' | string;
+  given_by?: string;
+  given_by_role?: 'MANAGER' | 'OWNER' | string;
+  given_by_name?: string;
+  is_without_trip?: boolean;
+  given_for?: string;
 }
 
 export interface DriverAdvanceSummary {
@@ -437,6 +505,9 @@ export interface DriverAdvanceSummary {
   trip_status?: string;
   lorry_number?: string;
   vehicle_type?: string;
+  owner_id?: number;
+  owner_name?: string;
+  owner_mobile?: string;
   party_name?: string;
   from_location?: string;
   to_location?: string;
@@ -450,6 +521,10 @@ export interface DriverAdvanceSummary {
   is_active_trip?: boolean;
   // Financial summary
   total_advance_given: number;
+  manager_advance_given?: number;
+  owner_advance_given?: number;
+  trip_advance_given?: number;
+  without_trip_advance_given?: number;
   advance_count: number;
   total_trip_advance_used: number;
   trip_count: number;

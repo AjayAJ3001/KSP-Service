@@ -46,8 +46,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const login = async (username: string, password: string) => {
     const res = await authService.login(username, password);
-    if (res.data.user.role !== 'ADMIN') {
-      throw new Error('Access denied. Administrator privileges required.');
+    if (res.data.user.role !== 'ADMIN' && res.data.user.role !== 'OWNER') {
+      throw new Error('Access denied. Administrator or owner privileges required.');
     }
     setToken(res.data.token);
     setUser(res.data.user);

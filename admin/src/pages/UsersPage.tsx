@@ -6,9 +6,13 @@ import { DataTable, Column } from '../components/Common/DataTable';
 import { Modal } from '../components/Common/Modal';
 import { StatusBadge } from '../components/Common/StatusBadge';
 import { formatIST } from '../utils/dateUtils';
+import { useAuth } from '../context/AuthContext';
 import * as XLSX from 'xlsx';
+import { PRINT_BRAND_CSS, printBrandLockup } from '../utils/printBrand';
 
 export const UsersPage: React.FC = () => {
+  const { user: authUser } = useAuth();
+  const isOwnerUser = authUser?.role === 'OWNER';
   const [users, setUsers] = useState<User[]>([]);
   const [drivers, setDrivers] = useState<Driver[]>([]);
   const [total, setTotal] = useState(0);
@@ -34,7 +38,7 @@ export const UsersPage: React.FC = () => {
     password: '',
     email: '',
     mobile_number: '',
-    role: 'MANAGER' as 'ADMIN' | 'MANAGER' | 'TRANSPORT_USER',
+    role: 'MANAGER' as 'ADMIN' | 'MANAGER' | 'TRANSPORT_USER' | 'OWNER',
     driver_id: '' as string | number,
     editPassword: '', // optional new password on edit
   });
@@ -106,10 +110,11 @@ export const UsersPage: React.FC = () => {
   <meta charset="utf-8" />
   <title>KSP Transport - User Management Directory</title>
   <style>
+    ${PRINT_BRAND_CSS}
     * { box-sizing: border-box; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
     body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif; margin: 0; padding: 20px; color: #1e293b; background: #fff; font-size: 12px; }
     @page { size: portrait; margin: 12mm; }
-    .header-bar { display: flex; justify-content: space-between; align-items: flex-start; padding-bottom: 14px; border-bottom: 2px solid #0f172a; margin-bottom: 14px; }
+    .header-bar { display: flex; justify-content: space-between; align-items: center; padding-bottom: 10px; border-bottom: 3px solid #0f172a; margin-bottom: 14px; }
     .company-title { font-size: 20px; font-weight: 800; color: #0f172a; letter-spacing: 0.5px; margin: 0 0 4px 0; }
     .report-subtitle { font-size: 13px; font-weight: 700; color: #2563eb; margin: 0 0 4px 0; text-transform: uppercase; letter-spacing: 0.5px; }
     .meta-text { font-size: 11px; color: #64748b; margin: 0; }
@@ -124,6 +129,7 @@ export const UsersPage: React.FC = () => {
     .badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 10px; font-weight: 700; text-align: center; }
     .badge-admin { background: #e0e7ff; color: #3730a3; }
     .badge-manager { background: #fef3c7; color: #92400e; }
+    .badge-owner { background: #f3e8ff; color: #6b21a8; }
     .badge-operator { background: #e0f2fe; color: #0369a1; }
     .badge-active { background: #dcfce7; color: #166534; }
     .badge-inactive { background: #fee2e2; color: #991b1b; }
@@ -144,7 +150,7 @@ export const UsersPage: React.FC = () => {
 
   <div class="header-bar">
     <div>
-      <h1 class="company-title">KSP TRANSPORT</h1>
+      ${printBrandLockup()}
       <div class="report-subtitle">User Management Directory</div>
       <p class="meta-text">System users, access roles, and credential status</p>
     </div>
@@ -184,7 +190,7 @@ export const UsersPage: React.FC = () => {
           <td><strong style="color: #0f172a; font-family: monospace;">${u.username}</strong></td>
           <td>${u.name || '—'}</td>
           <td class="center">
-            <span class="badge ${u.role === 'ADMIN' ? 'badge-admin' : u.role === 'MANAGER' ? 'badge-manager' : 'badge-operator'}">
+            <span class="badge ${u.role === 'ADMIN' ? 'badge-admin' : u.role === 'MANAGER' ? 'badge-manager' : u.role === 'OWNER' ? 'badge-owner' : 'badge-operator'}">
               ${u.role}
             </span>
           </td>
@@ -312,6 +318,10 @@ export const UsersPage: React.FC = () => {
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isOwnerUser) {
+      setFormError('Owner logins cannot create managers.');
+      return;
+    }
     if (!formData.username || !formData.name || !formData.password || !formData.role) {
       setFormError('Username, full name, password and role are required.');
       return;
@@ -477,8 +487,8 @@ export const UsersPage: React.FC = () => {
             borderRadius: '4px',
             fontSize: '12px',
             fontWeight: 700,
-            background: u.role === 'ADMIN' ? '#e0e7ff' : u.role === 'MANAGER' ? '#fef3c7' : '#e0f2fe',
-            color: u.role === 'ADMIN' ? '#3730a3' : u.role === 'MANAGER' ? '#92400e' : '#0369a1',
+            background: u.role === 'ADMIN' ? '#e0e7ff' : u.role === 'MANAGER' ? '#fef3c7' : u.role === 'OWNER' ? '#f3e8ff' : '#e0f2fe',
+            color: u.role === 'ADMIN' ? '#3730a3' : u.role === 'MANAGER' ? '#92400e' : u.role === 'OWNER' ? '#6b21a8' : '#0369a1',
           }}
         >
           {u.role}
@@ -529,11 +539,14 @@ export const UsersPage: React.FC = () => {
     <div>
       <div className="card-header" style={{ marginBottom: '24px' }}>
         <div>
-          <h2 style={{ fontSize: '22px', fontWeight: 800 }}>User Management</h2>
+          <h2 style={{ fontSize: '22px', fontWeight: 800 }}>{isOwnerUser ? 'Managers' : 'User Management'}</h2>
           <p style={{ color: 'var(--text-muted)', fontSize: '13.5px' }}>
-            Create and maintain Admin & Mobile Transport Operator user credentials
+            {isOwnerUser
+              ? 'View managers linked to your owner login'
+              : 'Create and maintain Admin & Mobile Transport Operator user credentials'}
           </p>
         </div>
+        {!isOwnerUser && (
         <button
           onClick={() => {
             resetForm();
@@ -543,6 +556,7 @@ export const UsersPage: React.FC = () => {
         >
           <UserPlus size={18} /> Create New User
         </button>
+        )}
       </div>
 
       <div className="card">
@@ -563,6 +577,7 @@ export const UsersPage: React.FC = () => {
           </div>
 
           <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
+            {!isOwnerUser && (
             <select
               className="form-control form-select"
               style={{ width: '160px' }}
@@ -575,8 +590,10 @@ export const UsersPage: React.FC = () => {
               <option value="">All Roles</option>
               <option value="ADMIN">ADMIN</option>
               <option value="MANAGER">MANAGER</option>
+              <option value="OWNER">OWNER</option>
               <option value="TRANSPORT_USER">TRANSPORT_USER</option>
             </select>
+            )}
 
             <select
               className="form-control form-select"
@@ -674,20 +691,26 @@ export const UsersPage: React.FC = () => {
       <Modal
         isOpen={isCreateModalOpen}
         onClose={() => setIsCreateModalOpen(false)}
-        title="Create New User"
+        title={isOwnerUser ? 'Create Manager' : 'Create New User'}
       >
         {formError && (
           <div style={{ color: '#b91c1c', background: '#fef2f2', padding: '10px', borderRadius: '8px', marginBottom: '16px', fontSize: '13px' }}>
             {formError}
           </div>
         )}
-        <form onSubmit={handleCreate}>
+        <form onSubmit={handleCreate} autoComplete="off">
+          <input type="text" name="fake_user" autoComplete="username" style={{ display: 'none' }} tabIndex={-1} />
+          <input type="password" name="fake_pass" autoComplete="current-password" style={{ display: 'none' }} tabIndex={-1} />
           <div className="form-group">
             <label className="form-label">Username *</label>
             <input
               type="text"
               className="form-control"
               required
+              name="ksp_new_username"
+              autoComplete="off"
+              autoCorrect="off"
+              spellCheck={false}
               placeholder="e.g. jdoe or driver_rajan"
               value={formData.username}
               onChange={(e) => setFormData({ ...formData, username: e.target.value })}
@@ -712,6 +735,8 @@ export const UsersPage: React.FC = () => {
               type="password"
               className="form-control"
               required
+              name="ksp_new_password"
+              autoComplete="new-password"
               placeholder="Enter secure initial password"
               value={formData.password}
               onChange={(e) => setFormData({ ...formData, password: e.target.value })}
@@ -722,8 +747,11 @@ export const UsersPage: React.FC = () => {
             <div className="form-group">
               <label className="form-label">Email</label>
               <input
-                type="email"
+                type="text"
                 className="form-control"
+                name="ksp_new_email"
+                autoComplete="off"
+                inputMode="email"
                 placeholder="optional@example.com"
                 value={formData.email}
                 onChange={(e) => setFormData({ ...formData, email: e.target.value })}
@@ -744,6 +772,9 @@ export const UsersPage: React.FC = () => {
           <div className="grid-cols-2">
             <div className="form-group">
               <label className="form-label">Role *</label>
+              {isOwnerUser ? (
+                <input className="form-control" value="MANAGER" disabled />
+              ) : (
               <select
                 className="form-control form-select"
                 value={formData.role}
@@ -751,8 +782,10 @@ export const UsersPage: React.FC = () => {
               >
                 <option value="MANAGER">MANAGER (Fleet Manager)</option>
                 <option value="ADMIN">ADMIN (Full Access)</option>
+                <option value="OWNER">OWNER (Owner Portal)</option>
                 <option value="TRANSPORT_USER">TRANSPORT_USER (Mobile App)</option>
               </select>
+              )}
             </div>
 
             <div className="form-group">
@@ -794,7 +827,7 @@ export const UsersPage: React.FC = () => {
             {formError}
           </div>
         )}
-        <form onSubmit={handleEdit}>
+        <form onSubmit={handleEdit} autoComplete="off">
 
           {/* Username (read-only) */}
           <div className="form-group">
@@ -827,8 +860,11 @@ export const UsersPage: React.FC = () => {
             <div className="form-group">
               <label className="form-label">Email</label>
               <input
-                type="email"
+                type="text"
                 className="form-control"
+                name="ksp_edit_email"
+                autoComplete="off"
+                inputMode="email"
                 value={formData.email}
                 onChange={(e) => setFormData({ ...formData, email: e.target.value })}
               />
@@ -846,6 +882,9 @@ export const UsersPage: React.FC = () => {
 
           <div className="form-group">
             <label className="form-label">Role *</label>
+            {isOwnerUser ? (
+              <input className="form-control" value="MANAGER" disabled />
+            ) : (
             <select
               className="form-control form-select"
               value={formData.role}
@@ -853,8 +892,10 @@ export const UsersPage: React.FC = () => {
             >
               <option value="MANAGER">MANAGER</option>
               <option value="ADMIN">ADMIN</option>
+              <option value="OWNER">OWNER</option>
               <option value="TRANSPORT_USER">TRANSPORT_USER</option>
             </select>
+            )}
           </div>
 
           {/* Optional New Password */}
@@ -866,6 +907,8 @@ export const UsersPage: React.FC = () => {
             <input
               type="password"
               className="form-control"
+              name="ksp_edit_password"
+              autoComplete="new-password"
               placeholder="Enter new password (min 6 characters)"
               value={formData.editPassword}
               onChange={(e) => setFormData({ ...formData, editPassword: e.target.value })}
@@ -894,13 +937,15 @@ export const UsersPage: React.FC = () => {
             {formError}
           </div>
         )}
-        <form onSubmit={handleResetPassword}>
+        <form onSubmit={handleResetPassword} autoComplete="off">
           <div className="form-group">
             <label className="form-label">New Password * (Min 6 characters)</label>
             <input
               type="password"
               className="form-control"
               required
+              name="ksp_reset_password"
+              autoComplete="new-password"
               placeholder="Enter new password"
               value={newPassword}
               onChange={(e) => setNewPassword(e.target.value)}

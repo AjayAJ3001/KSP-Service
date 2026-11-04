@@ -4,7 +4,7 @@ export interface User {
   name: string;
   email?: string;
   mobile_number?: string;
-  role: 'ADMIN' | 'TRANSPORT_USER';
+  role: 'ADMIN' | 'MANAGER' | 'TRANSPORT_USER' | 'OWNER';
   driver_id?: number;
   status: 'ACTIVE' | 'INACTIVE';
   created_at: Date;
@@ -18,6 +18,11 @@ export interface Driver {
   mobile_number?: string;
   license_number?: string;
   status: 'ACTIVE' | 'INACTIVE';
+  total_advance_given?: number;
+  total_expenses_reported?: number;
+  remaining_advance_balance?: number;
+  driver_balance?: number;
+  pending_owed_to_driver?: number;
   created_at: Date;
   updated_at: Date;
 }
@@ -266,3 +271,27 @@ export interface OtherExpenseLimit {
   created_at: Date;
   updated_at: Date;
 }
+
+export interface OwnerAdvance {
+  id: number;
+  owner_id: number;
+  owner_name?: string;
+  recipient_type: 'MANAGER' | 'DRIVER';
+  manager_id?: number | null;
+  manager_name?: string | null;
+  driver_id?: number | null;
+  driver_name?: string | null;
+  driver_mobile?: string | null;
+  vehicle_id?: number | null;
+  lorry_number?: string | null;
+  amount: number;
+  advance_date: Date | string;
+  payment_mode?: string;
+  screenshot_url?: string | null;
+  notes?: string | null;
+  created_by?: number;
+  created_by_name?: string;
+  created_at: Date;
+  updated_at: Date;
+}
+

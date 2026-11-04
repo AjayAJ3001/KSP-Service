@@ -13,8 +13,8 @@ router.use(authenticate);
 
 router.get('/', getUnloadingRates);
 router.get('/:id', getUnloadingRateById);
-router.post('/', authorize('ADMIN'), createUnloadingRate);
-router.put('/:id', authorize('ADMIN'), updateUnloadingRate);
-router.delete('/:id', authorize('ADMIN'), deleteUnloadingRate);
+router.post('/', authorize('ADMIN', 'OWNER'), createUnloadingRate);
+router.put('/:id', authorize('ADMIN', 'OWNER'), updateUnloadingRate);
+router.delete('/:id', authorize('ADMIN', 'OWNER'), deleteUnloadingRate);
 
 export default router;

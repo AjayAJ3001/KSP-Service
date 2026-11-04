@@ -19,26 +19,35 @@ import {
   Receipt,
   BookOpen,
   RotateCcw,
+  Truck,
+  User as UserIcon,
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import * as XLSX from 'xlsx';
-import { ownerAdvanceService, ownerService, userService } from '../services/adminService';
-import { OwnerAdvance, Owner, User } from '../types';
+import { ownerAdvanceService, ownerService, userService, driverService, vehicleService } from '../services/adminService';
+import { OwnerAdvance, Owner, User, Driver, Vehicle } from '../types';
 import { DataTable, Column } from '../components/Common/DataTable';
 import { Modal } from '../components/Common/Modal';
 import { formatIST } from '../utils/dateUtils';
 import { DateField } from '../components/Common/DateField';
+import { useAuth } from '../context/AuthContext';
+import { PRINT_BRAND_CSS, printBrandLockup } from '../utils/printBrand';
 
 export const OwnerAdvancesPage: React.FC = () => {
+  const { user: authUser } = useAuth();
   const [advances, setAdvances] = useState<OwnerAdvance[]>([]);
   const [owners, setOwners] = useState<Owner[]>([]);
   const [managers, setManagers] = useState<User[]>([]);
+  const [drivers, setDrivers] = useState<Driver[]>([]);
+  const [vehicles, setVehicles] = useState<Vehicle[]>([]);
   const [total, setTotal] = useState(0);
   const [totalAmount, setTotalAmount] = useState(0);
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState('');
   const [ownerFilter, setOwnerFilter] = useState('');
+  const [recipientTypeFilter, setRecipientTypeFilter] = useState('');
   const [managerFilter, setManagerFilter] = useState('');
+  const [driverFilter, setDriverFilter] = useState('');
   const [paymentModeFilter, setPaymentModeFilter] = useState('');
   const [fromDate, setFromDate] = useState('');
   const [toDate, setToDate] = useState('');
@@ -50,9 +59,23 @@ export const OwnerAdvancesPage: React.FC = () => {
   // Modal
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [selectedAdvance, setSelectedAdvance] = useState<OwnerAdvance | null>(null);
-  const [formData, setFormData] = useState({
+  const [formData, setFormData] = useState<{
+    owner_id: string;
+    recipient_type: 'MANAGER' | 'DRIVER';
+    manager_id: string;
+    driver_id: string;
+    vehicle_id: string;
+    amount: string;
+    advance_date: string;
+    payment_mode: string;
+    screenshot_url: string;
+    notes: string;
+  }>({
     owner_id: '',
+    recipient_type: 'MANAGER',
     manager_id: '',
+    driver_id: '',
+    vehicle_id: '',
     amount: '',
     advance_date: '',
     payment_mode: 'CASH',
@@ -71,18 +94,22 @@ export const OwnerAdvancesPage: React.FC = () => {
 
   useEffect(() => {
     loadAdvances();
-  }, [page, search, ownerFilter, managerFilter, paymentModeFilter, fromDate, toDate]);
+  }, [page, search, ownerFilter, recipientTypeFilter, managerFilter, driverFilter, paymentModeFilter, fromDate, toDate]);
 
   const loadLookups = async () => {
     try {
-      const [oRes, uRes] = await Promise.all([
+      const [oRes, uRes, dRes, vRes] = await Promise.all([
         ownerService.getOwners({ limit: 100 }),
-        userService.getUsers({ limit: 100, status: 'ACTIVE' }),
+        userService.getUsers({ limit: 200, status: 'ACTIVE', for_advance: true }),
+        driverService.getDrivers({ limit: 500, status: 'ACTIVE' }),
+        vehicleService.getVehicles({ limit: 200 }),
       ]);
-      setOwners(oRes.data.items);
+      setOwners(oRes.data.items || []);
       // Only show users with role MANAGER
-      const managerUsers = uRes.data.items.filter((u) => u.role === 'MANAGER');
+      const managerUsers = (uRes.data.items || []).filter((u) => u.role === 'MANAGER' || u.role === 'ADMIN');
       setManagers(managerUsers);
+      setDrivers(dRes.data.items || []);
+      setVehicles(vRes.data.items || []);
     } catch (err) {
       console.error('Failed to load lookups', err);
     }
@@ -96,7 +123,9 @@ export const OwnerAdvancesPage: React.FC = () => {
         limit: 10,
         search: search || undefined,
         owner_id: ownerFilter ? parseInt(ownerFilter) : undefined,
+        recipient_type: recipientTypeFilter || undefined,
         manager_id: managerFilter ? parseInt(managerFilter) : undefined,
+        driver_id: driverFilter ? parseInt(driverFilter) : undefined,
         payment_mode: paymentModeFilter || undefined,
         from_date: fromDate || undefined,
         to_date: toDate || undefined,
@@ -134,8 +163,18 @@ export const OwnerAdvancesPage: React.FC = () => {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!formData.owner_id || !formData.manager_id || !formData.amount) {
-      setFormError('Owner, Manager (Received By), and Advance Amount are required.');
+    if (!formData.owner_id || !formData.amount) {
+      setFormError('Owner and Advance Amount are required.');
+      return;
+    }
+
+    if (formData.recipient_type === 'MANAGER' && !formData.manager_id) {
+      setFormError('Please select the receiving manager.');
+      return;
+    }
+
+    if (formData.recipient_type === 'DRIVER' && !formData.driver_id) {
+      setFormError('Please select the receiving driver.');
       return;
     }
 
@@ -150,7 +189,10 @@ export const OwnerAdvancesPage: React.FC = () => {
       setFormError('');
       const payload = {
         owner_id: parseInt(formData.owner_id),
-        manager_id: parseInt(formData.manager_id),
+        recipient_type: formData.recipient_type,
+        manager_id: formData.recipient_type === 'MANAGER' ? parseInt(formData.manager_id) : undefined,
+        driver_id: formData.recipient_type === 'DRIVER' ? parseInt(formData.driver_id) : undefined,
+        vehicle_id: formData.vehicle_id ? parseInt(formData.vehicle_id) : undefined,
         amount: numAmount,
         advance_date: formData.advance_date ? new Date(formData.advance_date).toISOString() : new Date().toISOString(),
         payment_mode: formData.payment_mode || 'CASH',
@@ -176,7 +218,8 @@ export const OwnerAdvancesPage: React.FC = () => {
   };
 
   const handleDelete = async (item: OwnerAdvance) => {
-    if (!confirm(`Are you sure you want to delete advance record of ₹${item.amount} from ${item.owner_name}?`)) return;
+    const recipientDisplay = item.recipient_type === 'DRIVER' || item.driver_id ? `Driver ${item.driver_name}` : `Manager ${item.manager_name}`;
+    if (!confirm(`Are you sure you want to delete advance record of ₹${item.amount} from ${item.owner_name} to ${recipientDisplay}?`)) return;
     try {
       await ownerAdvanceService.deleteOwnerAdvance(item.id);
       loadAdvances();
@@ -194,8 +237,11 @@ export const OwnerAdvancesPage: React.FC = () => {
   const openEditModal = (item: OwnerAdvance) => {
     setSelectedAdvance(item);
     setFormData({
-      owner_id: String(item.owner_id),
-      manager_id: String(item.manager_id),
+      owner_id: String(item.owner_id || ''),
+      recipient_type: item.recipient_type || (item.driver_id ? 'DRIVER' : 'MANAGER'),
+      manager_id: item.manager_id ? String(item.manager_id) : '',
+      driver_id: item.driver_id ? String(item.driver_id) : '',
+      vehicle_id: item.vehicle_id ? String(item.vehicle_id) : '',
       amount: String(item.amount),
       advance_date: item.advance_date,
       payment_mode: item.payment_mode || 'CASH',
@@ -207,9 +253,16 @@ export const OwnerAdvancesPage: React.FC = () => {
   };
 
   const resetForm = () => {
+    const defaultOwnerId =
+      authUser?.role === 'OWNER' && owners.length
+        ? String(owners.length === 1 ? owners[0].id : owners[0].id)
+        : '';
     setFormData({
-      owner_id: '',
+      owner_id: defaultOwnerId,
+      recipient_type: 'MANAGER',
       manager_id: '',
+      driver_id: '',
+      vehicle_id: '',
       amount: '',
       advance_date: '',
       payment_mode: 'CASH',
@@ -264,13 +317,23 @@ export const OwnerAdvancesPage: React.FC = () => {
       setToDate(todayStr);
       setPage(1);
     } else if (type === 'clear') {
-      setFromDate('');
-      setToDate('');
-      setSearch('');
-      setOwnerFilter('');
-      setManagerFilter('');
-      setPaymentModeFilter('');
-      setPage(1);
+      resetFilters();
+    }
+  };
+
+  const resetFilters = () => {
+    const hadFilter = Boolean(fromDate || toDate || search || ownerFilter || recipientTypeFilter || managerFilter || driverFilter || paymentModeFilter || page !== 1);
+    setFromDate('');
+    setToDate('');
+    setSearch('');
+    setOwnerFilter('');
+    setRecipientTypeFilter('');
+    setManagerFilter('');
+    setDriverFilter('');
+    setPaymentModeFilter('');
+    setPage(1);
+    if (!hadFilter) {
+      loadAdvances();
     }
   };
 
@@ -281,7 +344,9 @@ export const OwnerAdvancesPage: React.FC = () => {
         limit: Math.max(total, 5000) || 5000,
         search: search || undefined,
         owner_id: ownerFilter ? parseInt(ownerFilter) : undefined,
+        recipient_type: recipientTypeFilter || undefined,
         manager_id: managerFilter ? parseInt(managerFilter) : undefined,
+        driver_id: driverFilter ? parseInt(driverFilter) : undefined,
         payment_mode: paymentModeFilter || undefined,
         from_date: fromDate || undefined,
         to_date: toDate || undefined,
@@ -307,15 +372,23 @@ export const OwnerAdvancesPage: React.FC = () => {
         return;
       }
 
-      const exportRows = allItems.map((item, idx) => ({
-        'S.No': idx + 1,
-        'Date & Time': formatDateTime(item.advance_date, item.created_at),
-        'Owner Name (Given By)': item.owner_name || 'N/A',
-        'Received By (Manager)': item.manager_name || 'N/A',
-        'Advance Amount (₹)': Number(item.amount) || 0,
-        'Payment Mode': item.payment_mode || 'CASH',
-        'Notes / Remarks': item.notes || '—',
-      }));
+      const exportRows = allItems.map((item, idx) => {
+        const isDriver = item.recipient_type === 'DRIVER' || item.driver_id;
+        const recipientName = isDriver
+          ? `${item.driver_name || 'Driver'}${item.lorry_number ? ` (Truck: ${item.lorry_number})` : ''}`
+          : (item.manager_name || 'Manager');
+
+        return {
+          'S.No': idx + 1,
+          'Date & Time': formatDateTime(item.advance_date, item.created_at),
+          'Owner Name (Given By)': item.owner_name || 'N/A',
+          'Recipient Type': isDriver ? 'Driver (Direct)' : 'Manager',
+          'Received By': recipientName,
+          'Advance Amount (₹)': Number(item.amount) || 0,
+          'Payment Mode': item.payment_mode || 'CASH',
+          'Notes / Remarks': item.notes || '—',
+        };
+      });
 
       const sumAmount = allItems.reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0);
 
@@ -324,7 +397,8 @@ export const OwnerAdvancesPage: React.FC = () => {
         'S.No': '' as any,
         'Date & Time': '',
         'Owner Name (Given By)': '',
-        'Received By (Manager)': '',
+        'Recipient Type': '',
+        'Received By': '',
         'Advance Amount (₹)': '' as any,
         'Payment Mode': '',
         'Notes / Remarks': '',
@@ -334,7 +408,8 @@ export const OwnerAdvancesPage: React.FC = () => {
         'S.No': 'TOTAL' as any,
         'Date & Time': `Total: ${allItems.length} Advances`,
         'Owner Name (Given By)': '',
-        'Received By (Manager)': '',
+        'Recipient Type': '',
+        'Received By': '',
         'Advance Amount (₹)': sumAmount,
         'Payment Mode': '',
         'Notes / Remarks': '',
@@ -345,7 +420,8 @@ export const OwnerAdvancesPage: React.FC = () => {
         { wch: 8 },  // S.No
         { wch: 22 }, // Date & Time
         { wch: 26 }, // Owner Name
-        { wch: 24 }, // Manager Name
+        { wch: 18 }, // Recipient Type
+        { wch: 26 }, // Received By
         { wch: 20 }, // Advance Amount
         { wch: 22 }, // Payment Mode
         { wch: 35 }, // Notes
@@ -356,14 +432,18 @@ export const OwnerAdvancesPage: React.FC = () => {
 
       // Summary sheet
       const selectedOwnerName = ownerFilter ? owners.find((o) => String(o.id) === String(ownerFilter))?.name || 'Selected' : 'All Owners';
+      const selectedRecipient = recipientTypeFilter === 'DRIVER' ? 'Drivers Directly' : recipientTypeFilter === 'MANAGER' ? 'Managers' : 'All Recipients';
       const selectedManagerName = managerFilter ? managers.find((m) => String(m.id) === String(managerFilter))?.name || 'Selected' : 'All Managers';
+      const selectedDriverName = driverFilter ? drivers.find((d) => String(d.id) === String(driverFilter))?.name || 'Selected' : 'All Drivers';
       const summaryRows = [
         { 'Metric / Field': 'Report Name', 'Value': 'Owner Advances Audit Report' },
         { 'Metric / Field': 'Total Advance Transactions', 'Value': allItems.length },
         { 'Metric / Field': 'Total Advance Amount (₹)', 'Value': sumAmount },
         { 'Metric / Field': 'Average Advance per Entry (₹)', 'Value': allItems.length > 0 ? (sumAmount / allItems.length).toFixed(2) : 0 },
         { 'Metric / Field': 'Owner Filter', 'Value': selectedOwnerName },
+        { 'Metric / Field': 'Recipient Type Filter', 'Value': selectedRecipient },
         { 'Metric / Field': 'Manager Filter', 'Value': selectedManagerName },
+        { 'Metric / Field': 'Driver Filter', 'Value': selectedDriverName },
         { 'Metric / Field': 'Payment Mode Filter', 'Value': paymentModeFilter || 'All Modes' },
         { 'Metric / Field': 'Date Range', 'Value': fromDate || toDate ? `${fromDate || 'Start'} to ${toDate || 'End'}` : 'All Dates' },
         { 'Metric / Field': 'Export Timestamp', 'Value': new Date().toLocaleString('en-IN') },
@@ -396,20 +476,28 @@ export const OwnerAdvancesPage: React.FC = () => {
         return;
       }
 
-      const headers = ['S.No', 'Date & Time', 'Owner Name (Given By)', 'Received By (Manager)', 'Advance Amount (INR)', 'Payment Mode', 'Notes / Remarks'];
-      const rows = allItems.map((item, idx) => [
-        idx + 1,
-        `"${formatDateTime(item.advance_date, item.created_at)}"`,
-        `"${item.owner_name || ''}"`,
-        `"${item.manager_name || ''}"`,
-        Number(item.amount) || 0,
-        `"${item.payment_mode || 'CASH'}"`,
-        `"${(item.notes || '').replace(/"/g, '""')}"`,
-      ]);
+      const headers = ['S.No', 'Date & Time', 'Owner Name (Given By)', 'Recipient Type', 'Received By', 'Advance Amount (INR)', 'Payment Mode', 'Notes / Remarks'];
+      const rows = allItems.map((item, idx) => {
+        const isDriver = item.recipient_type === 'DRIVER' || item.driver_id;
+        const recipientName = isDriver
+          ? `${item.driver_name || 'Driver'}${item.lorry_number ? ` (Truck: ${item.lorry_number})` : ''}`
+          : (item.manager_name || 'Manager');
+
+        return [
+          idx + 1,
+          `"${formatDateTime(item.advance_date, item.created_at)}"`,
+          `"${item.owner_name || ''}"`,
+          `"${isDriver ? 'Driver (Direct)' : 'Manager'}"`,
+          `"${recipientName}"`,
+          Number(item.amount) || 0,
+          `"${item.payment_mode || 'CASH'}"`,
+          `"${(item.notes || '').replace(/"/g, '""')}"`,
+        ];
+      });
 
       const sumAmount = allItems.reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0);
-      rows.push(['', '', '', '', '', '', '']);
-      rows.push(['TOTAL', `"Total: ${allItems.length} Advances"`, '', '', sumAmount, '', '']);
+      rows.push(['', '', '', '', '', '', '', '']);
+      rows.push(['TOTAL', `"Total: ${allItems.length} Advances"`, '', '', '', sumAmount, '', '']);
 
       const csvContent = 'data:text/csv;charset=utf-8,' + [headers.join(','), ...rows.map((r) => r.join(','))].join('\n');
       const encodedUri = encodeURI(csvContent);
@@ -452,10 +540,11 @@ export const OwnerAdvancesPage: React.FC = () => {
   <meta charset="utf-8" />
   <title>KSP Logistics - Owner Advances Report</title>
   <style>
+    ${PRINT_BRAND_CSS}
     * { box-sizing: border-box; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
     body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif; margin: 0; padding: 20px; color: #1e293b; background: #fff; font-size: 11.5px; }
     @page { size: landscape; margin: 10mm; }
-    .header-bar { display: flex; justify-content: space-between; align-items: flex-start; padding-bottom: 12px; border-bottom: 2px solid #0f172a; margin-bottom: 14px; }
+    .header-bar { display: flex; justify-content: space-between; align-items: center; padding-bottom: 10px; border-bottom: 3px solid #0f172a; margin-bottom: 14px; }
     .company-title { font-size: 20px; font-weight: 800; color: #0f172a; letter-spacing: 0.5px; margin: 0 0 4px 0; }
     .report-subtitle { font-size: 13px; font-weight: 700; color: #2563eb; margin: 0; text-transform: uppercase; letter-spacing: 0.5px; }
     .meta-text { font-size: 11px; color: #64748b; margin: 0; }
@@ -484,7 +573,7 @@ export const OwnerAdvancesPage: React.FC = () => {
 
   <div class="header-bar">
     <div>
-      <h1 class="company-title">KSP TRANSPORT &amp; LOGISTICS</h1>
+      ${printBrandLockup()}
       <div class="report-subtitle">OWNER ADVANCE DISBURSEMENTS &amp; RECEIPTS REPORT</div>
     </div>
     <div style="text-align: right;">
@@ -498,27 +587,39 @@ export const OwnerAdvancesPage: React.FC = () => {
         <th class="center" style="width: 35px;">S.No</th>
         <th style="width: 140px;">Date &amp; Time</th>
         <th>Owner Name (Given By)</th>
-        <th>Received By (Manager)</th>
+        <th style="width: 125px;">Recipient Type</th>
+        <th>Received By</th>
         <th class="num" style="width: 120px;">Amount (₹)</th>
         <th style="width: 120px;">Payment Mode</th>
         <th>Notes / Remarks</th>
       </tr>
     </thead>
     <tbody>
-      ${allItems.map((item, idx) => `
+      ${allItems.map((item, idx) => {
+        const isDriver = item.recipient_type === 'DRIVER' || item.driver_id;
+        return `
         <tr>
           <td class="center">${idx + 1}</td>
           <td>${formatDateTime(item.advance_date, item.created_at)}</td>
           <td><strong>${item.owner_name || '-'}</strong></td>
-          <td><span class="badge">${item.manager_name || '-'}</span></td>
+          <td>
+            <span class="badge" style="${isDriver ? 'background:#ecfdf5;color:#047857;' : 'background:#e0f2fe;color:#0369a1;'}">
+              ${isDriver ? 'DRIVER (DIRECT)' : 'MANAGER'}
+            </span>
+          </td>
+          <td>
+            <strong>${isDriver ? (item.driver_name || 'Driver') : (item.manager_name || 'Manager')}</strong>
+            ${isDriver && item.lorry_number ? `<span style="font-size: 10.5px; color: #64748b; margin-left: 6px;">(Truck: ${item.lorry_number})</span>` : ''}
+          </td>
           <td class="num"><strong style="color: #15803d;">₹${Number(item.amount || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</strong></td>
           <td>${item.payment_mode || 'CASH'}</td>
           <td>${item.notes || '-'}</td>
         </tr>
-      `).join('')}
+      `;
+      }).join('')}
       <tr class="footer-row">
         <td class="center">TOTAL</td>
-        <td colspan="3"><strong>Total Records: ${allItems.length} Advances</strong></td>
+        <td colspan="4"><strong>Total Records: ${allItems.length} Advances</strong></td>
         <td class="num"><strong>₹${sumAmount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</strong></td>
         <td colspan="2"></td>
       </tr>
@@ -550,6 +651,11 @@ export const OwnerAdvancesPage: React.FC = () => {
   };
 
   const handlePrintSingleAdvance = (item: OwnerAdvance) => {
+    const isDriver = item.recipient_type === 'DRIVER' || item.driver_id;
+    const recipientTitle = isDriver ? 'Driver (Direct Advance)' : 'Manager (Staff)';
+    const recipientPerson = isDriver ? `${item.driver_name || 'Driver'}${item.lorry_number ? ` (Truck: ${item.lorry_number})` : ''}` : (item.manager_name || 'Manager');
+    const recipientSigName = isDriver ? (item.driver_name || 'Driver') : (item.manager_name || 'Manager');
+
     const printHtml = `
 <!DOCTYPE html>
 <html>
@@ -557,6 +663,7 @@ export const OwnerAdvancesPage: React.FC = () => {
   <meta charset="utf-8" />
   <title>Advance Voucher - OA-${item.id}</title>
   <style>
+    ${PRINT_BRAND_CSS}
     * { box-sizing: border-box; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
     body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif; margin: 0; padding: 24px; color: #0f172a; background: #fff; }
     @page { size: A5 landscape; margin: 8mm; }
@@ -591,7 +698,7 @@ export const OwnerAdvancesPage: React.FC = () => {
   <div class="voucher-box">
     <div class="voucher-header">
       <div>
-        <h1 class="company-name">KSP TRANSPORT &amp; LOGISTICS</h1>
+        ${printBrandLockup('Owner Advance Receipt')}
         <div class="voucher-title">OWNER ADVANCE RECEIPT VOUCHER</div>
       </div>
       <div style="text-align: right;">
@@ -610,11 +717,15 @@ export const OwnerAdvancesPage: React.FC = () => {
           <span class="info-label">Payment Mode:</span>
           <span class="info-val">${item.payment_mode || 'CASH'}</span>
         </div>
+        <div class="info-row">
+          <span class="info-label">Recipient Category:</span>
+          <span class="info-val" style="color: ${isDriver ? '#047857' : '#0369a1'}; font-weight: 700;">${recipientTitle}</span>
+        </div>
       </div>
       <div>
         <div class="info-row">
-          <span class="info-label">Received By (Manager):</span>
-          <span class="info-val">${item.manager_name}</span>
+          <span class="info-label">Received By:</span>
+          <span class="info-val">${recipientPerson}</span>
         </div>
         <div class="info-row">
           <span class="info-label">Recorded Timestamp:</span>
@@ -641,7 +752,7 @@ export const OwnerAdvancesPage: React.FC = () => {
       </div>
       <div class="sig-box">
         Received By Signature<br />
-        <span style="font-weight: 500; font-size: 11px; color: #64748b;">(${item.manager_name})</span>
+        <span style="font-weight: 500; font-size: 11px; color: #64748b;">(${recipientSigName})</span>
       </div>
     </div>
   </div>
@@ -695,22 +806,62 @@ export const OwnerAdvancesPage: React.FC = () => {
       ),
     },
     {
-      header: 'Received By (Manager)',
+      header: 'Received By (Recipient)',
       accessor: 'manager_name',
-      render: (r) => (
-        <span
-          style={{
-            fontWeight: 600,
-            color: '#0369a1',
-            background: '#f0f9ff',
-            padding: '4px 10px',
-            borderRadius: '6px',
-            fontSize: '13px',
-          }}
-        >
-          {r.manager_name}
-        </span>
-      ),
+      render: (r) => {
+        const isDriver = r.recipient_type === 'DRIVER' || (!r.manager_id && r.driver_id);
+        if (isDriver) {
+          return (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <span
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '4px',
+                    fontWeight: 700,
+                    color: '#047857',
+                    background: '#ecfdf5',
+                    border: '1px solid #a7f3d0',
+                    padding: '2px 8px',
+                    borderRadius: '5px',
+                    fontSize: '11px',
+                  }}
+                >
+                  <Truck size={12} /> DRIVER DIRECT
+                </span>
+                <strong style={{ color: '#0f172a', fontSize: '13px' }}>{r.driver_name || 'Driver'}</strong>
+              </div>
+              {r.lorry_number && (
+                <span style={{ fontSize: '11px', color: '#64748b' }}>
+                  Truck: <strong>{r.lorry_number}</strong>
+                </span>
+              )}
+            </div>
+          );
+        }
+        return (
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <span
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '4px',
+                fontWeight: 700,
+                color: '#0369a1',
+                background: '#f0f9ff',
+                border: '1px solid #bae6fd',
+                padding: '2px 8px',
+                borderRadius: '5px',
+                fontSize: '11px',
+              }}
+            >
+              <UserCheck size={12} /> MANAGER
+            </span>
+            <strong style={{ color: '#0f172a', fontSize: '13px' }}>{r.manager_name || 'Manager'}</strong>
+          </div>
+        );
+      },
     },
     {
       header: 'Advance Amount',
@@ -846,7 +997,23 @@ export const OwnerAdvancesPage: React.FC = () => {
             />
           </div>
 
-          <div style={{ width: '180px' }}>
+          <div style={{ width: '160px' }}>
+            <select
+              className="form-control form-select"
+              value={recipientTypeFilter}
+              onChange={(e) => {
+                setRecipientTypeFilter(e.target.value);
+                setPage(1);
+              }}
+              style={{ width: '100%', fontWeight: recipientTypeFilter ? 700 : 400 }}
+            >
+              <option value="">All Recipients</option>
+              <option value="MANAGER">🏢 Managers Only</option>
+              <option value="DRIVER">🚚 Drivers Directly</option>
+            </select>
+          </div>
+
+          <div style={{ width: '170px' }}>
             <select
               className="form-control form-select"
               value={ownerFilter}
@@ -865,26 +1032,49 @@ export const OwnerAdvancesPage: React.FC = () => {
             </select>
           </div>
 
-          <div style={{ width: '170px' }}>
-            <select
-              className="form-control form-select"
-              value={managerFilter}
-              onChange={(e) => {
-                setManagerFilter(e.target.value);
-                setPage(1);
-              }}
-              style={{ width: '100%' }}
-            >
-              <option value="">All Managers</option>
-              {managers.map((m) => (
-                <option key={m.id} value={m.id}>
-                  {m.name}
-                </option>
-              ))}
-            </select>
-          </div>
+          {recipientTypeFilter !== 'DRIVER' && (
+            <div style={{ width: '160px' }}>
+              <select
+                className="form-control form-select"
+                value={managerFilter}
+                onChange={(e) => {
+                  setManagerFilter(e.target.value);
+                  setPage(1);
+                }}
+                style={{ width: '100%' }}
+              >
+                <option value="">All Managers</option>
+                {managers.map((m) => (
+                  <option key={m.id} value={m.id}>
+                    {m.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
 
-          <div style={{ width: '180px' }}>
+          {recipientTypeFilter !== 'MANAGER' && (
+            <div style={{ width: '160px' }}>
+              <select
+                className="form-control form-select"
+                value={driverFilter}
+                onChange={(e) => {
+                  setDriverFilter(e.target.value);
+                  setPage(1);
+                }}
+                style={{ width: '100%' }}
+              >
+                <option value="">All Drivers</option>
+                {drivers.map((d) => (
+                  <option key={d.id} value={d.id}>
+                    {d.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          <div style={{ width: '170px' }}>
             <select
               className="form-control form-select"
               value={paymentModeFilter}
@@ -941,7 +1131,7 @@ export const OwnerAdvancesPage: React.FC = () => {
             type="button"
             className="btn btn-outline"
             style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', height: '38px', padding: '0 14px', fontSize: '12.5px' }}
-            onClick={() => setQuickDate('clear')}
+            onClick={resetFilters}
             title="Reset all filters"
           >
             <RotateCcw size={14} /> Reset
@@ -1111,25 +1301,126 @@ export const OwnerAdvancesPage: React.FC = () => {
             </select>
           </div>
 
-          {/* Select Manager */}
-          <div className="form-group">
-            <label className="form-label">
-              Select Manager (Received By) *
+          {/* Select Recipient Type (Manager vs Driver) */}
+          <div className="form-group" style={{ marginBottom: '16px' }}>
+            <label className="form-label" style={{ fontWeight: 700, marginBottom: '6px' }}>
+              Advance Given To (Recipient) *
             </label>
-            <select
-              className="form-control form-select"
-              required
-              value={formData.manager_id}
-              onChange={(e) => setFormData({ ...formData, manager_id: e.target.value })}
-            >
-              <option value="">-- Choose Manager --</option>
-              {managers.map((m) => (
-                <option key={m.id} value={m.id}>
-                  {m.name}
-                </option>
-              ))}
-            </select>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+              <button
+                type="button"
+                onClick={() => setFormData((prev) => ({ ...prev, recipient_type: 'MANAGER', driver_id: '', vehicle_id: '' }))}
+                style={{
+                  padding: '10px 14px',
+                  borderRadius: '8px',
+                  border: formData.recipient_type === 'MANAGER' ? '2px solid #2563eb' : '1px solid #cbd5e1',
+                  background: formData.recipient_type === 'MANAGER' ? '#eff6ff' : '#fff',
+                  color: formData.recipient_type === 'MANAGER' ? '#1d4ed8' : '#475569',
+                  fontWeight: formData.recipient_type === 'MANAGER' ? 700 : 500,
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '8px',
+                  transition: 'all 0.15s ease',
+                }}
+              >
+                <UserCheck size={18} />
+                <span>To Manager</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setFormData((prev) => ({ ...prev, recipient_type: 'DRIVER', manager_id: '' }))}
+                style={{
+                  padding: '10px 14px',
+                  borderRadius: '8px',
+                  border: formData.recipient_type === 'DRIVER' ? '2px solid #059669' : '1px solid #cbd5e1',
+                  background: formData.recipient_type === 'DRIVER' ? '#ecfdf5' : '#fff',
+                  color: formData.recipient_type === 'DRIVER' ? '#047857' : '#475569',
+                  fontWeight: formData.recipient_type === 'DRIVER' ? 700 : 500,
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '8px',
+                  transition: 'all 0.15s ease',
+                }}
+              >
+                <Truck size={18} />
+                <span>Directly to Driver</span>
+              </button>
+            </div>
           </div>
+
+          {/* Conditional: Select Manager */}
+          {formData.recipient_type === 'MANAGER' && (
+            <div className="form-group">
+              <label className="form-label">
+                Select Manager (Received By) *
+              </label>
+              <select
+                className="form-control form-select"
+                required
+                value={formData.manager_id}
+                onChange={(e) => setFormData({ ...formData, manager_id: e.target.value })}
+              >
+                <option value="">-- Choose Manager --</option>
+                {managers.length === 0 && (
+                  <option value="" disabled>No managers found</option>
+                )}
+                {managers.map((m) => (
+                  <option key={m.id} value={m.id}>
+                    {m.name} {m.username ? `(${m.username})` : ''}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          {/* Conditional: Select Driver & Optional Vehicle */}
+          {formData.recipient_type === 'DRIVER' && (
+            <>
+              <div className="form-group">
+                <label className="form-label">
+                  Select Driver (Received By) *
+                </label>
+                <select
+                  className="form-control form-select"
+                  required
+                  value={formData.driver_id}
+                  onChange={(e) => setFormData({ ...formData, driver_id: e.target.value })}
+                >
+                  <option value="">-- Choose Driver --</option>
+                  {drivers.length === 0 && (
+                    <option value="" disabled>No drivers found</option>
+                  )}
+                  {drivers.map((d) => (
+                    <option key={d.id} value={d.id}>
+                      {d.name} {d.mobile_number ? `(${d.mobile_number})` : ''}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="form-group">
+                <label className="form-label">
+                  Associated Vehicle / Truck (Optional)
+                </label>
+                <select
+                  className="form-control form-select"
+                  value={formData.vehicle_id}
+                  onChange={(e) => setFormData({ ...formData, vehicle_id: e.target.value })}
+                >
+                  <option value="">-- None / Any Truck --</option>
+                  {vehicles.map((v) => (
+                    <option key={v.id} value={v.id}>
+                      {v.lorry_number}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </>
+          )}
 
           {/* Advance Amount & Payment Mode */}
           <div className="grid-cols-2">

@@ -15,6 +15,7 @@ import {
   FlatList,
   Animated,
   Easing,
+  TextInput,
 } from 'react-native';
 import {
   Truck,
@@ -34,12 +35,31 @@ import {
   Download,
   Share2,
   Scale,
+  Wallet,
+  AlertCircle,
+  CheckCircle2,
+  Search,
+  Printer,
+  Check,
+  RefreshCw,
 } from 'lucide-react-native';
 import { useAuth } from '../context/AuthContext';
-import { mobileDashboardService, mobileLookupService } from '../services/mobileService';
+import {
+  mobileDashboardService,
+  mobileLookupService,
+  mobileDriverAdvanceService,
+  mobileSettlementService,
+} from '../services/mobileService';
 import { MobileDashboardData, Trip, Vehicle } from '../types';
 import { COLORS, SPACING, RADIUS, SHADOWS } from '../constants/theme';
-import { downloadTripPdf, shareTripPdf } from '../utils/pdfGenerator';
+import {
+  downloadTripPdf,
+  shareTripPdf,
+  printDriverStatementPdf,
+  downloadDriverStatementPdf,
+  shareDriverStatementPdf,
+} from '../utils/pdfGenerator';
+import { buildDriverTripStories, getSettlementBreakdown } from '../utils/driverTripStories';
 
 /* ─── helpers ──────────────────────────────────────────────── */
 const getDaysDifference = (expiryDateStr?: string) => {
@@ -78,8 +98,9 @@ interface SheetProps {
   visible: boolean;
   onClose: () => void;
   children: React.ReactNode;
+  sheetStyle?: any;
 }
-const BottomSheet: React.FC<SheetProps> = ({ visible, onClose, children }) => (
+const BottomSheet: React.FC<SheetProps> = ({ visible, onClose, children, sheetStyle }) => (
   <Modal
     visible={visible}
     transparent
@@ -95,7 +116,7 @@ const BottomSheet: React.FC<SheetProps> = ({ visible, onClose, children }) => (
         onPress={onClose}
       />
       {/* Sheet content container */}
-      <View style={mStyles.sheet}>
+      <View style={[mStyles.sheet, sheetStyle]}>
         <View style={mStyles.handle} />
         {children}
       </View>
@@ -189,6 +210,1186 @@ const AdvanceDetailModal: React.FC<AdvanceModalProps> = ({
 );
 
 /* ─────────────────────────────────────────────────────────────
+   Driver Advance & Balance Modal
+───────────────────────────────────────────────────────────── */
+interface DriverAdvanceModalProps {
+  visible: boolean;
+  onClose: () => void;
+  balances: {
+    driver_id: number;
+    driver_name: string;
+    driver_mobile?: string;
+    total_advance_given: number;
+    total_expenses: number;
+    balance_in_manager_hand: number;
+  }[];
+  formatCurrency: (v: number | string) => string;
+  selectedDriverId: number | null;
+  onSelectDriver: (driverId: number) => void;
+  onRefreshDashboard?: () => void;
+}
+
+const DriverAdvanceModal: React.FC<DriverAdvanceModalProps> = ({
+  visible,
+  onClose,
+  balances,
+  formatCurrency,
+  selectedDriverId,
+  onSelectDriver,
+  onRefreshDashboard,
+}) => {
+  const { user } = useAuth();
+  const isAdmin = user?.role === 'ADMIN';
+
+  const [search, setSearch] = useState('');
+  const [statusFilter, setStatusFilter] = useState<'ALL' | 'DEFICIT' | 'SURPLUS' | 'SETTLED'>('ALL');
+  const [activityTab, setActivityTab] = useState<'ALL' | 'TRIPS' | 'ADVANCES' | 'SETTLEMENTS'>('ALL');
+
+  // Statement data for selected driver
+  const [statement, setStatement] = useState<any | null>(null);
+  const [loadingStatement, setLoadingStatement] = useState(false);
+  const [exportLoading, setExportLoading] = useState<'pdf' | 'share' | 'print' | null>(null);
+
+  // Settlement payment modal state
+  const [payModalVisible, setPayModalVisible] = useState(false);
+  const [payAmount, setPayAmount] = useState('');
+  const [paymentMode, setPaymentMode] = useState<'CASH' | 'UPI' | 'BANK_TRANSFER'>('CASH');
+  const [payNotes, setPayNotes] = useState('');
+  const [isSubmittingPay, setIsSubmittingPay] = useState(false);
+  const [advanceSourceOpen, setAdvanceSourceOpen] = useState<'MANAGER' | 'OWNER' | null>(null);
+
+  const activeDefault = balances.find((b) => b.total_advance_given > 0 || b.total_expenses > 0) ?? balances[0];
+  const currentDriver = (selectedDriverId ? balances.find((b) => b.driver_id === selectedDriverId) : null) ?? activeDefault;
+
+  // Load statement whenever currentDriver or visible changes
+  const loadStatement = useCallback(async (driverId: number) => {
+    try {
+      setLoadingStatement(true);
+      const res = await mobileDriverAdvanceService.getDriverStatement(driverId);
+      if (res.data) {
+        setStatement(res.data);
+      }
+    } catch (err) {
+      console.error('Error fetching driver statement:', err);
+    } finally {
+      setLoadingStatement(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (visible && currentDriver?.driver_id) {
+      setAdvanceSourceOpen(null);
+      loadStatement(currentDriver.driver_id);
+    }
+  }, [visible, currentDriver?.driver_id, loadStatement]);
+
+  // Derived financials (prefer statement data if loaded, fallback to balances item)
+  const isDeficit = statement ? statement.summary.is_deficit : (currentDriver && currentDriver.balance_in_manager_hand < 0);
+  const isSurplus = statement ? statement.summary.is_surplus : (currentDriver && currentDriver.balance_in_manager_hand > 0);
+  const isSettled = statement ? statement.summary.is_settled : (currentDriver && Math.abs(currentDriver.balance_in_manager_hand) < 1);
+
+  const deficitAmount = statement
+    ? statement.summary.deficit_amount
+    : (currentDriver && currentDriver.balance_in_manager_hand < 0 ? Math.abs(currentDriver.balance_in_manager_hand) : 0);
+
+  const surplusAmount = statement
+    ? statement.summary.surplus_amount
+    : (currentDriver && currentDriver.balance_in_manager_hand > 0 ? currentDriver.balance_in_manager_hand : 0);
+
+  const totalAdv = statement ? statement.summary.total_advance_given : (currentDriver?.total_advance_given || 0);
+  const totalExp = statement ? statement.summary.total_expenses : (currentDriver?.total_expenses || 0);
+  const totalSettledPaid = statement ? statement.summary.total_settled_cash_paid : 0;
+  const managerAdvTotal = statement?.summary?.manager_advance_total ?? null;
+  const ownerAdvTotal = statement?.summary?.owner_advance_total ?? null;
+  const advancesGroupedByGiver = (isOwner: boolean) => {
+    const groups = new Map<string, { name: string; total: number; items: any[] }>();
+    for (const item of statement?.timeline || []) {
+      if (item.type !== 'ADVANCE') continue;
+      if ((item.given_by_role === 'Owner') !== isOwner) continue;
+      const name = String(item.given_by_name || (isOwner ? 'Owner' : 'Manager')).trim() || (isOwner ? 'Owner' : 'Manager');
+      const existing = groups.get(name) || { name, total: 0, items: [] };
+      existing.total += parseFloat(String(item.amount)) || 0;
+      existing.items.push(item);
+      groups.set(name, existing);
+    }
+    return Array.from(groups.values());
+  };
+
+  // Filter drivers for selector list
+  const filteredDrivers = balances.filter((b) => {
+    const matchesSearch =
+      b.driver_name.toLowerCase().includes(search.toLowerCase()) ||
+      (b.driver_mobile ?? '').includes(search);
+    if (!matchesSearch) return false;
+
+    if (statusFilter === 'DEFICIT') return b.balance_in_manager_hand < 0;
+    if (statusFilter === 'SURPLUS') return b.balance_in_manager_hand > 0;
+    if (statusFilter === 'SETTLED') return Math.abs(b.balance_in_manager_hand) < 1;
+    return true;
+  });
+
+  const tripStories = buildDriverTripStories(statement?.timeline || []).filter((story) => {
+    if (activityTab === 'TRIPS') return story.kind === 'TRIP';
+    if (activityTab === 'ADVANCES') return story.advances.length > 0;
+    if (activityTab === 'SETTLEMENTS') return story.settlements.length > 0;
+    return true;
+  });
+
+  // Export handlers: PDF, Print, Share
+  const handlePrint = async () => {
+    if (!currentDriver) return;
+    try {
+      setExportLoading('print');
+      const docData = {
+        driver: statement?.driver || { id: currentDriver.driver_id, name: currentDriver.driver_name, mobile_number: currentDriver.driver_mobile },
+        summary: statement?.summary || {
+          total_advance_given: totalAdv,
+          total_expenses: totalExp,
+          total_settled_cash_paid: totalSettledPaid,
+          balance_in_manager_hand: currentDriver.balance_in_manager_hand,
+          is_deficit: isDeficit,
+          is_surplus: isSurplus,
+          is_settled: isSettled,
+          deficit_amount: deficitAmount,
+          surplus_amount: surplusAmount,
+        },
+        timeline: statement?.timeline || [],
+        dateRangeText: 'Complete Statement',
+      };
+      await printDriverStatementPdf(docData);
+    } catch (err: any) {
+      Alert.alert('Print Error', err?.message || 'Could not print driver statement.');
+    } finally {
+      setExportLoading(null);
+    }
+  };
+
+  const handlePdf = async () => {
+    if (!currentDriver) return;
+    try {
+      setExportLoading('pdf');
+      const docData = {
+        driver: statement?.driver || { id: currentDriver.driver_id, name: currentDriver.driver_name, mobile_number: currentDriver.driver_mobile },
+        summary: statement?.summary || {
+          total_advance_given: totalAdv,
+          total_expenses: totalExp,
+          total_settled_cash_paid: totalSettledPaid,
+          balance_in_manager_hand: currentDriver.balance_in_manager_hand,
+          is_deficit: isDeficit,
+          is_surplus: isSurplus,
+          is_settled: isSettled,
+          deficit_amount: deficitAmount,
+          surplus_amount: surplusAmount,
+        },
+        timeline: statement?.timeline || [],
+        dateRangeText: 'Complete Statement',
+      };
+      const res = await downloadDriverStatementPdf(docData);
+      if (res.savedDirectly) {
+        Alert.alert('Saved', `Driver statement PDF saved as ${res.filename}`);
+      }
+    } catch (err: any) {
+      Alert.alert('PDF Export Error', err?.message || 'Could not export driver statement PDF.');
+    } finally {
+      setExportLoading(null);
+    }
+  };
+
+  const handleShare = async () => {
+    if (!currentDriver) return;
+    try {
+      setExportLoading('share');
+      const docData = {
+        driver: statement?.driver || { id: currentDriver.driver_id, name: currentDriver.driver_name, mobile_number: currentDriver.driver_mobile },
+        summary: statement?.summary || {
+          total_advance_given: totalAdv,
+          total_expenses: totalExp,
+          total_settled_cash_paid: totalSettledPaid,
+          balance_in_manager_hand: currentDriver.balance_in_manager_hand,
+          is_deficit: isDeficit,
+          is_surplus: isSurplus,
+          is_settled: isSettled,
+          deficit_amount: deficitAmount,
+          surplus_amount: surplusAmount,
+        },
+        timeline: statement?.timeline || [],
+        dateRangeText: 'Complete Statement',
+      };
+      await shareDriverStatementPdf(docData);
+    } catch (err: any) {
+      Alert.alert('Share Error', err?.message || 'Could not share driver statement.');
+    } finally {
+      setExportLoading(null);
+    }
+  };
+  const handleExcel = handleShare;
+
+  // Settle driver balance (Admin only)
+  const handleConfirmSettle = async () => {
+    if (!isAdmin) {
+      Alert.alert('Permission Denied', 'Only administrators have authority to settle driver balance payments.');
+      return;
+    }
+    if (!currentDriver) return;
+    const amt = parseFloat(payAmount);
+    if (isNaN(amt) || amt <= 0) {
+      Alert.alert('Invalid Amount', 'Please enter a valid settlement amount.');
+      return;
+    }
+
+    try {
+      setIsSubmittingPay(true);
+      await mobileSettlementService.settleDriverBalance(currentDriver.driver_id, {
+        paid_amount: amt,
+        payment_mode: paymentMode,
+        notes: payNotes || 'Balance settled by admin via mobile app',
+        payment_date: new Date().toISOString(),
+      });
+
+      Alert.alert(
+        'Payment Settled ✓',
+        `₹${amt.toLocaleString('en-IN')} successfully settled with driver ${currentDriver.driver_name}.`
+      );
+      setPayModalVisible(false);
+      setPayNotes('');
+
+      // Reload statement and home dashboard
+      await loadStatement(currentDriver.driver_id);
+      if (onRefreshDashboard) onRefreshDashboard();
+    } catch (err: any) {
+      Alert.alert('Settlement Failed', err?.response?.data?.message || err?.message || 'Could not record settlement.');
+    } finally {
+      setIsSubmittingPay(false);
+    }
+  };
+
+  return (
+    <BottomSheet visible={visible} onClose={onClose} sheetStyle={{ height: '92%' }}>
+      {/* Header */}
+      <View style={mStyles.sheetHeader}>
+        <View style={mStyles.advHeaderLeft}>
+          <View style={[mStyles.advIconCircle, { backgroundColor: '#f3e8ff' }]}>
+            <Wallet size={20} color="#7c3aed" />
+          </View>
+          <View>
+            <Text style={mStyles.advTitle}>Driver Advance & Balance</Text>
+            <Text style={mStyles.advSubtitle}>Advances, expenses & settlement history</Text>
+          </View>
+        </View>
+        <TouchableOpacity
+          style={mStyles.closeBtn}
+          onPress={onClose}
+          hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+        >
+          <X size={18} color={COLORS.textMuted} />
+        </TouchableOpacity>
+      </View>
+
+      <ScrollView
+        showsVerticalScrollIndicator={false}
+        style={{ flex: 1 }}
+        contentContainerStyle={{ paddingBottom: 36 }}
+        keyboardShouldPersistTaps="handled"
+      >
+        {/* Quick Driver Selector Chips (Horizontal Scroll) */}
+        <View style={{ marginBottom: 10 }}>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, paddingVertical: 2 }}>
+            {balances.map((b) => {
+              const isSelected = currentDriver?.driver_id === b.driver_id;
+              const hasDeficit = b.balance_in_manager_hand < 0;
+              const hasSurplus = b.balance_in_manager_hand > 0;
+
+              return (
+                <TouchableOpacity
+                  key={b.driver_id}
+                  style={{
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    gap: 6,
+                    paddingHorizontal: 12,
+                    paddingVertical: 7,
+                    borderRadius: 20,
+                    backgroundColor: isSelected ? '#7c3aed' : '#f1f5f9',
+                    borderWidth: 1.5,
+                    borderColor: isSelected ? '#7c3aed' : hasDeficit ? '#fca5a5' : '#e2e8f0',
+                  }}
+                  onPress={() => onSelectDriver(b.driver_id)}
+                  activeOpacity={0.75}
+                >
+                  <View
+                    style={{
+                      width: 8,
+                      height: 8,
+                      borderRadius: 4,
+                      backgroundColor: isSelected
+                        ? '#ffffff'
+                        : hasDeficit
+                        ? '#dc2626'
+                        : hasSurplus
+                        ? '#16a34a'
+                        : '#94a3b8',
+                    }}
+                  />
+                  <Text
+                    style={{
+                      fontSize: 12,
+                      fontWeight: '700',
+                      color: isSelected ? '#ffffff' : COLORS.primary,
+                    }}
+                  >
+                    {b.driver_name}
+                  </Text>
+                  {hasDeficit && !isSelected && (
+                    <Text style={{ fontSize: 10, fontWeight: '800', color: '#dc2626' }}>
+                      ({isAdmin ? 'Pay ' : 'Due '}₹{Math.abs(Math.round(b.balance_in_manager_hand)).toLocaleString('en-IN')})
+                    </Text>
+                  )}
+                </TouchableOpacity>
+              );
+            })}
+          </ScrollView>
+        </View>
+
+        {/* Selected Driver Detailed Breakdown Card */}
+        {currentDriver && (
+          <View style={[
+            mStyles.driverCardContainer,
+            isDeficit && { borderColor: '#fca5a5', backgroundColor: '#fff5f5' },
+          ]}>
+            {/* Top row: Avatar + Name + Status Tag */}
+            <View style={mStyles.driverCardTop}>
+              <View style={[mStyles.driverAvatar, isDeficit && { backgroundColor: '#fee2e2' }]}>
+                <User size={18} color={isDeficit ? '#dc2626' : '#7c3aed'} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={[mStyles.driverCardName, isDeficit && { color: '#991b1b' }]}>
+                  {currentDriver.driver_name}
+                </Text>
+                {currentDriver.driver_mobile ? (
+                  <Text style={mStyles.driverCardMobile}>{currentDriver.driver_mobile}</Text>
+                ) : null}
+              </View>
+              {loadingStatement ? (
+                <ActivityIndicator size="small" color="#7c3aed" />
+              ) : isDeficit ? (
+                <View style={mStyles.statusTagDeficit}>
+                  <Text style={mStyles.statusTagDeficitText}>Need to Pay</Text>
+                </View>
+              ) : isSurplus ? (
+                <View style={mStyles.statusTagSurplus}>
+                  <Text style={mStyles.statusTagSurplusText}>In Hand</Text>
+                </View>
+              ) : (
+                <View style={mStyles.statusTagNeutral}>
+                  <Text style={mStyles.statusTagNeutralText}>Settled</Text>
+                </View>
+              )}
+            </View>
+
+            <View style={mStyles.driverStatsGrid}>
+              <View style={{ flexDirection: 'row', borderBottomWidth: 1, borderBottomColor: '#ede9fe', paddingBottom: 8 }}>
+                <View style={[mStyles.driverStatCol, { flex: 1 }]}>
+                  <Text style={mStyles.driverStatLabel}>ADVANCE GIVEN</Text>
+                  <Text style={[mStyles.driverStatValueAdvance, { color: '#6d28d9' }]}>
+                    {formatCurrency(totalAdv)}
+                  </Text>
+                </View>
+                <View style={[mStyles.driverStatCol, { flex: 1, borderLeftWidth: 1, borderLeftColor: '#ede9fe' }]}>
+                  <Text style={mStyles.driverStatLabel}>TRIP EXPENSES</Text>
+                  <Text style={mStyles.driverStatValueExpense}>
+                    {formatCurrency(totalExp)}
+                  </Text>
+                </View>
+              </View>
+              <View style={{ flexDirection: 'row', paddingTop: 8 }}>
+                <View style={[mStyles.driverStatCol, { flex: 1 }]}>
+                  <Text style={mStyles.driverStatLabel}>NEED TO PAY</Text>
+                  <Text style={[mStyles.driverStatValueExpense, { color: '#dc2626' }]}>
+                    {formatCurrency(deficitAmount || 0)}
+                  </Text>
+                </View>
+                <View style={[mStyles.driverStatCol, { flex: 1, borderLeftWidth: 1, borderLeftColor: '#ede9fe' }]}>
+                  <Text style={mStyles.driverStatLabel}>BALANCE IN HAND</Text>
+                  <Text style={[mStyles.driverStatValueAdvance, { color: '#16a34a' }]}>
+                    {formatCurrency(surplusAmount || 0)}
+                  </Text>
+                </View>
+              </View>
+            </View>
+
+            {(managerAdvTotal != null || ownerAdvTotal != null) && (
+              <>
+              <View style={{
+                flexDirection: 'row',
+                gap: 8,
+                marginTop: 10,
+              }}>
+                <TouchableOpacity
+                  style={{
+                    flex: 1,
+                    backgroundColor: '#eff6ff',
+                    borderWidth: advanceSourceOpen === 'MANAGER' ? 2 : 1,
+                    borderColor: advanceSourceOpen === 'MANAGER' ? '#2563eb' : '#bfdbfe',
+                    borderRadius: 8,
+                    paddingVertical: 8,
+                    paddingHorizontal: 10,
+                  }}
+                  onPress={() => setAdvanceSourceOpen((prev) => (prev === 'MANAGER' ? null : 'MANAGER'))}
+                  activeOpacity={0.8}
+                >
+                  <Text style={{ fontSize: 9, fontWeight: '800', color: '#1d4ed8', letterSpacing: 0.3 }}>FROM MANAGER</Text>
+                  <Text style={{ fontSize: 16, fontWeight: '900', color: '#1e40af', marginTop: 4 }}>
+                    {formatCurrency(managerAdvTotal || 0)}
+                  </Text>
+                  <Text style={{ fontSize: 9, fontWeight: '700', color: '#3b82f6', marginTop: 4 }}>
+                    {advanceSourceOpen === 'MANAGER' ? 'Tap to hide names' : 'Tap to see manager name'}
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={{
+                    flex: 1,
+                    backgroundColor: '#f5f3ff',
+                    borderWidth: advanceSourceOpen === 'OWNER' ? 2 : 1,
+                    borderColor: advanceSourceOpen === 'OWNER' ? '#7c3aed' : '#ddd6fe',
+                    borderRadius: 8,
+                    paddingVertical: 8,
+                    paddingHorizontal: 10,
+                  }}
+                  onPress={() => setAdvanceSourceOpen((prev) => (prev === 'OWNER' ? null : 'OWNER'))}
+                  activeOpacity={0.8}
+                >
+                  <Text style={{ fontSize: 9, fontWeight: '800', color: '#6d28d9', letterSpacing: 0.3 }}>FROM OWNER</Text>
+                  <Text style={{ fontSize: 16, fontWeight: '900', color: '#5b21b6', marginTop: 4 }}>
+                    {formatCurrency(ownerAdvTotal || 0)}
+                  </Text>
+                  <Text style={{ fontSize: 9, fontWeight: '700', color: '#8b5cf6', marginTop: 4 }}>
+                    {advanceSourceOpen === 'OWNER' ? 'Tap to hide names' : 'Tap to see owner name'}
+                  </Text>
+                </TouchableOpacity>
+              </View>
+
+              {advanceSourceOpen && (
+                <View style={{
+                  marginTop: 8,
+                  backgroundColor: '#ffffff',
+                  borderWidth: 1,
+                  borderColor: advanceSourceOpen === 'OWNER' ? '#ddd6fe' : '#bfdbfe',
+                  borderRadius: 10,
+                  padding: 10,
+                }}>
+                  <Text style={{
+                    fontSize: 11,
+                    fontWeight: '800',
+                    color: advanceSourceOpen === 'OWNER' ? '#6d28d9' : '#1d4ed8',
+                    marginBottom: 8,
+                    letterSpacing: 0.3,
+                  }}>
+                    {advanceSourceOpen === 'OWNER' ? 'OWNER ADVANCE DETAILS' : 'MANAGER ADVANCE DETAILS'}
+                  </Text>
+                  {advancesGroupedByGiver(advanceSourceOpen === 'OWNER').length === 0 ? (
+                    <Text style={{ fontSize: 12, color: '#64748b' }}>No advances from this source.</Text>
+                  ) : (
+                    advancesGroupedByGiver(advanceSourceOpen === 'OWNER').map((group) => (
+                      <View key={group.name} style={{ marginBottom: 10 }}>
+                        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                          <Text style={{ fontSize: 13, fontWeight: '800', color: COLORS.primary, flex: 1, marginRight: 8 }}>
+                            {group.name}
+                          </Text>
+                          <Text style={{ fontSize: 13, fontWeight: '900', color: advanceSourceOpen === 'OWNER' ? '#6d28d9' : '#1d4ed8' }}>
+                            {formatCurrency(group.total)}
+                          </Text>
+                        </View>
+                        {group.items.map((item: any, idx: number) => (
+                          <View
+                            key={`${item.id}-${idx}`}
+                            style={{
+                              flexDirection: 'row',
+                              justifyContent: 'space-between',
+                              alignItems: 'flex-start',
+                              paddingVertical: 5,
+                              paddingLeft: 8,
+                              borderLeftWidth: 2,
+                              borderLeftColor: advanceSourceOpen === 'OWNER' ? '#c4b5fd' : '#93c5fd',
+                              marginBottom: 2,
+                            }}
+                          >
+                            <View style={{ flex: 1, marginRight: 8 }}>
+                              <Text style={{ fontSize: 11, color: '#334155', fontWeight: '600' }}>
+                                {item.date ? formatDateDMY(item.date) : '—'}
+                              </Text>
+                              <Text style={{ fontSize: 10, color: '#64748b', marginTop: 1 }}>
+                                {item.subtitle || item.given_for || item.title}
+                              </Text>
+                            </View>
+                            <Text style={{ fontSize: 12, fontWeight: '800', color: '#0f172a' }}>
+                              {formatCurrency(item.amount)}
+                            </Text>
+                          </View>
+                        ))}
+                      </View>
+                    ))
+                  )}
+                </View>
+              )}
+              </>
+            )}
+
+            {/* Net Balance Result Banner with distinct RED / GREEN color modules */}
+            {isDeficit ? (
+              <View style={mStyles.balanceResultBoxDeficit}>
+                <View style={mStyles.balanceResultTitleRow}>
+                  <AlertCircle size={22} color="#dc2626" />
+                  <View style={{ flex: 1 }}>
+                    <Text style={mStyles.balanceResultTitleDeficit}>
+                      BALANCE NEED TO PAY TO DRIVER
+                    </Text>
+                    <Text style={mStyles.balanceResultAmountDeficit}>
+                      {formatCurrency(deficitAmount)}
+                    </Text>
+                  </View>
+                </View>
+                <Text style={mStyles.balanceResultNoteDeficit}>
+                  Trip expenses ({formatCurrency(totalExp)}) exceeded advances ({formatCurrency(totalAdv)}). {isAdmin ? `You can settle ${formatCurrency(deficitAmount)} with ${currentDriver.driver_name}.` : `Admin / Head Office will settle ${formatCurrency(deficitAmount)} with ${currentDriver.driver_name}.`}
+                </Text>
+
+                {/* Direct Pay Balance Action Button (ADMIN ONLY) */}
+                {isAdmin ? (
+                  <TouchableOpacity
+                    style={{
+                      backgroundColor: '#dc2626',
+                      borderRadius: RADIUS.md,
+                      paddingVertical: 10,
+                      paddingHorizontal: 14,
+                      flexDirection: 'row',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: 8,
+                      marginTop: 10,
+                      ...SHADOWS.sm,
+                    }}
+                    onPress={() => {
+                      setPayAmount(String(Math.round(deficitAmount)));
+                      setPayModalVisible(true);
+                    }}
+                    activeOpacity={0.85}
+                  >
+                    <HandCoins size={18} color="#ffffff" />
+                    <Text style={{ color: '#ffffff', fontSize: 13, fontWeight: '800', letterSpacing: 0.3 }}>
+                      PAY {formatCurrency(deficitAmount)} TO DRIVER
+                    </Text>
+                  </TouchableOpacity>
+                ) : (
+                  <View style={{
+                    backgroundColor: '#fee2e2',
+                    borderColor: '#fca5a5',
+                    borderWidth: 1,
+                    borderRadius: RADIUS.md,
+                    paddingVertical: 8,
+                    paddingHorizontal: 12,
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    gap: 8,
+                    marginTop: 10,
+                  }}>
+                    <AlertCircle size={16} color="#dc2626" />
+                    <Text style={{ fontSize: 11, fontWeight: '700', color: '#991b1b', flex: 1 }}>
+                      Payment authorized for Admin only. Office will settle this balance.
+                    </Text>
+                  </View>
+                )}
+              </View>
+            ) : isSurplus ? (
+              <View style={mStyles.balanceResultBoxSurplus}>
+                <View style={mStyles.balanceResultTitleRow}>
+                  <CheckCircle2 size={22} color="#16a34a" />
+                  <View style={{ flex: 1 }}>
+                    <Text style={mStyles.balanceResultTitleSurplus}>
+                      REMAINING ADVANCE IN DRIVER HAND
+                    </Text>
+                    <Text style={mStyles.balanceResultAmountSurplus}>
+                      {formatCurrency(surplusAmount)}
+                    </Text>
+                  </View>
+                </View>
+                <Text style={mStyles.balanceResultNoteSurplus}>
+                  Advance given ({formatCurrency(totalAdv)}) was more than trip expenses ({formatCurrency(totalExp)}). {formatCurrency(surplusAmount)} balance remains in driver's hand for subsequent trips.
+                </Text>
+              </View>
+            ) : (
+              <View style={mStyles.balanceResultBoxNeutral}>
+                <View style={mStyles.balanceResultTitleRow}>
+                  <CheckCircle2 size={22} color="#059669" />
+                  <View style={{ flex: 1 }}>
+                    <Text style={mStyles.balanceResultTitleNeutral}>✓ ALL BALANCES FULLY SETTLED</Text>
+                    <Text style={mStyles.balanceResultAmountNeutral}>₹0</Text>
+                  </View>
+                </View>
+                <Text style={mStyles.balanceResultNoteNeutral}>
+                  Advances received, trip expenses, and settlement payments are completely balanced.
+                </Text>
+              </View>
+            )}
+
+            {/* Export Toolbar: PDF, Share, Print */}
+            <View style={{
+              flexDirection: 'row',
+              gap: 8,
+              marginTop: 12,
+              paddingTop: 12,
+              borderTopWidth: 1,
+              borderTopColor: '#e2e8f0',
+            }}>
+              {/* PDF Button */}
+              <TouchableOpacity
+                style={{
+                  flex: 1,
+                  backgroundColor: '#dc2626',
+                  borderRadius: RADIUS.md,
+                  paddingVertical: 9,
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: 6,
+                  opacity: exportLoading === 'pdf' ? 0.7 : 1,
+                }}
+                onPress={handlePdf}
+                disabled={exportLoading !== null}
+                activeOpacity={0.8}
+              >
+                {exportLoading === 'pdf' ? (
+                  <ActivityIndicator size="small" color="#fff" />
+                ) : (
+                  <>
+                    <FileText size={15} color="#fff" />
+                    <Text style={{ color: '#fff', fontSize: 12, fontWeight: '800' }}>PDF</Text>
+                  </>
+                )}
+              </TouchableOpacity>
+
+              {/* Share Button */}
+              <TouchableOpacity
+                style={{
+                  flex: 1,
+                  backgroundColor: '#16a34a',
+                  borderRadius: RADIUS.md,
+                  paddingVertical: 9,
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: 6,
+                  opacity: exportLoading === 'share' ? 0.7 : 1,
+                }}
+                onPress={handleShare}
+                disabled={exportLoading !== null}
+                activeOpacity={0.8}
+              >
+                {exportLoading === 'share' ? (
+                  <ActivityIndicator size="small" color="#fff" />
+                ) : (
+                  <>
+                    <Share2 size={15} color="#fff" />
+                    <Text style={{ color: '#fff', fontSize: 12, fontWeight: '800' }}>SHARE</Text>
+                  </>
+                )}
+              </TouchableOpacity>
+
+              {/* Print Button */}
+              <TouchableOpacity
+                style={{
+                  flex: 1,
+                  backgroundColor: COLORS.primary,
+                  borderRadius: RADIUS.md,
+                  paddingVertical: 9,
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: 6,
+                  opacity: exportLoading === 'print' ? 0.7 : 1,
+                }}
+                onPress={handlePrint}
+                disabled={exportLoading !== null}
+                activeOpacity={0.8}
+              >
+                {exportLoading === 'print' ? (
+                  <ActivityIndicator size="small" color="#fff" />
+                ) : (
+                  <>
+                    <Printer size={15} color="#fff" />
+                    <Text style={{ color: '#fff', fontSize: 12, fontWeight: '800' }}>PRINT</Text>
+                  </>
+                )}
+              </TouchableOpacity>
+            </View>
+          </View>
+        )}
+
+        {/* Activity & Breakdown Section Header */}
+        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 4, marginBottom: 8 }}>
+          <Text style={mStyles.sectionLabel}>
+            TRIP STORY HISTORY ({tripStories.length})
+          </Text>
+          <TouchableOpacity
+            style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}
+            onPress={() => currentDriver && loadStatement(currentDriver.driver_id)}
+          >
+            <RefreshCw size={12} color="#7c3aed" />
+            <Text style={{ fontSize: 11, fontWeight: '700', color: '#7c3aed' }}>Refresh</Text>
+          </TouchableOpacity>
+        </View>
+
+        {/* Activity Category Filter Tabs */}
+        <View style={{ flexDirection: 'row', gap: 6, marginBottom: 12 }}>
+          {(['ALL', 'TRIPS', 'ADVANCES', 'SETTLEMENTS'] as const).map((tab) => (
+            <TouchableOpacity
+              key={tab}
+              style={{
+                flex: 1,
+                paddingVertical: 6,
+                borderRadius: 8,
+                alignItems: 'center',
+                backgroundColor: activityTab === tab ? '#7c3aed' : '#f1f5f9',
+              }}
+              onPress={() => setActivityTab(tab)}
+            >
+              <Text style={{
+                fontSize: 10,
+                fontWeight: '800',
+                color: activityTab === tab ? '#ffffff' : '#64748b',
+                textTransform: 'uppercase',
+              }}>
+                {tab}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+
+        {/* Timeline Items List */}
+        {loadingStatement ? (
+          <View style={{ paddingVertical: 24, alignItems: 'center' }}>
+            <ActivityIndicator size="small" color="#7c3aed" />
+            <Text style={{ fontSize: 12, color: '#64748b', marginTop: 8 }}>Loading driver ledger...</Text>
+          </View>
+        ) : tripStories.length === 0 ? (
+          <View style={mStyles.emptyBox}>
+            <FileText size={24} color={COLORS.textMuted} />
+            <Text style={mStyles.emptyText}>No activity recorded in this category</Text>
+          </View>
+        ) : (
+          tripStories.map((story, storyIdx) => {
+            const workingCash = (story.totalAdvance || 0) + (story.broughtForward || 0);
+            const calcNeed = Math.max(0, (story.totalExpenses || 0) - workingCash);
+            const calcHand = Math.max(0, workingCash - (story.totalExpenses || 0));
+            const resultColor = calcNeed > 0 ? '#dc2626' : calcHand > 0 ? '#16a34a' : '#64748b';
+            const resultLabel = calcNeed > 0 ? 'NEED TO PAY' : calcHand > 0 ? 'BALANCE IN HAND' : 'BALANCED';
+            const resultAmt = calcNeed > 0 ? calcNeed : calcHand;
+            return (
+              <View
+                key={story.key}
+                style={{
+                  backgroundColor: '#ffffff',
+                  borderRadius: RADIUS.md,
+                  padding: 12,
+                  marginBottom: 10,
+                  borderWidth: 1,
+                  borderColor: story.kind === 'DIRECT_ADVANCE' ? '#ddd6fe' : '#cbd5e1',
+                  borderLeftWidth: 4,
+                  borderLeftColor: story.needToPay > 0 ? '#dc2626' : story.settlements.length ? '#16a34a' : '#2563eb',
+                  ...SHADOWS.sm,
+                }}
+              >
+                <Text style={{ fontSize: 12, fontWeight: '800', color: COLORS.primary }}>
+                  {story.kind === 'DIRECT_ADVANCE'
+                    ? `Direct Advance · ${story.date ? formatDateDMY(story.date) : ''}`
+                    : `Trip ${tripStories.slice(0, storyIdx + 1).filter((s) => s.kind === 'TRIP').length}${story.tripId ? `  ·  #${story.tripId}` : ''}${story.date ? `  ·  ${formatDateDMY(story.date)}` : ''}`}
+                </Text>
+                {story.kind === 'TRIP' ? (
+                  <View style={{ marginTop: 8, backgroundColor: '#f8fafc', borderRadius: 8, borderWidth: 1, borderColor: '#e2e8f0', paddingHorizontal: 10, paddingVertical: 6 }}>
+                    {[
+                      ['Party', story.partyName],
+                      ['Truck No', story.lorry],
+                      ['Owner', story.ownerName],
+                      ['Route', story.route ? story.route.replace(/→/g, 'to') : ''],
+                    ].filter(([, val]) => !!val).map(([label, val]) => (
+                      <View key={label} style={{ flexDirection: 'row', alignItems: 'flex-start', paddingVertical: 3 }}>
+                        <Text style={{ width: 72, fontSize: 10, fontWeight: '800', color: '#64748b', textTransform: 'uppercase' }}>{label}</Text>
+                        <Text style={{ flex: 1, fontSize: 12, fontWeight: '700', color: '#0f172a' }}>{val}</Text>
+                      </View>
+                    ))}
+                  </View>
+                ) : null}
+
+                <View style={{ marginTop: 10, gap: 8 }}>
+                  <View>
+                    <Text style={{ fontSize: 10, fontWeight: '800', color: '#1d4ed8' }}>1. ADVANCE GIVEN</Text>
+                    {story.advances.length === 0 ? (
+                      <Text style={{ fontSize: 11, color: '#94a3b8', marginTop: 2 }}>No advance recorded</Text>
+                    ) : (
+                      story.advances.map((adv: any, i: number) => (
+                        <View key={`${adv.id}-${i}`} style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 3 }}>
+                          <Text style={{ fontSize: 12, color: '#334155', flex: 1, marginRight: 8 }}>
+                            {adv.given_by_role === 'Owner' ? 'Owner' : 'Manager'}: {adv.given_by_name || (adv.given_by_role === 'Owner' ? 'Owner' : 'Manager')}
+                          </Text>
+                          <Text style={{ fontSize: 12, fontWeight: '800', color: '#1e40af' }}>{formatCurrency(adv.amount)}</Text>
+                        </View>
+                      ))
+                    )}
+                    {story.advances.length > 1 ? (
+                      <Text style={{ fontSize: 11, fontWeight: '800', color: '#1e3a8a', marginTop: 4, textAlign: 'right' }}>
+                        Total advance {formatCurrency(story.totalAdvance)}
+                      </Text>
+                    ) : null}
+                  </View>
+
+                  {story.kind === 'TRIP' ? (
+                    <>
+                      <View>
+                        <Text style={{ fontSize: 10, fontWeight: '800', color: '#c2410c' }}>2. TRIP EXPENSES</Text>
+                        <Text style={{ fontSize: 13, fontWeight: '800', color: '#9a3412', marginTop: 2 }}>
+                          {formatCurrency(story.totalExpenses)}
+                        </Text>
+                      </View>
+
+                      <View style={{ backgroundColor: '#f8fafc', borderRadius: 8, padding: 8, borderWidth: 1, borderColor: '#e2e8f0' }}>
+                        <Text style={{ fontSize: 10, fontWeight: '800', color: '#475569' }}>3. CALCULATION</Text>
+                        {story.broughtForward > 0 ? (
+                          <Text style={{ fontSize: 11, color: '#047857', marginTop: 3, fontWeight: '700' }}>
+                            Balance in hand brought {formatCurrency(story.broughtForward)}
+                          </Text>
+                        ) : null}
+                        <Text style={{ fontSize: 11, color: '#334155', marginTop: 3 }}>
+                          {story.broughtForward > 0 ? 'In hand + ' : ''}Advance {formatCurrency(story.totalAdvance)}  −  Expenses {formatCurrency(story.totalExpenses)}
+                        </Text>
+                        {story.inHandUsed > 0 ? (
+                          <Text style={{ fontSize: 11, fontWeight: '700', color: '#b45309', marginTop: 3 }}>
+                            Balance in hand used {formatCurrency(story.inHandUsed)}
+                          </Text>
+                        ) : null}
+                        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 6 }}>
+                          <Text style={{ fontSize: 11, fontWeight: '800', color: resultColor }}>{resultLabel}</Text>
+                          <Text style={{ fontSize: 15, fontWeight: '900', color: resultColor }}>{formatCurrency(resultAmt)}</Text>
+                        </View>
+                      </View>
+                    </>
+                  ) : null}
+
+                  {(() => {
+                    const br = getSettlementBreakdown(story);
+                    const cm = br.cashMovement;
+                    const laterPays = br.laterPays || [];
+                    if (!br.happened && br.stillToPay <= 0 && br.remainingInHand <= 0) return null;
+                    return (
+                      <View style={{ backgroundColor: '#f0fdf4', borderRadius: 8, padding: 8, borderWidth: 1, borderColor: '#bbf7d0' }}>
+                        <Text style={{ fontSize: 10, fontWeight: '800', color: '#15803d' }}>4. SETTLEMENT / ADJUSTMENT</Text>
+                        {laterPays.map((pay, pi) => (
+                          <View key={`later-${pi}`} style={{ marginTop: 6 }}>
+                            <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+                              <Text style={{ fontSize: 12, color: '#6d28d9', flex: 1, marginRight: 8 }}>{pay.sourceLabel}</Text>
+                              <Text style={{ fontSize: 13, fontWeight: '800', color: '#6d28d9' }}>{formatCurrency(pay.totalGiven)}</Text>
+                            </View>
+                            <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 3 }}>
+                              <Text style={{ fontSize: 12, color: '#166534' }}>Pay to driver (this trip due)</Text>
+                              <Text style={{ fontSize: 13, fontWeight: '800', color: '#166534' }}>{formatCurrency(pay.thisTripPaid)}</Text>
+                            </View>
+                            <Text style={{ fontSize: 11, color: '#475569', marginTop: 2 }}>
+                              {formatCurrency(pay.totalGiven)} − {formatCurrency(pay.thisTripPaid)}
+                            </Text>
+                            <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 3 }}>
+                              <Text style={{ fontSize: 12, fontWeight: '800', color: '#047857' }}>Balance in hand</Text>
+                              <Text style={{ fontSize: 14, fontWeight: '900', color: '#047857' }}>{formatCurrency(pay.leftoverInHand)}</Text>
+                            </View>
+                          </View>
+                        ))}
+                        {cm ? (
+                          <View style={{ marginTop: 6 }}>
+                            <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+                              <Text style={{ fontSize: 12, color: '#6d28d9', flex: 1, marginRight: 8 }}>{cm.sourceLabel} total</Text>
+                              <Text style={{ fontSize: 13, fontWeight: '800', color: '#6d28d9' }}>{formatCurrency(cm.totalGiven)}</Text>
+                            </View>
+                            <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 3 }}>
+                              <Text style={{ fontSize: 12, color: '#166534' }}>Reduced previous trip due</Text>
+                              <Text style={{ fontSize: 13, fontWeight: '800', color: '#166534' }}>{formatCurrency(cm.reducedDue)}</Text>
+                            </View>
+                            <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 3 }}>
+                              <Text style={{ fontSize: 12, color: '#047857' }}>Balance in hand after this</Text>
+                              <Text style={{ fontSize: 13, fontWeight: '800', color: '#047857' }}>{formatCurrency(cm.leftInHand)}</Text>
+                            </View>
+                          </View>
+                        ) : null}
+                        {laterPays.length === 0 && !cm ? br.sources.map((src, si) => (
+                          <View key={`${src.tripId || 'src'}-${si}`} style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 6 }}>
+                            <Text style={{ fontSize: 12, color: '#166534', flex: 1, marginRight: 8 }}>Adjusted leftover from {src.label}</Text>
+                            <Text style={{ fontSize: 13, fontWeight: '800', color: '#166534' }}>{formatCurrency(src.amount)}</Text>
+                          </View>
+                        )) : null}
+                        {laterPays.length === 0 && !cm && br.sources.length === 0 && br.adjusted > 0 ? (
+                          <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 6 }}>
+                            <Text style={{ fontSize: 12, color: '#166534' }}>Adjusted leftover</Text>
+                            <Text style={{ fontSize: 13, fontWeight: '800', color: '#166534' }}>{formatCurrency(br.adjusted)}</Text>
+                          </View>
+                        ) : null}
+                        {br.appliedTo.map((row, ri) => (
+                          <Text key={`${row.tripId || 'to'}-${ri}`} style={{ fontSize: 11, color: '#334155', marginTop: 3 }}>
+                            {ri + 1}. Adjusted {row.label}: {formatCurrency(row.amount)}
+                            {row.remainingOnThatTrip > 0 ? ` · still ${formatCurrency(row.remainingOnThatTrip)}` : ' · fully settled'}
+                          </Text>
+                        ))}
+                        {br.stillToPay > 0 ? (
+                          <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 6 }}>
+                            <Text style={{ fontSize: 12, fontWeight: '800', color: '#b91c1c' }}>Still to pay</Text>
+                            <Text style={{ fontSize: 14, fontWeight: '900', color: '#b91c1c' }}>{formatCurrency(br.stillToPay)}</Text>
+                          </View>
+                        ) : laterPays.length === 0 ? (
+                          <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 6 }}>
+                            <Text style={{ fontSize: 12, fontWeight: '800', color: '#047857' }}>Balance in hand</Text>
+                            <Text style={{ fontSize: 14, fontWeight: '900', color: '#047857' }}>{formatCurrency(br.remainingInHand)}</Text>
+                          </View>
+                        ) : null}
+                      </View>
+                    );
+                  })()}
+                </View>
+              </View>
+            );
+          })
+        )}
+
+        {/* Driver Selection & Filters */}
+        <View style={{ marginTop: 16, marginBottom: 8, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+          <Text style={mStyles.sectionLabel}>
+            ALL DRIVERS ({filteredDrivers.length})
+          </Text>
+          <View style={{ flexDirection: 'row', gap: 4 }}>
+            {(['ALL', 'DEFICIT', 'SURPLUS', 'SETTLED'] as const).map((filter) => (
+              <TouchableOpacity
+                key={filter}
+                style={{
+                  paddingHorizontal: 8,
+                  paddingVertical: 3,
+                  borderRadius: 6,
+                  backgroundColor: statusFilter === filter ? '#7c3aed' : '#f1f5f9',
+                }}
+                onPress={() => setStatusFilter(filter)}
+              >
+                <Text style={{
+                  fontSize: 10,
+                  fontWeight: '700',
+                  color: statusFilter === filter ? '#ffffff' : '#64748b',
+                }}>
+                  {filter === 'DEFICIT' ? 'Need to Pay' : filter === 'SURPLUS' ? 'In Hand' : filter}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        </View>
+
+        {/* Search Bar */}
+        <View style={mStyles.driverSearchBox}>
+          <Search size={16} color={COLORS.textMuted} />
+          <TextInput
+            style={mStyles.driverSearchInput}
+            placeholder="Search driver by name or mobile..."
+            placeholderTextColor={COLORS.textMuted}
+            value={search}
+            onChangeText={setSearch}
+          />
+          {search ? (
+            <TouchableOpacity onPress={() => setSearch('')}>
+              <X size={16} color={COLORS.textMuted} />
+            </TouchableOpacity>
+          ) : null}
+        </View>
+
+        {/* Driver List for quick selection */}
+        {filteredDrivers.length === 0 ? (
+          <View style={mStyles.emptyBox}>
+            <User size={28} color={COLORS.textMuted} />
+            <Text style={mStyles.emptyText}>No matching drivers found</Text>
+          </View>
+        ) : (
+          filteredDrivers.map((b) => {
+            const isSelected = currentDriver?.driver_id === b.driver_id;
+            const bDeficit = b.balance_in_manager_hand < 0;
+            const bSurplus = b.balance_in_manager_hand > 0;
+            return (
+              <TouchableOpacity
+                key={b.driver_id}
+                style={[
+                  mStyles.driverListItem,
+                  isSelected && mStyles.driverListItemActive,
+                  bDeficit && !isSelected && { borderColor: '#fecdd3' },
+                ]}
+                onPress={() => onSelectDriver(b.driver_id)}
+                activeOpacity={0.7}
+              >
+                <View style={{ flex: 1 }}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                    <Text style={[mStyles.driverItemName, isSelected && { color: '#7c3aed' }]}>
+                      {b.driver_name}
+                    </Text>
+                    {isSelected && (
+                      <View style={mStyles.selectedBadge}>
+                        <Text style={mStyles.selectedBadgeText}>Selected</Text>
+                      </View>
+                    )}
+                  </View>
+                  <Text style={mStyles.driverItemSub}>
+                    Adv: {formatCurrency(b.total_advance_given)}  ·  Exp: {formatCurrency(b.total_expenses)}
+                  </Text>
+                </View>
+
+                {bDeficit ? (
+                  <View style={mStyles.badgeDeficit}>
+                    <Text style={mStyles.badgeDeficitText}>
+                      {isAdmin ? 'Pay ' : 'Due '} {formatCurrency(Math.abs(b.balance_in_manager_hand))}
+                    </Text>
+                  </View>
+                ) : bSurplus ? (
+                  <View style={mStyles.badgeSurplus}>
+                    <Text style={mStyles.badgeSurplusText}>
+                      {formatCurrency(b.balance_in_manager_hand)} in hand
+                    </Text>
+                  </View>
+                ) : (
+                  <View style={mStyles.badgeNeutral}>
+                    <Text style={mStyles.badgeNeutralText}>₹0</Text>
+                  </View>
+                )}
+              </TouchableOpacity>
+            );
+          })
+        )}
+      </ScrollView>
+
+      {/* ── Settle Driver Balance Modal (Admin Only) ── */}
+      {isAdmin && (
+        <Modal
+          visible={payModalVisible}
+          transparent
+          animationType="slide"
+          statusBarTranslucent
+          onRequestClose={() => setPayModalVisible(false)}
+        >
+          <Pressable
+            style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' }}
+            onPress={() => !isSubmittingPay && setPayModalVisible(false)}
+          >
+            <Pressable
+              style={{
+                backgroundColor: '#fff',
+                borderTopLeftRadius: 20,
+                borderTopRightRadius: 20,
+                padding: 24,
+                paddingBottom: 36,
+              }}
+              onPress={() => {}}
+            >
+              {/* Modal Header */}
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                  <View style={{ backgroundColor: '#fee2e2', borderRadius: 10, padding: 8 }}>
+                    <HandCoins size={20} color="#dc2626" />
+                  </View>
+                  <View>
+                    <Text style={{ fontSize: 16, fontWeight: '800', color: '#1e293b' }}>Settle Driver Balance</Text>
+                    <Text style={{ fontSize: 12, color: '#64748b', marginTop: 1 }}>{currentDriver?.driver_name}</Text>
+                  </View>
+                </View>
+                <TouchableOpacity onPress={() => setPayModalVisible(false)} hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}>
+                  <X size={20} color="#64748b" />
+                </TouchableOpacity>
+              </View>
+
+              {/* Amount Banner */}
+              <View style={{ backgroundColor: '#fef2f2', borderColor: '#fca5a5', borderWidth: 1, borderRadius: 12, padding: 14, marginBottom: 16, alignItems: 'center' }}>
+                <Text style={{ fontSize: 12, fontWeight: '700', color: '#dc2626', marginBottom: 4 }}>DEFICIT BALANCE DUE</Text>
+                <Text style={{ fontSize: 28, fontWeight: '900', color: '#dc2626' }}>{formatCurrency(deficitAmount)}</Text>
+                <Text style={{ fontSize: 11, color: '#991b1b', marginTop: 2 }}>
+                  Trip expenses exceeded advances given by manager
+                </Text>
+              </View>
+
+              {/* Amount Input */}
+              <Text style={{ fontSize: 12, fontWeight: '700', color: '#374151', marginBottom: 6 }}>PAYMENT AMOUNT (₹)</Text>
+              <TextInput
+                style={{
+                  borderWidth: 1.5, borderColor: '#e2e8f0', borderRadius: 10,
+                  paddingHorizontal: 14, paddingVertical: 10, fontSize: 18,
+                  fontWeight: '700', color: '#1e293b', marginBottom: 14,
+                  backgroundColor: '#f8fafc',
+                }}
+                value={payAmount}
+                onChangeText={setPayAmount}
+                keyboardType="numeric"
+                placeholder="Enter amount"
+              />
+
+              {/* Payment Mode */}
+              <Text style={{ fontSize: 12, fontWeight: '700', color: '#374151', marginBottom: 8 }}>PAYMENT MODE</Text>
+              <View style={{ flexDirection: 'row', gap: 8, marginBottom: 14 }}>
+                {(['CASH', 'UPI', 'BANK_TRANSFER'] as const).map((mode) => (
+                  <TouchableOpacity
+                    key={mode}
+                    style={{
+                      flex: 1, paddingVertical: 8, borderRadius: 8, alignItems: 'center',
+                      backgroundColor: paymentMode === mode ? '#dc2626' : '#f1f5f9',
+                      borderWidth: 1.5, borderColor: paymentMode === mode ? '#dc2626' : '#e2e8f0',
+                    }}
+                    onPress={() => setPaymentMode(mode)}
+                  >
+                    <Text style={{ fontSize: 11, fontWeight: '800', color: paymentMode === mode ? '#fff' : '#64748b' }}>
+                      {mode.replace('_', ' ')}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+
+              {/* Notes */}
+              <Text style={{ fontSize: 12, fontWeight: '700', color: '#374151', marginBottom: 6 }}>NOTES (optional)</Text>
+              <TextInput
+                style={{
+                  borderWidth: 1.5, borderColor: '#e2e8f0', borderRadius: 10,
+                  paddingHorizontal: 14, paddingVertical: 8, fontSize: 13,
+                  color: '#1e293b', marginBottom: 20, backgroundColor: '#f8fafc', minHeight: 60,
+                  textAlignVertical: 'top',
+                }}
+                value={payNotes}
+                onChangeText={setPayNotes}
+                placeholder="e.g. Paid in cash after trips settlement"
+                multiline
+              />
+
+              {/* Confirm Button */}
+              <TouchableOpacity
+                style={{
+                  backgroundColor: isSubmittingPay ? '#9ca3af' : '#dc2626',
+                  borderRadius: 12, height: 52, alignItems: 'center',
+                  justifyContent: 'center', flexDirection: 'row', gap: 8,
+                }}
+                onPress={handleConfirmSettle}
+                disabled={isSubmittingPay}
+                activeOpacity={0.85}
+              >
+                {isSubmittingPay ? (
+                  <ActivityIndicator color="#fff" size="small" />
+                ) : (
+                  <>
+                    <Check size={18} color="#fff" />
+                    <Text style={{ color: '#fff', fontSize: 15, fontWeight: '800' }}>
+                      CONFIRM PAYMENT — {formatCurrency(parseFloat(payAmount) || deficitAmount)}
+                    </Text>
+                  </>
+                )}
+              </TouchableOpacity>
+            </Pressable>
+          </Pressable>
+        </Modal>
+      )}
+    </BottomSheet>
+  );
+};
+
+
+/* ─────────────────────────────────────────────────────────────
    Recent Trips Modal (List + Read-Only Trip Details)
 ───────────────────────────────────────────────────────────── */
 interface RecentTripsModalProps {
@@ -202,6 +1403,7 @@ interface RecentTripsModalProps {
 const RecentTripsModal: React.FC<RecentTripsModalProps> = ({
   visible, onClose, trips, formatCurrency, getStatusStyle, initialTrip,
 }) => {
+  const { user } = useAuth();
   const [selectedTrip, setSelectedTrip] = useState<Trip | null>(null);
   const [actionLoading, setActionLoading] = useState<'download' | 'share' | null>(null);
 
@@ -379,18 +1581,23 @@ const RecentTripsModal: React.FC<RecentTripsModalProps> = ({
                 <View style={mStyles.section}>
                   <Text style={mStyles.sectionLabel}>FINANCIALS</Text>
                   <Row label="Total Freight" value={formatCurrency(selectedTrip.total_freight)} accent />
-                  {selectedTrip.total_received != null && (
-                    <Row label="Amount Received" value={formatCurrency(selectedTrip.total_received)} />
-                  )}
-                  <Row
-                    label="Balance Due"
-                    value={formatCurrency(
-                      selectedTrip.balance_due ??
-                        Math.max(0, (selectedTrip.total_freight || 0) - (selectedTrip.total_received || 0))
-                    )}
-                  />
                   {selectedTrip.advance_paid != null && selectedTrip.advance_paid > 0 && (
                     <Row label="Driver Advance" value={formatCurrency(selectedTrip.advance_paid)} />
+                  )}
+                  {user?.role === 'ADMIN' && (
+                    <>
+                      {selectedTrip.total_received != null && (
+                        <Row label="Amount Received" value={formatCurrency(selectedTrip.total_received)} />
+                      )}
+                      <Row
+                        label="Balance Due"
+                        value={formatCurrency(
+                          selectedTrip.balance_due ??
+                            Math.max(0, (selectedTrip.total_freight || 0) - (selectedTrip.total_received || 0))
+                        )}
+                        accent
+                      />
+                    </>
                   )}
                 </View>
 
@@ -526,12 +1733,18 @@ const RecentTripsModal: React.FC<RecentTripsModalProps> = ({
                           </View>
                           <View style={{ alignItems: 'flex-end' }}>
                             <Text style={mStyles.tripListFreight}>{formatCurrency(trip.total_freight)}</Text>
-                            <Text style={mStyles.tripListBalance}>
-                              Due: {formatCurrency(
-                                trip.balance_due ??
-                                  Math.max(0, (trip.total_freight || 0) - (trip.total_received || 0))
-                              )}
-                            </Text>
+                            {user?.role === 'ADMIN' ? (
+                              <Text style={mStyles.tripListBalance}>
+                                Due: {formatCurrency(
+                                  trip.balance_due ??
+                                    Math.max(0, (trip.total_freight || 0) - (trip.total_received || 0))
+                                )}
+                              </Text>
+                            ) : trip.advance_paid != null && Number(trip.advance_paid) > 0 ? (
+                              <Text style={[mStyles.tripListBalance, { color: '#b45309' }]}>
+                                Adv: {formatCurrency(trip.advance_paid)}
+                              </Text>
+                            ) : null}
                           </View>
                         </View>
 
@@ -593,6 +1806,8 @@ export const HomeScreen: React.FC<{ navigation: any }> = ({ navigation }) => {
   // Modal states
   const [advanceModalVisible, setAdvanceModalVisible] = useState(false);
   const [tripsModalVisible, setTripsModalVisible] = useState(false);
+  const [driverAdvanceModalVisible, setDriverAdvanceModalVisible] = useState(false);
+  const [selectedDriverId, setSelectedDriverId] = useState<number | null>(null);
   const [selectedRecentTrip, setSelectedRecentTrip] = useState<Trip | null>(null);
 
   // ── Animation Values ──────────────────────────────────────────────────────
@@ -608,6 +1823,7 @@ export const HomeScreen: React.FC<{ navigation: any }> = ({ navigation }) => {
   const newTripScale = useRef(new Animated.Value(1)).current;
   const truckAdvScale = useRef(new Animated.Value(1)).current;
   const advanceTileScale = useRef(new Animated.Value(1)).current;
+  const driverAdvTileScale = useRef(new Animated.Value(1)).current;
   const recentTripsTileScale = useRef(new Animated.Value(1)).current;
 
   useFocusEffect(
@@ -658,17 +1874,16 @@ export const HomeScreen: React.FC<{ navigation: any }> = ({ navigation }) => {
 
   const loadDashboard = async () => {
     try {
-      const res = await mobileDashboardService.getDashboard();
-      setData(res.data);
-    } catch (error) {
-      console.error('Failed to load mobile dashboard', error);
-    } finally {
-      setIsLoading(false);
-      setRefreshing(false);
-    }
-
-    try {
-      const expRes = await mobileLookupService.getExpiringVehicles(30);
+      const [dashResult, expResult] = await Promise.allSettled([
+        mobileDashboardService.getDashboard(),
+        mobileLookupService.getExpiringVehicles(30),
+      ]);
+      if (dashResult.status === 'fulfilled') {
+        setData(dashResult.value.data);
+      } else {
+        console.error('Failed to load mobile dashboard', dashResult.reason);
+      }
+      const expRes = expResult.status === 'fulfilled' ? expResult.value : { data: [] };
       const items = (expRes.data || []).filter((v) => getVehicleDocAlerts(v).length > 0);
       setExpiringVehicles(items);
       if (items.length > 0 && !expiryAlertShown.current) {
@@ -690,6 +1905,9 @@ export const HomeScreen: React.FC<{ navigation: any }> = ({ navigation }) => {
       }
     } catch (error) {
       console.error('Failed to load expiring vehicles', error);
+    } finally {
+      setIsLoading(false);
+      setRefreshing(false);
     }
   };
 
@@ -704,7 +1922,7 @@ export const HomeScreen: React.FC<{ navigation: any }> = ({ navigation }) => {
 
   const formatCurrency = (val: number | string) => {
     const num = parseFloat(String(val)) || 0;
-    return `\u20B9${num.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    return `\u20B9${Math.round(num).toLocaleString('en-IN')}`;
   };
 
   const formatDate = (dateStr?: string) => formatDateDMY(dateStr);
@@ -779,12 +1997,21 @@ export const HomeScreen: React.FC<{ navigation: any }> = ({ navigation }) => {
               <Text style={styles.statLabel}>Trips Today</Text>
               <Text style={styles.statValue}>{data?.trips_today || 0}</Text>
             </View>
-            <View style={[styles.statBox, { borderLeftWidth: 1, borderLeftColor: 'rgba(255,255,255,0.15)' }]}>
-              <Text style={styles.statLabel}>Balance Due</Text>
-              <Text style={[styles.statValue, { color: COLORS.accent }]}>
-                {formatCurrency(data?.balance_due || 0)}
-              </Text>
-            </View>
+            {user?.role === 'ADMIN' ? (
+              <View style={[styles.statBox, { borderLeftWidth: 1, borderLeftColor: 'rgba(255,255,255,0.15)' }]}>
+                <Text style={styles.statLabel}>Balance Due</Text>
+                <Text style={[styles.statValue, { color: COLORS.accent }]}>
+                  {formatCurrency(data?.balance_due || 0)}
+                </Text>
+              </View>
+            ) : (
+              <View style={[styles.statBox, { borderLeftWidth: 1, borderLeftColor: 'rgba(255,255,255,0.15)' }]}>
+                <Text style={styles.statLabel}>My Recent Trips</Text>
+                <Text style={[styles.statValue, { color: COLORS.accent }]}>
+                  {recentTrips.length}
+                </Text>
+              </View>
+            )}
           </Animated.View>
         </Animated.View>
 
@@ -851,6 +2078,30 @@ export const HomeScreen: React.FC<{ navigation: any }> = ({ navigation }) => {
                 <View style={styles.tileCta}>
                   <Text style={styles.tileCtaText}>View Details</Text>
                   <ChevronRight size={16} color="#16a34a" />
+                </View>
+              </Pressable>
+            </Animated.View>
+          )}
+
+          {/* ── Driver Advance & Balance — heading only; details open on tap ── */}
+          {(data?.driver_advance_balances ?? []).length > 0 && (
+            <Animated.View style={{ transform: [{ scale: driverAdvTileScale }] }}>
+              <Pressable
+                style={[styles.sectionTile, { borderColor: '#ddd6fe' }]}
+                onPress={() => setDriverAdvanceModalVisible(true)}
+                onPressIn={() => Animated.spring(driverAdvTileScale, { toValue: 0.97, speed: 50, useNativeDriver: true }).start()}
+                onPressOut={() => Animated.spring(driverAdvTileScale, { toValue: 1.0, speed: 30, bounciness: 6, useNativeDriver: true }).start()}
+              >
+                <View style={styles.tileLead}>
+                  <View style={[styles.tileIconBox, { backgroundColor: '#f3e8ff' }]}>
+                    <Wallet size={22} color="#7c3aed" />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={[styles.tileTitle, { color: COLORS.primary }]}>Driver Advance & Balance</Text>
+                  </View>
+                </View>
+                <View style={styles.tileCta}>
+                  <ChevronRight size={16} color="#7c3aed" />
                 </View>
               </Pressable>
             </Animated.View>
@@ -946,6 +2197,17 @@ export const HomeScreen: React.FC<{ navigation: any }> = ({ navigation }) => {
         formatCurrency={formatCurrency}
         getStatusStyle={getStatusStyle}
         initialTrip={selectedRecentTrip}
+      />
+
+      {/* ── Driver Advance & Balance Modal ── */}
+      <DriverAdvanceModal
+        visible={driverAdvanceModalVisible}
+        onClose={() => setDriverAdvanceModalVisible(false)}
+        balances={data?.driver_advance_balances ?? []}
+        formatCurrency={formatCurrency}
+        selectedDriverId={selectedDriverId}
+        onSelectDriver={(id) => setSelectedDriverId(id)}
+        onRefreshDashboard={loadDashboard}
       />
     </>
   );
@@ -1411,6 +2673,269 @@ const mStyles = StyleSheet.create({
     fontSize: 14,
     color: COLORS.textMuted,
   },
+  // Driver Advance Modal Styles
+  driverSearchBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: COLORS.surface,
+    borderRadius: RADIUS.md,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    gap: 8,
+    marginBottom: SPACING.md,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+  },
+  driverSearchInput: {
+    flex: 1,
+    fontSize: 13,
+    color: COLORS.primary,
+    padding: 0,
+  },
+  driverCardContainer: {
+    backgroundColor: '#faf5ff',
+    borderRadius: RADIUS.lg,
+    borderWidth: 1,
+    borderColor: '#ddd6fe',
+    padding: SPACING.md,
+    marginBottom: SPACING.md,
+  },
+  driverCardTop: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    marginBottom: SPACING.sm,
+  },
+  driverAvatar: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: '#ede9fe',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  driverCardName: {
+    fontSize: 15,
+    fontWeight: '800',
+    color: '#4c1d95',
+  },
+  driverCardMobile: {
+    fontSize: 12,
+    color: COLORS.textMuted,
+    marginTop: 1,
+  },
+  statusTagDeficit: {
+    backgroundColor: '#fee2e2',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 12,
+  },
+  statusTagDeficitText: {
+    fontSize: 11,
+    fontWeight: '800',
+    color: '#dc2626',
+    textTransform: 'uppercase',
+  },
+  statusTagSurplus: {
+    backgroundColor: '#dcfce7',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 12,
+  },
+  statusTagSurplusText: {
+    fontSize: 11,
+    fontWeight: '800',
+    color: '#16a34a',
+    textTransform: 'uppercase',
+  },
+  statusTagNeutral: {
+    backgroundColor: '#f1f5f9',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 12,
+  },
+  statusTagNeutralText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: COLORS.textMuted,
+    textTransform: 'uppercase',
+  },
+  driverStatsGrid: {
+    backgroundColor: '#ffffff',
+    borderRadius: RADIUS.md,
+    borderWidth: 1,
+    borderColor: '#ede9fe',
+    paddingVertical: 10,
+    marginBottom: SPACING.sm,
+  },
+  driverStatCol: {
+    alignItems: 'center',
+  },
+  driverStatLabel: {
+    fontSize: 10,
+    fontWeight: '800',
+    color: COLORS.textMuted,
+    letterSpacing: 0.5,
+    marginBottom: 2,
+  },
+  driverStatValueAdvance: {
+    fontSize: 17,
+    fontWeight: '900',
+    color: '#059669',
+  },
+  driverStatValueExpense: {
+    fontSize: 17,
+    fontWeight: '900',
+    color: '#dc2626',
+  },
+  driverStatSub: {
+    fontSize: 10,
+    color: COLORS.textMuted,
+    marginTop: 1,
+  },
+  balanceResultBoxDeficit: {
+    backgroundColor: '#fff1f2',
+    borderRadius: RADIUS.md,
+    borderWidth: 1,
+    borderColor: '#fecdd3',
+    padding: 12,
+  },
+  balanceResultBoxSurplus: {
+    backgroundColor: '#f0fdf4',
+    borderRadius: RADIUS.md,
+    borderWidth: 1,
+    borderColor: '#bbf7d0',
+    padding: 12,
+  },
+  balanceResultBoxNeutral: {
+    backgroundColor: '#f8fafc',
+    borderRadius: RADIUS.md,
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+    padding: 12,
+  },
+  balanceResultTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 4,
+  },
+  balanceResultTitleDeficit: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#991b1b',
+  },
+  balanceResultAmountDeficit: {
+    fontSize: 20,
+    fontWeight: '900',
+    color: '#dc2626',
+  },
+  balanceResultNoteDeficit: {
+    fontSize: 11,
+    color: '#b91c1c',
+    lineHeight: 15,
+    marginTop: 2,
+  },
+  balanceResultTitleSurplus: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#166534',
+  },
+  balanceResultAmountSurplus: {
+    fontSize: 20,
+    fontWeight: '900',
+    color: '#16a34a',
+  },
+  balanceResultNoteSurplus: {
+    fontSize: 11,
+    color: '#15803d',
+    lineHeight: 15,
+    marginTop: 2,
+  },
+  balanceResultTitleNeutral: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: COLORS.textMuted,
+  },
+  balanceResultAmountNeutral: {
+    fontSize: 18,
+    fontWeight: '800',
+    color: COLORS.primary,
+  },
+  balanceResultNoteNeutral: {
+    fontSize: 11,
+    color: COLORS.textMuted,
+    marginTop: 2,
+  },
+  driverListItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: COLORS.surface,
+    borderRadius: RADIUS.md,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    marginBottom: 6,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+  },
+  driverListItemActive: {
+    backgroundColor: '#f5f3ff',
+    borderColor: '#7c3aed',
+  },
+  driverItemName: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: COLORS.primary,
+  },
+  driverItemSub: {
+    fontSize: 11,
+    color: COLORS.textMuted,
+    marginTop: 2,
+  },
+  selectedBadge: {
+    backgroundColor: '#ede9fe',
+    paddingHorizontal: 6,
+    paddingVertical: 1,
+    borderRadius: 8,
+  },
+  selectedBadgeText: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: '#7c3aed',
+  },
+  badgeDeficit: {
+    backgroundColor: '#fee2e2',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 14,
+  },
+  badgeDeficitText: {
+    fontSize: 11,
+    fontWeight: '800',
+    color: '#dc2626',
+  },
+  badgeSurplus: {
+    backgroundColor: '#dcfce7',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 14,
+  },
+  badgeSurplusText: {
+    fontSize: 11,
+    fontWeight: '800',
+    color: '#16a34a',
+  },
+  badgeNeutral: {
+    backgroundColor: '#f1f5f9',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 14,
+  },
+  badgeNeutralText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: COLORS.textMuted,
+  },
 });
 
 /* ─────────────────────────────────────────────────────────────
@@ -1426,7 +2951,7 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.background,
   },
   headerCard: {
-    backgroundColor: COLORS.primary,
+    backgroundColor: COLORS.indigo,
     borderRadius: RADIUS.xl,
     padding: SPACING.lg,
     marginBottom: SPACING.md,
@@ -1437,7 +2962,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
   },
-  greetingText: { color: '#94a3b8', fontSize: 13, fontWeight: '500' },
+  greetingText: { color: '#fde68a', fontSize: 13, fontWeight: '700' },
   userNameText: { color: COLORS.white, fontSize: 22, fontWeight: '800', marginTop: 2 },
   userHandleText: {
     color: 'rgba(255,255,255,0.55)',
@@ -1782,4 +3307,243 @@ const styles = StyleSheet.create({
     letterSpacing: 0.4,
     textTransform: 'uppercase',
   },
+  /* ─── Driver Advance Balance Card ─────────────────────────── */
+  driverBalanceCard: {
+    backgroundColor: COLORS.card,
+    borderRadius: RADIUS.lg,
+    borderWidth: 1,
+    borderColor: '#ede9fe',
+    marginBottom: SPACING.md,
+    padding: SPACING.md,
+    ...SHADOWS.sm,
+  },
+  driverBalanceHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: SPACING.sm,
+    marginBottom: SPACING.sm,
+  },
+  driverBalanceIconBox: {
+    width: 36,
+    height: 36,
+    borderRadius: RADIUS.sm,
+    backgroundColor: '#f3e8ff',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  driverBalanceTitle: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: COLORS.primary,
+  },
+  driverBalanceSub: {
+    fontSize: 12,
+    color: COLORS.textMuted,
+    marginTop: 1,
+  },
+  driverPickerBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 7,
+    borderWidth: 1,
+    borderColor: '#ddd6fe',
+    borderRadius: RADIUS.sm,
+    paddingVertical: 9,
+    paddingHorizontal: 12,
+    marginBottom: SPACING.sm,
+    backgroundColor: '#faf5ff',
+  },
+  driverPickerText: {
+    flex: 1,
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#4c1d95',
+  },
+  driverBalanceBox: {
+    borderRadius: RADIUS.sm,
+    padding: SPACING.sm + 2,
+    gap: SPACING.xs,
+  },
+  driverBalanceBoxSurplus: {
+    backgroundColor: '#f0fdf4',
+    borderWidth: 1,
+    borderColor: '#bbf7d0',
+  },
+  driverBalanceBoxDeficit: {
+    backgroundColor: '#fff1f2',
+    borderWidth: 1,
+    borderColor: '#fecdd3',
+  },
+  driverBalanceRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  driverBalanceRowLabel: {
+    fontSize: 12,
+    color: COLORS.textMuted,
+    fontWeight: '500',
+  },
+  driverBalanceRowValue: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: COLORS.primary,
+  },
+  driverBalanceDivider: {
+    height: 1,
+    backgroundColor: COLORS.border,
+    marginVertical: 4,
+  },
+  driverBalanceResultRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: 2,
+  },
+  driverBalanceResultTextSurplus: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: '#16a34a',
+  },
+  driverBalanceResultTextDeficit: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: '#dc2626',
+    flexShrink: 1,
+  },
+  driverBalancePlaceholder: {
+    borderRadius: RADIUS.sm,
+    backgroundColor: '#f5f3ff',
+    paddingVertical: 14,
+    alignItems: 'center',
+  },
+  driverBalancePlaceholderText: {
+    fontSize: 12,
+    color: '#7c3aed',
+    fontWeight: '500',
+  },
+  /* ─── Driver Picker Modal ──────────────────────────────────── */
+  driverPickerOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.55)',
+    justifyContent: 'flex-end',
+  },
+  driverPickerSheet: {
+    backgroundColor: COLORS.card,
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    paddingHorizontal: SPACING.lg,
+    paddingBottom: SPACING.xl,
+    maxHeight: '65%',
+    ...SHADOWS.lg,
+  },
+  driverPickerHandle: {
+    width: 42,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: COLORS.border,
+    alignSelf: 'center',
+    marginTop: 10,
+    marginBottom: SPACING.md,
+  },
+  driverPickerSheetTitle: {
+    fontSize: 16,
+    fontWeight: '800',
+    color: COLORS.primary,
+    marginBottom: SPACING.md,
+  },
+  driverPickerItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: 10,
+    borderRadius: RADIUS.sm,
+    marginBottom: 4,
+    gap: SPACING.sm,
+  },
+  driverPickerItemActive: {
+    backgroundColor: '#f5f3ff',
+  },
+  driverPickerItemName: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: COLORS.primary,
+  },
+  driverPickerItemMobile: {
+    fontSize: 11,
+    color: COLORS.textMuted,
+    marginTop: 1,
+  },
+  driverPickerBadgeSurplus: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#16a34a',
+    backgroundColor: '#dcfce7',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 20,
+  },
+  driverPickerBadgeDeficit: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#dc2626',
+    backgroundColor: '#fee2e2',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 20,
+  },
+  driverPickerBadgeNeutral: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: COLORS.textMuted,
+    backgroundColor: COLORS.background,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 20,
+  },
+  driverBalanceBoxNeutral: {
+    backgroundColor: '#f8fafc',
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+  },
+  driverBalanceNoteTextDeficit: {
+    fontSize: 11,
+    color: '#b91c1c',
+    marginTop: 4,
+    lineHeight: 15,
+  },
+  driverBalanceNoteTextSurplus: {
+    fontSize: 11,
+    color: '#15803d',
+    marginTop: 4,
+    lineHeight: 15,
+  },
+  driverBalanceResultTextNeutral: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#059669',
+  },
+  driverPickerSheetHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: SPACING.sm,
+  },
+  driverSearchBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#f1f5f9',
+    borderRadius: RADIUS.md,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    gap: 8,
+    marginBottom: SPACING.md,
+  },
+  driverSearchInput: {
+    flex: 1,
+    fontSize: 13,
+    color: COLORS.primary,
+    padding: 0,
+  },
 });
+

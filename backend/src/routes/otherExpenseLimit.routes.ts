@@ -16,8 +16,8 @@ router.get('/', getOtherExpenseLimits);
 router.get('/effective', getEffectiveOtherExpenseLimit);
 
 // Admin-only management routes
-router.post('/', authorize('ADMIN'), createOtherExpenseLimit);
-router.put('/:id', authorize('ADMIN'), updateOtherExpenseLimit);
-router.delete('/:id', authorize('ADMIN'), deleteOtherExpenseLimit);
+router.post('/', authorize('ADMIN', 'OWNER'), createOtherExpenseLimit);
+router.put('/:id', authorize('ADMIN', 'OWNER'), updateOtherExpenseLimit);
+router.delete('/:id', authorize('ADMIN', 'OWNER'), deleteOtherExpenseLimit);
 
 export default router;

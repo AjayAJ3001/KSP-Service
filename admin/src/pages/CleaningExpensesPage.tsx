@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Droplets, Plus, Edit2, Trash2 } from 'lucide-react';
-import { cleaningExpenseRateService } from '../services/adminService';
-import { CleaningExpenseRate } from '../types';
+import { cleaningExpenseRateService, partyService, vehicleService } from '../services/adminService';
+import { CleaningExpenseRate, Party, Vehicle } from '../types';
 import { DataTable, Column } from '../components/Common/DataTable';
 import { Modal } from '../components/Common/Modal';
 import { StatusBadge } from '../components/Common/StatusBadge';
@@ -12,18 +12,36 @@ export const CleaningExpensesPage: React.FC = () => {
 
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [selectedRate, setSelectedRate] = useState<CleaningExpenseRate | null>(null);
+  const [parties, setParties] = useState<Party[]>([]);
+  const [vehicles, setVehicles] = useState<Vehicle[]>([]);
   const [formData, setFormData] = useState({
     unit_name: '',
     cleaning_charge: '',
     description: '',
     status: 'ACTIVE' as 'ACTIVE' | 'INACTIVE',
+    party_id: '',
+    vehicle_id: '',
   });
   const [formError, setFormError] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   useEffect(() => {
     loadRates();
+    loadLookups();
   }, []);
+
+  const loadLookups = async () => {
+    try {
+      const [pRes, vRes] = await Promise.all([
+        partyService.getParties({ limit: 200 }),
+        vehicleService.getVehicles({ limit: 200 }),
+      ]);
+      setParties(pRes.data.items || []);
+      setVehicles(vRes.data.items || []);
+    } catch (err) {
+      console.error('Failed to load cleaning rate lookups', err);
+    }
+  };
 
   const loadRates = async () => {
     try {
@@ -60,6 +78,8 @@ export const CleaningExpensesPage: React.FC = () => {
         cleaning_charge: parseFloat(formData.cleaning_charge),
         description: formData.description.trim() || undefined,
         status: formData.status,
+        party_id: formData.party_id ? Number(formData.party_id) : null,
+        vehicle_id: formData.vehicle_id ? Number(formData.vehicle_id) : null,
       };
 
       if (selectedRate) {
@@ -106,13 +126,15 @@ export const CleaningExpensesPage: React.FC = () => {
       cleaning_charge: String(rate.cleaning_charge),
       description: rate.description || '',
       status: rate.status,
+      party_id: rate.party_id ? String(rate.party_id) : '',
+      vehicle_id: rate.vehicle_id ? String(rate.vehicle_id) : '',
     });
     setFormError('');
     setIsModalOpen(true);
   };
 
   const resetForm = () => {
-    setFormData({ unit_name: '', cleaning_charge: '', description: '', status: 'ACTIVE' });
+    setFormData({ unit_name: '', cleaning_charge: '', description: '', status: 'ACTIVE', party_id: '', vehicle_id: '' });
     setFormError('');
   };
 
@@ -143,6 +165,22 @@ export const CleaningExpensesPage: React.FC = () => {
           }}
         >
           {r.unit_name}
+        </span>
+      ),
+    },
+    {
+      header: 'Party',
+      render: (r) => (
+        <span style={{ fontSize: '13px', fontWeight: 600 }}>
+          {r.party_name || <span style={{ color: 'var(--text-muted)' }}>All parties</span>}
+        </span>
+      ),
+    },
+    {
+      header: 'Truck',
+      render: (r) => (
+        <span style={{ fontSize: '13px', fontWeight: 700, color: r.lorry_number ? '#1d4ed8' : 'var(--text-muted)' }}>
+          {r.lorry_number || 'All trucks'}
         </span>
       ),
     },
@@ -199,7 +237,7 @@ export const CleaningExpensesPage: React.FC = () => {
             Cleaning Expense Rates
           </h2>
           <p style={{ color: 'var(--text-muted)', fontSize: '13.5px', marginTop: '4px' }}>
-            Configure cleaning charges per destination / unit ({rates.length} destinations configured)
+            Configure cleaning charges by unit, party, and truck ({rates.length} rates configured)
           </p>
         </div>
         <button onClick={openCreateModal} className="btn btn-primary">
@@ -268,6 +306,34 @@ export const CleaningExpensesPage: React.FC = () => {
               value={formData.unit_name}
               onChange={(e) => setFormData({ ...formData, unit_name: e.target.value })}
             />
+          </div>
+
+          <div className="form-group">
+            <label className="form-label">Party (optional)</label>
+            <select
+              className="form-control form-select"
+              value={formData.party_id}
+              onChange={(e) => setFormData({ ...formData, party_id: e.target.value })}
+            >
+              <option value="">All parties</option>
+              {parties.map((p) => (
+                <option key={p.id} value={p.id}>{p.name}</option>
+              ))}
+            </select>
+          </div>
+
+          <div className="form-group">
+            <label className="form-label">Truck (optional)</label>
+            <select
+              className="form-control form-select"
+              value={formData.vehicle_id}
+              onChange={(e) => setFormData({ ...formData, vehicle_id: e.target.value })}
+            >
+              <option value="">All trucks</option>
+              {vehicles.map((v) => (
+                <option key={v.id} value={v.id}>{v.lorry_number}</option>
+              ))}
+            </select>
           </div>
 
           {/* Cleaning Charge */}

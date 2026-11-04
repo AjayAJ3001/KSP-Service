@@ -30,6 +30,20 @@ import otherExpenseLimitRoutes from './routes/otherExpenseLimit.routes';
 import driverAdvanceRoutes from './routes/driverAdvance.routes';
 
 import { errorHandler, notFound } from './middleware/errorHandler';
+import os from 'os';
+
+export function getLanIpv4Addresses(): string[] {
+  const ips: string[] = [];
+  for (const addrs of Object.values(os.networkInterfaces())) {
+    for (const addr of addrs || []) {
+      const family = String(addr.family);
+      if ((family === 'IPv4' || family === '4') && !addr.internal) {
+        ips.push(addr.address);
+      }
+    }
+  }
+  return ips;
+}
 
 dotenv.config();
 
@@ -46,7 +60,7 @@ app.use(cors({
 }));
 
 // Parsing middleware
-app.use(express.json({ limit: '10mb' }));
+app.use(express.json({ limit: '20mb' }));
 app.use(express.urlencoded({ extended: true }));
 
 // Logging
@@ -56,7 +70,16 @@ if (process.env.NODE_ENV !== 'test') {
 
 // Health check
 app.get('/health', (req, res) => {
-  res.json({ success: true, message: 'KSP Transport API is running', timestamp: new Date() });
+  const port = parseInt(process.env.PORT || '5000', 10);
+  const lanIps = getLanIpv4Addresses();
+  res.json({
+    success: true,
+    message: 'KSP Transport API is running',
+    timestamp: new Date(),
+    port,
+    lanIps,
+    urls: ['http://localhost:' + port, ...lanIps.map((ip) => `http://${ip}:${port}`)],
+  });
 });
 
 // API Routes

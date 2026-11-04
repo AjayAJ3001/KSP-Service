@@ -25,7 +25,10 @@ export const errorHandler = (
   // PostgreSQL errors
   if (err.code === '23505') {
     statusCode = 409;
-    message = 'A record with this information already exists.';
+    const constraint = `${err.constraint || ''} ${err.detail || ''}`;
+    message = /weigh_bill/i.test(constraint)
+      ? 'This bill is duplicate. It was already used on another trip. Upload a different weighment / acceptance bill.'
+      : 'A record with this information already exists.';
   } else if (err.code === '23503') {
     statusCode = 400;
     message = 'Referenced record does not exist.';

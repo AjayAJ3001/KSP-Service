@@ -3,9 +3,11 @@ import { query, getClient } from '../config/database';
 import { AppError, asyncHandler } from '../middleware/errorHandler';
 import { AuthRequest } from '../middleware/auth';
 import { createAuditLog } from '../utils/auditLog';
+import { applyVehicleScope, assertTripInOwnerScope } from '../utils/ownerScope';
 
 export const getTripPayments = asyncHandler(async (req: AuthRequest, res: Response): Promise<void> => {
   const { trip_id } = req.params;
+  await assertTripInOwnerScope(req, trip_id);
   const result = await query(
     `SELECT tp.*, u.name as created_by_name FROM trip_payments tp
      JOIN users u ON tp.created_by = u.id
@@ -17,6 +19,7 @@ export const getTripPayments = asyncHandler(async (req: AuthRequest, res: Respon
 
 export const addPayment = asyncHandler(async (req: AuthRequest, res: Response): Promise<void> => {
   const { trip_id } = req.params;
+  await assertTripInOwnerScope(req, trip_id);
   const { received_amount, payment_date, notes } = req.body;
 
   if (!received_amount || received_amount < 0) {
@@ -104,20 +107,26 @@ export const getPartyLedger = asyncHandler(async (req: AuthRequest, res: Respons
 
   if (from_date) { conditions.push(`t.trip_date >= $${paramIdx}`); params.push(from_date); paramIdx++; }
   if (to_date) { conditions.push(`t.trip_date <= $${paramIdx}`); params.push(to_date); paramIdx++; }
+  paramIdx = applyVehicleScope(req, conditions, params, paramIdx, 't.vehicle_id');
 
   const result = await query(
     `SELECT t.id as trip_id, t.trip_date, r.from_location, r.to_location,
             t.total_freight as freight, t.goods_weight, t.freight_rate, t.status,
-            COALESCE((SELECT SUM(received_amount) FROM trip_payments WHERE trip_id = t.id), 0) as received_amount,
-            (t.total_freight - COALESCE((SELECT SUM(received_amount) FROM trip_payments WHERE trip_id = t.id), 0)) as balance_due,
+            COALESCE(pay.received_amount, 0) as received_amount,
+            (t.total_freight - COALESCE(pay.received_amount, 0)) as balance_due,
             CASE 
               WHEN t.status = 'SETTLED' THEN 'Settled'
-              WHEN (t.total_freight - COALESCE((SELECT SUM(received_amount) FROM trip_payments WHERE trip_id = t.id), 0)) > 0 
-                   AND COALESCE((SELECT SUM(received_amount) FROM trip_payments WHERE trip_id = t.id), 0) > 0 THEN 'Partial'
+              WHEN (t.total_freight - COALESCE(pay.received_amount, 0)) > 0 
+                   AND COALESCE(pay.received_amount, 0) > 0 THEN 'Partial'
               ELSE 'Pending'
             END as payment_status
      FROM trips t
      JOIN routes r ON t.route_id = r.id
+     LEFT JOIN (
+       SELECT trip_id, SUM(received_amount) as received_amount
+       FROM trip_payments
+       GROUP BY trip_id
+     ) pay ON pay.trip_id = t.id
      WHERE ${conditions.join(' AND ')}
      ORDER BY t.trip_date DESC`,
     params

@@ -3,6 +3,8 @@ import { query } from '../config/database';
 import { AppError, asyncHandler } from '../middleware/errorHandler';
 import { AuthRequest } from '../middleware/auth';
 import { createAuditLog } from '../utils/auditLog';
+import { applyVehicleScope, assertOwnerVehicle, hasFleetWideAccess, isLinkedManager, isOwnerUser } from '../utils/ownerScope';
+import { reconcileDriverPendingSettlements } from './settlement.controller';
 
 // ===== TRUCK ADVANCES =====
 
@@ -27,6 +29,8 @@ export const getMyTruckAdvances = asyncHandler(async (req: AuthRequest, res: Res
     `SELECT ta.*,
             v.lorry_number,
             v.vehicle_type,
+            o.id as owner_id,
+            o.name as owner_name,
             u.name as manager_name,
             d.name as driver_name,
             d.mobile_number as driver_mobile,
@@ -45,6 +49,7 @@ export const getMyTruckAdvances = asyncHandler(async (req: AuthRequest, res: Res
             un.abbreviation as unit_abbreviation
      FROM truck_advances ta
      JOIN vehicles v ON ta.vehicle_id = v.id
+     LEFT JOIN owners o ON v.owner_id = o.id
      JOIN users u ON ta.manager_id = u.id
      LEFT JOIN drivers d ON ta.driver_id = d.id
      LEFT JOIN trips t ON ta.trip_id = t.id AND t.status NOT IN ('CANCELLED', 'DRAFT')
@@ -79,6 +84,7 @@ export const getTruckAdvances = asyncHandler(async (req: AuthRequest, res: Respo
   const limit = parseInt(req.query.limit as string) || 20;
   const offset = (page - 1) * limit;
   const vehicle_id = req.query.vehicle_id as string;
+  const owner_id = req.query.owner_id as string;
   const driver_id = req.query.driver_id as string;
   const manager_id = req.query.manager_id as string;
   const party_id = req.query.party_id as string;
@@ -93,6 +99,11 @@ export const getTruckAdvances = asyncHandler(async (req: AuthRequest, res: Respo
   if (vehicle_id) {
     conditions.push(`ta.vehicle_id = $${paramIdx}`);
     params.push(vehicle_id);
+    paramIdx++;
+  }
+  if (owner_id) {
+    conditions.push(`v.owner_id = $${paramIdx}`);
+    params.push(parseInt(owner_id));
     paramIdx++;
   }
   if (driver_id) {
@@ -121,8 +132,14 @@ export const getTruckAdvances = asyncHandler(async (req: AuthRequest, res: Respo
     paramIdx++;
   }
   if (search) {
-    conditions.push(`(v.lorry_number ILIKE $${paramIdx} OR u.name ILIKE $${paramIdx} OR d.name ILIKE $${paramIdx} OR ta.notes ILIKE $${paramIdx} OR p.name ILIKE $${paramIdx})`);
+    conditions.push(`(v.lorry_number ILIKE $${paramIdx} OR o.name ILIKE $${paramIdx} OR u.name ILIKE $${paramIdx} OR d.name ILIKE $${paramIdx} OR ta.notes ILIKE $${paramIdx} OR p.name ILIKE $${paramIdx})`);
     params.push(`%${search}%`);
+    paramIdx++;
+  }
+  paramIdx = applyVehicleScope(req, conditions, params, paramIdx, 'ta.vehicle_id');
+  if (!hasFleetWideAccess(req) && req.user?.id && !manager_id && !isLinkedManager(req)) {
+    conditions.push(`ta.manager_id = $${paramIdx}`);
+    params.push(req.user.id);
     paramIdx++;
   }
 
@@ -132,6 +149,7 @@ export const getTruckAdvances = asyncHandler(async (req: AuthRequest, res: Respo
     `SELECT COUNT(*) as total_count, COALESCE(SUM(ta.amount), 0) as total_amount
      FROM truck_advances ta
      JOIN vehicles v ON ta.vehicle_id = v.id
+     LEFT JOIN owners o ON v.owner_id = o.id
      JOIN users u ON ta.manager_id = u.id
      LEFT JOIN drivers d ON ta.driver_id = d.id
      LEFT JOIN trips t ON ta.trip_id = t.id
@@ -143,6 +161,7 @@ export const getTruckAdvances = asyncHandler(async (req: AuthRequest, res: Respo
   const result = await query(
     `SELECT ta.*,
             v.lorry_number, v.vehicle_type,
+            o.id as owner_id, o.name as owner_name,
             u.name as manager_name,
             d.name as driver_name, d.mobile_number as driver_mobile,
             cb.name as created_by_name,
@@ -165,6 +184,7 @@ export const getTruckAdvances = asyncHandler(async (req: AuthRequest, res: Respo
             r.to_location
      FROM truck_advances ta
      JOIN vehicles v ON ta.vehicle_id = v.id
+     LEFT JOIN owners o ON v.owner_id = o.id
      JOIN users u ON ta.manager_id = u.id
      LEFT JOIN drivers d ON ta.driver_id = d.id
      LEFT JOIN users cb ON ta.created_by = cb.id
@@ -205,6 +225,20 @@ export const getManagerAdvancesSummary = asyncHandler(async (req: AuthRequest, r
   let userCondition = "u.status = 'ACTIVE'";
   const params: any[] = [];
   let paramIdx = 1;
+
+  if (isOwnerUser(req)) {
+    const ownerIds = req.user?.ownerIds || [];
+    if (ownerIds.length === 0) {
+      userCondition += ' AND FALSE';
+    } else {
+      userCondition += ` AND EXISTS (
+        SELECT 1 FROM manager_owners mo
+        WHERE mo.user_id = u.id AND mo.owner_id = ANY($${paramIdx}::int[])
+      )`;
+      params.push(ownerIds);
+      paramIdx++;
+    }
+  }
 
   if (manager_id) {
     userCondition += ` AND u.id = $${paramIdx}`;
@@ -306,6 +340,7 @@ export const createTruckAdvance = asyncHandler(async (req: AuthRequest, res: Res
   if (!vehicle_id || amount === undefined || amount === null) {
     throw new AppError('Vehicle and Amount are required.', 400);
   }
+  assertOwnerVehicle(req, vehicle_id);
 
   const numAmount = parseFloat(amount);
   if (isNaN(numAmount) || numAmount <= 0) {
@@ -334,6 +369,10 @@ export const createTruckAdvance = asyncHandler(async (req: AuthRequest, res: Res
      RETURNING *`,
     [vehicle_id, driver_id || null, managerId, numAmount, resolvedDate, notes?.trim() || null, req.user?.id, trip_id || null]
   );
+
+  if (driver_id) {
+    await reconcileDriverPendingSettlements(driver_id, null, req.user?.id);
+  }
 
   // Fetch enriched result with vehicle and driver info
   const enriched = await query(

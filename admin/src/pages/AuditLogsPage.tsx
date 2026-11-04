@@ -6,6 +6,7 @@ import { DataTable, Column } from '../components/Common/DataTable';
 import { Modal } from '../components/Common/Modal';
 import { formatIST } from '../utils/dateUtils';
 import { DateField } from '../components/Common/DateField';
+import { PRINT_BRAND_CSS, printBrandLockup } from '../utils/printBrand';
 
 type SourceTab = 'ADMIN' | 'MOBILE' | 'ALL';
 
@@ -339,6 +340,7 @@ export const AuditLogsPage: React.FC = () => {
   <meta charset="utf-8" />
   <title>KSP Transport - Audit Logs &amp; Compliance Report</title>
   <style>
+    ${PRINT_BRAND_CSS}
     * { box-sizing: border-box; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
     body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif; margin: 0; padding: 24px; color: #0f172a; background: #fff; font-size: 11px; line-height: 1.4; }
     @page { size: landscape; margin: 10mm; }
@@ -350,7 +352,7 @@ export const AuditLogsPage: React.FC = () => {
       body { padding: 0; }
     }
 
-    .header-bar { display: flex; justify-content: space-between; align-items: flex-start; padding-bottom: 12px; border-bottom: 2px solid #0f172a; margin-bottom: 14px; }
+    .header-bar { display: flex; justify-content: space-between; align-items: center; padding-bottom: 10px; border-bottom: 3px solid #0f172a; margin-bottom: 14px; }
     .company-title { font-size: 20px; font-weight: 800; color: #0f172a; letter-spacing: 0.5px; margin: 0 0 4px 0; }
     .report-subtitle { font-size: 13px; font-weight: 700; color: #2563eb; margin: 0 0 4px 0; text-transform: uppercase; letter-spacing: 0.5px; }
     .meta-text { font-size: 11px; color: #64748b; margin: 0; }
@@ -383,7 +385,7 @@ export const AuditLogsPage: React.FC = () => {
 
   <div class="header-bar">
     <div>
-      <h1 class="company-title">KSP TRANSPORT &amp; LOGISTICS</h1>
+      ${printBrandLockup()}
       <div class="report-subtitle">Official Audit Logs &amp; Compliance Trail</div>
       <p class="meta-text">Scope: ${scopeTitle} | Module: ${moduleFilter || 'All Modules'}</p>
     </div>

@@ -8,9 +8,9 @@ router.use(authenticate);
 router.get('/', getVehicles);
 router.get('/expiring', getExpiringVehicles);
 router.get('/:id', getVehicleById);
-router.post('/', authorize('ADMIN'), createVehicle);
-router.put('/:id', authorize('ADMIN'), updateVehicle);
-router.patch('/:id/status', authorize('ADMIN'), updateVehicleStatus);
-router.delete('/:id', authorize('ADMIN'), deleteVehicle);
+router.post('/', authorize('ADMIN', 'OWNER'), createVehicle);
+router.put('/:id', authorize('ADMIN', 'OWNER'), updateVehicle);
+router.patch('/:id/status', authorize('ADMIN', 'OWNER'), updateVehicleStatus);
+router.delete('/:id', authorize('ADMIN', 'OWNER'), deleteVehicle);
 
 export default router;

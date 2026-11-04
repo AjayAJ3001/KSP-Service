@@ -3,11 +3,13 @@ import * as XLSX from 'xlsx';
 import {
   Printer, Download, RefreshCw, FileSpreadsheet, Loader2,
 } from 'lucide-react';
-import { reportService, partyService, driverService, vehicleService, unitService } from '../services/adminService';
-import { Party, Driver, Vehicle, Unit } from '../types';
+import { reportService, partyService, driverService, vehicleService, ownerService, unitService } from '../services/adminService';
+import { Party, Driver, Vehicle, Owner, Unit } from '../types';
 import { StatusBadge } from '../components/Common/StatusBadge';
 import { formatDateDMY } from '../utils/dateUtils';
 import { DateField } from '../components/Common/DateField';
+import { useAuth } from '../context/AuthContext';
+import { PRINT_BRAND_CSS, printBrandLockup } from '../utils/printBrand';
 
 function downloadCSV(filename: string, headers: string[], rows: string[][]) {
   const escape = (v: any) => `"${String(v ?? '').replace(/"/g, '""')}"`;
@@ -30,18 +32,193 @@ function formatCurrency(val: number | string) {
   return `${String.fromCharCode(8377)}${num.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
+function parseJsonList(val: any): any[] {
+  if (Array.isArray(val)) return val;
+  if (typeof val === 'string') {
+    try {
+      const parsed = JSON.parse(val);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  }
+  return [];
+}
+
+function printInr(val: any) {
+  return (parseFloat(String(val)) || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+function driverExpenseBalance(t: any) {
+  const total = parseFloat(String(t.total_expenses || 0)) || 0;
+  const toPay = Math.max(0, parseFloat(String(t.need_to_pay || 0)) || 0);
+  const settled = Math.max(0, total - toPay);
+  const inHand = Math.max(0, parseFloat(String(t.in_hand || 0)) || 0);
+  return { total, toPay, settled, inHand };
+}
+
+function driverExpenseStatus(t: any) {
+  const amt = parseFloat(String(t.total_expenses || 0)) || 0;
+  if (amt <= 0) return 'NO_EXPENSE';
+  const settle = String(t.settlement_status || '').toUpperCase();
+  if (settle === 'SETTLED') return 'SETTLED';
+  if (settle === 'VERIFIED') return 'VERIFIED';
+  const need = parseFloat(String(t.need_to_pay || 0)) || 0;
+  const paid = parseFloat(String(t.driver_cash_paid || 0)) || 0;
+  if (paid > 0 && need > 0) return 'PARTIALLY_PAID';
+  return 'PENDING';
+}
+
+function expenseStatusBadgeHtml(status: string) {
+  let cls = 'badge-pending';
+  if (status === 'SETTLED') cls = 'badge-paid';
+  else if (status === 'VERIFIED' || status === 'PARTIALLY_PAID') cls = 'badge-partial';
+  else if (status === 'NO_EXPENSE') cls = 'badge-settled';
+  return `<span class="badge ${cls}">${String(status || '').replace(/_/g, ' ')}</span>`;
+}
+
+function driverExpensePrintRows(trips: any[]) {
+  const rows: string[] = [];
+  let sno = 0;
+  let total = 0;
+  let totalSettled = 0;
+  let totalToPay = 0;
+  trips.forEach((t) => {
+    const items = parseJsonList(t.expense_items);
+    const bal = driverExpenseBalance(t);
+    const tripTotal = bal.total;
+    total += tripTotal;
+    totalSettled += bal.settled;
+    totalToPay += bal.toPay;
+    const expStatus = driverExpenseStatus(t);
+    const statusCell = expenseStatusBadgeHtml(expStatus);
+    const settledCell = `<td class="num" style="color:#15803d">${printInr(bal.settled)}</td>`;
+    const toPayCell = `<td class="num" style="color:${bal.toPay > 0 ? '#b91c1c' : '#15803d'}"><strong>${printInr(bal.toPay)}</strong></td>`;
+    if (items.length === 0) {
+      if (tripTotal <= 0) return;
+      sno += 1;
+      rows.push(`
+        <tr>
+          <td class="center">${sno}</td>
+          <td>${formatDateDMY(t.trip_date)}</td>
+          <td><strong>${t.lorry_number || '-'}</strong></td>
+          <td>${t.driver_name || '-'}</td>
+          <td>TOTAL</td>
+          <td>—</td>
+          <td class="num" style="color:#7c3aed"><strong>${printInr(tripTotal)}</strong></td>
+          ${settledCell}
+          ${toPayCell}
+          <td class="center">${statusCell}</td>
+        </tr>`);
+      return;
+    }
+    items.forEach((item: any, idx: number) => {
+      sno += 1;
+      const amt = parseFloat(String(item.amount || 0)) || 0;
+      rows.push(`
+        <tr>
+          <td class="center">${sno}</td>
+          <td>${idx === 0 ? formatDateDMY(t.trip_date) : ''}</td>
+          <td>${idx === 0 ? `<strong>${t.lorry_number || '-'}</strong>` : ''}</td>
+          <td>${idx === 0 ? (t.driver_name || '-') : ''}</td>
+          <td>${item.expense_type || 'OTHER'}</td>
+          <td>${item.description || '—'}</td>
+          <td class="num" style="color:#7c3aed">${printInr(amt)}</td>
+          ${idx === 0 ? settledCell : '<td></td>'}
+          ${idx === 0 ? toPayCell : '<td></td>'}
+          <td class="center">${idx === 0 ? statusCell : ''}</td>
+        </tr>`);
+    });
+    if (items.length > 1) {
+      rows.push(`
+        <tr>
+          <td></td>
+          <td colspan="5" style="text-align:right;font-weight:700;color:#475569">Trip ${t.id} expense total</td>
+          <td class="num" style="color:#6d28d9"><strong>${printInr(tripTotal)}</strong></td>
+          <td class="num" style="color:#15803d"><strong>${printInr(bal.settled)}</strong></td>
+          <td class="num" style="color:${bal.toPay > 0 ? '#b91c1c' : '#15803d'}"><strong>${printInr(bal.toPay)}</strong></td>
+          <td></td>
+        </tr>`);
+    }
+  });
+  return { rowsHtml: rows.join(''), count: sno, total, totalSettled, totalToPay };
+}
+
+function partyPaymentPrintRows(trips: any[]) {
+  const rows: string[] = [];
+  let sno = 0;
+  let totalReceived = 0;
+  let totalDue = 0;
+  trips.forEach((t) => {
+    const items = parseJsonList(t.payment_items);
+    const received = parseFloat(String(t.total_received || 0)) || 0;
+    const due = parseFloat(String(t.balance_due || 0)) || 0;
+    totalReceived += received;
+    totalDue += due;
+    if (items.length === 0) {
+      sno += 1;
+      rows.push(`
+        <tr>
+          <td class="center">${sno}</td>
+          <td>${formatDateDMY(t.trip_date)}</td>
+          <td><strong>${t.lorry_number || '-'}</strong></td>
+          <td>${t.party_name || '-'}</td>
+          <td>—</td>
+          <td class="num">${printInr(t.total_freight)}</td>
+          <td class="num" style="color:#15803d">${printInr(received)}</td>
+          <td class="num" style="color:${due > 0 ? '#b91c1c' : '#15803d'}"><strong>${printInr(due)}</strong></td>
+          <td>—</td>
+        </tr>`);
+      return;
+    }
+    items.forEach((item: any, idx: number) => {
+      sno += 1;
+      const amt = parseFloat(String(item.received_amount || 0)) || 0;
+      const itemDue = parseFloat(String(item.balance_due != null ? item.balance_due : due)) || 0;
+      rows.push(`
+        <tr>
+          <td class="center">${sno}</td>
+          <td>${idx === 0 ? formatDateDMY(t.trip_date) : ''}</td>
+          <td>${idx === 0 ? `<strong>${t.lorry_number || '-'}</strong>` : ''}</td>
+          <td>${idx === 0 ? (t.party_name || '-') : ''}</td>
+          <td>${item.payment_date ? formatDateDMY(item.payment_date) : '—'}</td>
+          <td class="num">${idx === 0 ? printInr(t.total_freight) : ''}</td>
+          <td class="num" style="color:#15803d">${printInr(amt)}</td>
+          <td class="num" style="color:${itemDue > 0 ? '#b91c1c' : '#15803d'}">${printInr(itemDue)}</td>
+          <td>${item.notes || item.payment_status || '—'}</td>
+        </tr>`);
+    });
+    if (items.length > 1) {
+      rows.push(`
+        <tr>
+          <td></td>
+          <td colspan="5" style="text-align:right;font-weight:700;color:#475569">Trip ${t.id} party total</td>
+          <td class="num" style="color:#15803d"><strong>${printInr(received)}</strong></td>
+          <td class="num" style="color:${due > 0 ? '#b91c1c' : '#15803d'}"><strong>${printInr(due)}</strong></td>
+          <td></td>
+        </tr>`);
+    }
+  });
+  return { rowsHtml: rows.join(''), count: sno, totalReceived, totalDue };
+}
+
 export const ReportsPage: React.FC = () => {
+  const { user } = useAuth();
+  const isOwnerUser = user?.role === 'OWNER';
+  const ownerScopeIds = (user?.ownerIds?.length ? user.ownerIds : (user?.owners || []).map((o) => o.id)).map(Number);
   const [fromDate, setFromDate] = useState('');
   const [toDate, setToDate] = useState('');
   const [partyId, setPartyId] = useState('');
   const [driverId, setDriverId] = useState('');
   const [vehicleId, setVehicleId] = useState('');
+  const [ownerId, setOwnerId] = useState('');
   const [unitId, setUnitId] = useState('');
   const [status, setStatus] = useState('');
 
   const [parties, setParties] = useState<Party[]>([]);
   const [drivers, setDrivers] = useState<Driver[]>([]);
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
+  const [owners, setOwners] = useState<Owner[]>([]);
   const [units, setUnits] = useState<Unit[]>([]);
 
   const [tripData, setTripData] = useState<{ trips: any[]; summary: any }>({ trips: [], summary: {} });
@@ -53,6 +230,12 @@ export const ReportsPage: React.FC = () => {
     loadLookups();
   }, []);
 
+  useEffect(() => {
+    if (isOwnerUser && ownerScopeIds.length === 1 && !ownerId) {
+      setOwnerId(String(ownerScopeIds[0]));
+    }
+  }, [isOwnerUser, ownerScopeIds, ownerId]);
+
   const loadReport = useCallback(async () => {
     try {
       setIsLoading(true);
@@ -62,6 +245,7 @@ export const ReportsPage: React.FC = () => {
         party_id: partyId || undefined,
         driver_id: driverId || undefined,
         vehicle_id: vehicleId || undefined,
+        owner_id: ownerId || undefined,
         unit_id: unitId || undefined,
         status: status || undefined,
       };
@@ -73,7 +257,7 @@ export const ReportsPage: React.FC = () => {
     } finally {
       setIsLoading(false);
     }
-  }, [fromDate, toDate, partyId, driverId, vehicleId, unitId, status]);
+  }, [fromDate, toDate, partyId, driverId, vehicleId, ownerId, unitId, status]);
 
   useEffect(() => {
     loadReport();
@@ -81,15 +265,27 @@ export const ReportsPage: React.FC = () => {
 
   const loadLookups = async () => {
     try {
-      const [p, d, v, u] = await Promise.all([
+      const [p, d, v, o, u] = await Promise.all([
         partyService.getParties({ limit: 200 }),
         driverService.getDrivers({ limit: 200 }),
-        vehicleService.getVehicles({ limit: 200 }),
+        vehicleService.getVehicles({ limit: 500 }),
+        ownerService.getOwners({ limit: 500 }),
         unitService.getUnits('ACTIVE').catch(() => unitService.getUnits()),
       ]);
       setParties(p.data.items || (Array.isArray(p.data) ? p.data : []));
       setDrivers(d.data.items || (Array.isArray(d.data) ? d.data : []));
-      setVehicles(v.data.items || (Array.isArray(v.data) ? v.data : []));
+      const allVehicles = v.data.items || (Array.isArray(v.data) ? v.data : []);
+      const allOwners = o.data.items || (Array.isArray(o.data) ? o.data : []);
+      if (isOwnerUser && ownerScopeIds.length) {
+        setOwners(allOwners.filter((ow: Owner) => ownerScopeIds.includes(Number(ow.id))));
+        setVehicles(allVehicles.filter((veh: Vehicle) => ownerScopeIds.includes(Number(veh.owner_id))));
+      } else if (isOwnerUser && (user?.vehicleIds || []).length) {
+        setOwners(allOwners);
+        setVehicles(allVehicles.filter((veh: Vehicle) => (user?.vehicleIds || []).includes(Number(veh.id))));
+      } else {
+        setVehicles(allVehicles);
+        setOwners(allOwners);
+      }
       setUnits(Array.isArray(u.data) ? u.data : (u.data as any)?.items || []);
     } catch (err) {
       console.error('Failed to load lookups', err);
@@ -97,32 +293,47 @@ export const ReportsPage: React.FC = () => {
   };
 
   const resetFilters = () => {
+    const hadFilter = Boolean(fromDate || toDate || partyId || driverId || vehicleId || ownerId || unitId || status);
     setFromDate('');
     setToDate('');
     setPartyId('');
     setDriverId('');
     setVehicleId('');
+    setOwnerId(isOwnerUser && ownerScopeIds.length === 1 ? String(ownerScopeIds[0]) : '');
     setUnitId('');
     setStatus('');
+    if (!hadFilter) {
+      loadReport();
+    }
   };
 
   // CSV formatters
   const tripHeaders = [
-    'Trip ID', 'Trip Date', 'Lorry Number', 'Party Name', 'Driver Name',
-    'Route', 'Unit', 'Weight', 'Total Freight (INR)', 'Advance Paid (INR)',
-    'Total Received (INR)', 'Balance Due (INR)', 'Status'
+    'Trip ID', 'Trip Date', 'Lorry Number', 'Truck Owner', 'Party Name', 'Driver Name',
+    'Route', 'Unit', 'Weight', 'Total Freight (INR)',
+    'Driver Advance (INR)', 'Driver Expenses (INR)', 'Expense Settled (INR)', 'Expense To Pay (INR)', 'Driver Expense Status',
+    'Need to Pay Driver (INR)', 'Balance in Hand (INR)', 'Driver Cash Paid (INR)',
+    'Party Received (INR)', 'Party Balance Due (INR)', 'Status'
   ];
   const tripRow = (t: any) => [
     String(t.id),
     formatDateDMY(t.trip_date),
     t.lorry_number,
+    t.owner_name || '-',
     t.party_name,
     t.driver_name || '',
     `${t.from_location} -> ${t.to_location}`,
     t.unit_name || '',
     String(t.goods_weight || 0),
     fmtCur(t.total_freight),
-    fmtCur(t.advance_paid),
+    fmtCur(t.manager_advance ?? t.advance_paid),
+    fmtCur(t.total_expenses),
+    fmtCur(driverExpenseBalance(t).settled),
+    fmtCur(driverExpenseBalance(t).toPay),
+    driverExpenseStatus(t).replace(/_/g, ' '),
+    fmtCur(t.need_to_pay),
+    fmtCur(t.in_hand),
+    fmtCur(t.driver_cash_paid),
     fmtCur(t.total_received),
     fmtCur(t.balance_due),
     t.status
@@ -134,6 +345,10 @@ export const ReportsPage: React.FC = () => {
   const totalAdvancePaid = tripData.trips.reduce((sum, t) => sum + (Number(t.advance_paid) || 0), 0);
   const totalReceivedAmount = tripData.trips.reduce((sum, t) => sum + (Number(t.total_received) || 0), 0);
   const totalBalanceDueAmount = tripData.trips.reduce((sum, t) => sum + (Number(t.balance_due) || 0), 0);
+  const totalDriverExpenses = tripData.trips.reduce((sum, t) => sum + (Number(t.total_expenses) || 0), 0);
+  const totalDriverAdvance = tripData.trips.reduce((sum, t) => sum + (Number(t.manager_advance ?? t.advance_paid) || 0), 0);
+  const totalNeedToPay = tripData.trips.reduce((sum, t) => sum + (Number(t.need_to_pay) || 0), 0);
+  const totalInHand = tripData.trips.reduce((sum, t) => sum + (Number(t.in_hand) || 0), 0);
 
   const handleExportExcel = () => {
     if (tripData.trips.length === 0) {
@@ -148,6 +363,7 @@ export const ReportsPage: React.FC = () => {
         'Trip ID': `TRIP-${t.id}`,
         'Trip Date': formatDateDMY(t.trip_date),
         'Lorry Number': t.lorry_number || '-',
+        'Truck Owner': t.owner_name || '-',
         'Party Name': t.party_name || '-',
         'Route / Destination': `${t.from_location || ''} -> ${t.to_location || ''}`,
         'Driver Name': t.driver_name || '-',
@@ -155,32 +371,22 @@ export const ReportsPage: React.FC = () => {
         'Unit': t.unit_name || 'Tons',
         'Freight Rate (Rs)': Number(t.freight_rate || 0),
         'Total Freight (Rs)': Number(t.total_freight || 0),
-        'Advance Paid (Rs)': Number(t.advance_paid || 0),
-        'Total Received (Rs)': Number(t.total_received || 0),
-        'Balance Due (Rs)': Number(t.balance_due || 0),
+        'Driver Advance (Rs)': Number(t.manager_advance ?? t.advance_paid) || 0,
+        'Driver Expenses (Rs)': Number(t.total_expenses || 0),
+        'Expense Settled (Rs)': driverExpenseBalance(t).settled,
+        'Expense To Pay (Rs)': driverExpenseBalance(t).toPay,
+        'Driver Expense Status': driverExpenseStatus(t).replace(/_/g, ' '),
+        'Need to Pay Driver (Rs)': Number(t.need_to_pay || 0),
+        'Balance in Hand (Rs)': Number(t.in_hand || 0),
+        'Driver Cash Paid (Rs)': Number(t.driver_cash_paid || 0),
+        'Party Received (Rs)': Number(t.total_received || 0),
+        'Party Balance Due (Rs)': Number(t.balance_due || 0),
         'Status': t.status,
       }));
 
       // Add a blank separator row
-      excelRows.push({
-        'S.No': '',
-        'Trip ID': '',
-        'Trip Date': '',
-        'Lorry Number': '',
-        'Party Name': '',
-        'Route / Destination': '',
-        'Driver Name': '',
-        'Goods Weight': '',
-        'Unit': '',
-        'Freight Rate (Rs)': '',
-        'Total Freight (Rs)': '',
-        'Advance Paid (Rs)': '',
-        'Total Received (Rs)': '',
-        'Balance Due (Rs)': '',
-        'Status': '',
-      });
+      excelRows.push({});
 
-      // Add Grand Total row with Total Trips Count prominently included
       excelRows.push({
         'S.No': '',
         'Trip ID': 'TOTAL SUMMARY',
@@ -193,9 +399,12 @@ export const ReportsPage: React.FC = () => {
         'Unit': 'Total MT',
         'Freight Rate (Rs)': '',
         'Total Freight (Rs)': Number(totalFreightAmount.toFixed(2)),
-        'Advance Paid (Rs)': Number(totalAdvancePaid.toFixed(2)),
-        'Total Received (Rs)': Number(totalReceivedAmount.toFixed(2)),
-        'Balance Due (Rs)': Number(totalBalanceDueAmount.toFixed(2)),
+        'Driver Advance (Rs)': Number(totalDriverAdvance.toFixed(2)),
+        'Driver Expenses (Rs)': Number(totalDriverExpenses.toFixed(2)),
+        'Need to Pay Driver (Rs)': Number(totalNeedToPay.toFixed(2)),
+        'Balance in Hand (Rs)': Number(totalInHand.toFixed(2)),
+        'Party Received (Rs)': Number(totalReceivedAmount.toFixed(2)),
+        'Party Balance Due (Rs)': Number(totalBalanceDueAmount.toFixed(2)),
         'Status': `Total: ${totalTripsCount} Trips`,
       });
 
@@ -231,7 +440,10 @@ export const ReportsPage: React.FC = () => {
         { 'Summary Field': 'TOTAL TRIPS COUNT', 'Value': `${totalTripsCount} Trips` },
         { 'Summary Field': 'Total Goods Weight', 'Value': `${totalGoodsWeight.toFixed(3)} MT/Tons` },
         { 'Summary Field': 'Total Freight Amount', 'Value': `₹${totalFreightAmount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}` },
-        { 'Summary Field': 'Total Advance Paid to Drivers', 'Value': `₹${totalAdvancePaid.toLocaleString('en-IN', { minimumFractionDigits: 2 })}` },
+        { 'Summary Field': 'Total Advance Paid to Drivers', 'Value': `₹${totalDriverAdvance.toLocaleString('en-IN', { minimumFractionDigits: 2 })}` },
+        { 'Summary Field': 'Total Driver Expenses', 'Value': `₹${totalDriverExpenses.toLocaleString('en-IN', { minimumFractionDigits: 2 })}` },
+        { 'Summary Field': 'Need to Pay Drivers', 'Value': `₹${totalNeedToPay.toLocaleString('en-IN', { minimumFractionDigits: 2 })}` },
+        { 'Summary Field': 'Advance Balance in Hand', 'Value': `₹${totalInHand.toLocaleString('en-IN', { minimumFractionDigits: 2 })}` },
         { 'Summary Field': 'Total Amount Received from Parties', 'Value': `₹${totalReceivedAmount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}` },
         { 'Summary Field': 'Total Balance Due from Parties', 'Value': `₹${totalBalanceDueAmount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}` },
         { 'Summary Field': 'Party Filter', 'Value': selectedParty || 'All' },
@@ -264,6 +476,8 @@ export const ReportsPage: React.FC = () => {
 
     try {
       setIsPrinting(true);
+      const expensePrint = driverExpensePrintRows(tripData.trips);
+      const paymentPrint = partyPaymentPrintRows(tripData.trips);
 
       const printHtml = `
 <!DOCTYPE html>
@@ -272,15 +486,19 @@ export const ReportsPage: React.FC = () => {
   <meta charset="utf-8" />
   <title>KSP Logistics - Trip Dispatch Report</title>
   <style>
+    ${PRINT_BRAND_CSS}
     * { box-sizing: border-box; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
     body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif; margin: 0; padding: 20px; color: #1e293b; background: #fff; font-size: 11.5px; }
     @page { size: landscape; margin: 10mm; }
-    .header-bar { display: flex; justify-content: space-between; align-items: flex-start; padding-bottom: 12px; border-bottom: 2px solid #0f172a; margin-bottom: 14px; }
+    .header-bar { display: flex; justify-content: space-between; align-items: center; padding-bottom: 10px; border-bottom: 3px solid #0f172a; margin-bottom: 14px; }
     .company-title { font-size: 20px; font-weight: 800; color: #0f172a; letter-spacing: 0.5px; margin: 0 0 4px 0; }
     .report-subtitle { font-size: 13px; font-weight: 700; color: #2563eb; margin: 0 0 4px 0; text-transform: uppercase; letter-spacing: 0.5px; }
     .meta-text { font-size: 11px; color: #64748b; margin: 0; }
     .kpi-highlight .kpi-value { color: #1d4ed8; }
-    table { width: 100%; border-collapse: collapse; font-size: 11px; margin-top: 10px; }
+    .section-title { font-size: 13px; font-weight: 800; color: #0f172a; text-transform: uppercase; letter-spacing: 0.4px; margin: 18px 0 8px; padding: 6px 10px; background: #f1f5f9; border-left: 4px solid #2563eb; }
+    .section-title.exp { border-left-color: #7c3aed; }
+    .section-title.pay { border-left-color: #15803d; }
+    table { width: 100%; border-collapse: collapse; font-size: 11px; margin-top: 6px; }
     th { background: #0f172a; color: #ffffff; font-weight: 700; text-align: left; padding: 7px 8px; font-size: 10.5px; }
     th.num, td.num { text-align: right; }
     th.center, td.center { text-align: center; }
@@ -309,27 +527,27 @@ export const ReportsPage: React.FC = () => {
 
   <div class="header-bar">
     <div>
-      <h1 class="company-title">KSP TRANSPORT &amp; LOGISTICS</h1>
-      <div class="report-subtitle">FREIGHT DISPATCH &amp; REVENUE AUDIT REPORT</div>
+      ${printBrandLockup()}
+      <div class="report-subtitle">FREIGHT DISPATCH AUDIT — TRIPS, DRIVER EXPENSES &amp; PARTY PAYMENTS</div>
     </div>
     <div style="text-align: right;">
       <div style="font-weight: 800; font-size: 13px; color: #0f172a;">Total Trips: ${totalTripsCount}</div>
       <p class="meta-text" style="margin-top: 4px;">Generated on: ${new Date().toLocaleString('en-IN')}</p>
     </div>
   </div>
+  <div class="section-title">1. Trip Dispatch</div>
   <table>
     <thead>
       <tr>
         <th class="center" style="width: 35px;">S.No</th>
         <th style="width: 70px;">Date</th>
         <th style="width: 85px;">Lorry No</th>
+        <th style="width: 95px;">Truck Owner</th>
         <th>Party Name</th>
         <th>Route / Destination</th>
         <th>Driver</th>
         <th class="num" style="width: 70px;">Weight</th>
-        <th class="num" style="width: 85px;">Freight (₹)</th>
-        <th class="num" style="width: 75px;">Received (₹)</th>
-        <th class="num" style="width: 75px;">Balance (₹)</th>
+        <th class="num" style="width: 90px;">Freight (₹)</th>
         <th class="center" style="width: 80px;">Status</th>
       </tr>
     </thead>
@@ -346,25 +564,78 @@ export const ReportsPage: React.FC = () => {
           <td class="center">${idx + 1}</td>
           <td>${formatDateDMY(t.trip_date)}</td>
           <td><strong>${t.lorry_number}</strong></td>
+          <td>${t.owner_name || '-'}</td>
           <td>${t.party_name}</td>
           <td>${t.from_location} &rarr; ${t.to_location}</td>
           <td>${t.driver_name || '-'}</td>
           <td class="num">${Number(t.goods_weight || 0).toFixed(2)} ${t.unit_name || 'Tons'}</td>
           <td class="num"><strong>${Number(t.total_freight || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</strong></td>
-          <td class="num" style="color:#15803d">${Number(t.total_received || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td>
-          <td class="num" style="color:${Number(t.balance_due) > 0 ? '#b91c1c' : '#15803d'}"><strong>${Number(t.balance_due || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</strong></td>
           <td class="center"><span class="badge ${badgeClass}">${t.status}</span></td>
         </tr>
         `;
       }).join('')}
       <tr class="footer-row">
         <td class="center" colspan="2">TOTAL</td>
-        <td colspan="4"><strong>Total Count: ${totalTripsCount} Trips</strong></td>
+        <td colspan="5"><strong>Total Count: ${totalTripsCount} Trips</strong></td>
         <td class="num"><strong>${totalGoodsWeight.toFixed(2)} MT</strong></td>
         <td class="num"><strong>₹${totalFreightAmount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</strong></td>
-        <td class="num"><strong>₹${totalReceivedAmount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</strong></td>
-        <td class="num"><strong>₹${totalBalanceDueAmount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</strong></td>
         <td class="center"><strong>${totalTripsCount} Trips</strong></td>
+      </tr>
+    </tbody>
+  </table>
+
+  <div class="section-title exp">2. Driver Expenses</div>
+  <table>
+    <thead>
+      <tr>
+        <th class="center" style="width:35px;">S.No</th>
+        <th style="width:80px;">Trip Date</th>
+        <th style="width:90px;">Lorry</th>
+        <th>Driver</th>
+        <th>Expense Type</th>
+        <th>Description</th>
+        <th class="num" style="width:90px;">Amount (₹)</th>
+        <th class="num" style="width:90px;">Settled (₹)</th>
+        <th class="num" style="width:90px;">To Pay (₹)</th>
+        <th class="center" style="width:90px;">Status</th>
+      </tr>
+    </thead>
+    <tbody>
+      ${expensePrint.rowsHtml || `<tr><td colspan="10" class="center" style="color:#94a3b8;padding:14px;">No driver expenses for these trips.</td></tr>`}
+      <tr class="footer-row">
+        <td class="center" colspan="2">TOTAL</td>
+        <td colspan="4"><strong>Driver expenses: ${expensePrint.count} line(s)</strong></td>
+        <td class="num"><strong>₹${printInr(expensePrint.total)}</strong></td>
+        <td class="num"><strong>₹${printInr(expensePrint.totalSettled)}</strong></td>
+        <td class="num"><strong>₹${printInr(expensePrint.totalToPay)}</strong></td>
+        <td></td>
+      </tr>
+    </tbody>
+  </table>
+
+  <div class="section-title pay">3. Party Payments</div>
+  <table>
+    <thead>
+      <tr>
+        <th class="center" style="width:35px;">S.No</th>
+        <th style="width:80px;">Trip Date</th>
+        <th style="width:90px;">Lorry</th>
+        <th>Party Name</th>
+        <th style="width:90px;">Paid Date</th>
+        <th class="num" style="width:95px;">Freight (₹)</th>
+        <th class="num" style="width:95px;">Received (₹)</th>
+        <th class="num" style="width:95px;">Balance (₹)</th>
+        <th>Notes / Status</th>
+      </tr>
+    </thead>
+    <tbody>
+      ${paymentPrint.rowsHtml || `<tr><td colspan="9" class="center" style="color:#94a3b8;padding:14px;">No party payments for these trips.</td></tr>`}
+      <tr class="footer-row">
+        <td class="center" colspan="2">TOTAL</td>
+        <td colspan="4"><strong>Party payment lines: ${paymentPrint.count}</strong></td>
+        <td class="num"><strong>₹${printInr(paymentPrint.totalReceived)}</strong></td>
+        <td class="num"><strong>₹${printInr(paymentPrint.totalDue)}</strong></td>
+        <td></td>
       </tr>
     </tbody>
   </table>
@@ -409,6 +680,8 @@ export const ReportsPage: React.FC = () => {
   };
 
   const handlePrintSingleTrip = (trip: any) => {
+    const expensePrint = driverExpensePrintRows([trip]);
+    const paymentPrint = partyPaymentPrintRows([trip]);
     const singleTripHtml = `
 <!DOCTYPE html>
 <html>
@@ -416,6 +689,7 @@ export const ReportsPage: React.FC = () => {
   <meta charset="utf-8" />
   <title>Trip Voucher #${trip.id} - ${trip.lorry_number}</title>
   <style>
+    ${PRINT_BRAND_CSS}
     * { box-sizing: border-box; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
     body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif; margin: 0; padding: 24px; color: #1e293b; background: #fff; font-size: 13px; }
     @page { size: portrait; margin: 12mm; }
@@ -430,6 +704,14 @@ export const ReportsPage: React.FC = () => {
     .totals-box { background: #f8fafc; border: 1px solid #cbd5e1; border-radius: 6px; padding: 12px 16px; margin: 16px 0; }
     .totals-row { display: flex; justify-content: space-between; padding: 4px 0; font-size: 14px; }
     .grand { font-size: 16px; font-weight: 800; color: #0f172a; border-top: 1px solid #94a3b8; padding-top: 8px; margin-top: 4px; }
+    .section-title { font-size: 12px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.4px; margin: 16px 0 8px; padding: 6px 10px; background: #f1f5f9; border-left: 4px solid #2563eb; }
+    .section-title.exp { border-left-color: #7c3aed; }
+    .section-title.pay { border-left-color: #15803d; }
+    table.detail { width: 100%; border-collapse: collapse; font-size: 11.5px; }
+    table.detail th { background: #0f172a; color: #fff; text-align: left; padding: 6px 8px; }
+    table.detail td { padding: 6px 8px; border-bottom: 1px solid #e2e8f0; }
+    table.detail .num { text-align: right; }
+    table.detail .footer-row td { background: #f1f5f9; font-weight: 800; }
     .signatures { display: flex; justify-content: space-between; margin-top: 40px; padding-top: 20px; }
     .sig-line { border-top: 1px solid #0f172a; width: 180px; text-align: center; font-size: 11px; padding-top: 6px; color: #475569; }
     .print-btn-bar { display: flex; justify-content: flex-end; gap: 10px; margin-bottom: 16px; }
@@ -444,7 +726,7 @@ export const ReportsPage: React.FC = () => {
   </div>
   <div class="card">
     <div class="header">
-      <h1 class="title">KSP TRANSPORT &amp; LOGISTICS</h1>
+      ${printBrandLockup()}
       <div class="sub">OFFICIAL FREIGHT DISPATCH VOUCHER / CHALLAN</div>
       <div style="margin-top: 6px; font-size: 12px; font-weight: 700; color: #2563eb;">Trip Reference #TRIP-${trip.id}</div>
     </div>
@@ -461,10 +743,94 @@ export const ReportsPage: React.FC = () => {
 
     <div class="totals-box">
       <div class="totals-row"><span>Total Freight Billed:</span><strong>₹${parseFloat(String(trip.total_freight || 0)).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</strong></div>
-      <div class="totals-row"><span>Advance Paid to Driver:</span><strong>₹${parseFloat(String(trip.advance_paid || 0)).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</strong></div>
-      <div class="totals-row"><span>Amount Received:</span><strong style="color:#15803d">₹${parseFloat(String(trip.total_received || 0)).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</strong></div>
-      <div class="totals-row grand"><span>Balance Due from Party:</span><strong style="color:#b91c1c">₹${parseFloat(String(trip.balance_due || 0)).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</strong></div>
+      <div class="totals-row"><span>Driver Advance:</span><strong>₹${(parseFloat(String(trip.manager_advance ?? trip.advance_paid)) || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</strong></div>
+      <div class="totals-row"><span>Need to Pay Driver:</span><strong style="color:#b91c1c">₹${parseFloat(String(trip.need_to_pay || 0)).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</strong></div>
+      <div class="totals-row"><span>Balance in Hand:</span><strong style="color:#15803d">₹${parseFloat(String(trip.in_hand || 0)).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</strong></div>
     </div>
+
+    <div class="section-title exp">Driver Expenses</div>
+    <table class="detail">
+      <thead>
+        <tr>
+          <th>#</th>
+          <th>Type</th>
+          <th>Description</th>
+          <th class="num">Amount (₹)</th>
+          <th class="num">Settled (₹)</th>
+          <th class="num">To Pay (₹)</th>
+          <th class="center">Status</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${(() => {
+          const items = parseJsonList(trip.expense_items);
+          const statusHtml = expenseStatusBadgeHtml(driverExpenseStatus(trip));
+          const bal = driverExpenseBalance(trip);
+          if (items.length === 0) {
+            const amt = parseFloat(String(trip.total_expenses || 0)) || 0;
+            if (amt <= 0) return `<tr><td colspan="7" style="text-align:center;color:#94a3b8">No driver expenses.</td></tr>`;
+            return `<tr><td>1</td><td>TOTAL</td><td>—</td><td class="num" style="color:#7c3aed">₹${printInr(amt)}</td><td class="num" style="color:#15803d">₹${printInr(bal.settled)}</td><td class="num" style="color:${bal.toPay > 0 ? '#b91c1c' : '#15803d'}">₹${printInr(bal.toPay)}</td><td class="center">${statusHtml}</td></tr>`;
+          }
+          return items.map((item: any, idx: number) => `
+            <tr>
+              <td>${idx + 1}</td>
+              <td>${item.expense_type || 'OTHER'}</td>
+              <td>${item.description || '—'}</td>
+              <td class="num" style="color:#7c3aed">₹${printInr(item.amount)}</td>
+              <td class="num">${idx === 0 ? `₹${printInr(bal.settled)}` : ''}</td>
+              <td class="num">${idx === 0 ? `₹${printInr(bal.toPay)}` : ''}</td>
+              <td class="center">${idx === 0 ? statusHtml : ''}</td>
+            </tr>`).join('');
+        })()}
+        <tr class="footer-row">
+          <td colspan="3">Total Driver Expenses / Settled / To Pay</td>
+          <td class="num">₹${printInr(expensePrint.total)}</td>
+          <td class="num">₹${printInr(expensePrint.totalSettled)}</td>
+          <td class="num">₹${printInr(expensePrint.totalToPay)}</td>
+          <td></td>
+        </tr>
+      </tbody>
+    </table>
+
+    <div class="section-title pay">Party Payments</div>
+    <table class="detail">
+      <thead>
+        <tr>
+          <th>#</th>
+          <th>Paid Date</th>
+          <th>Notes / Status</th>
+          <th class="num">Received (₹)</th>
+          <th class="num">Balance (₹)</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${(() => {
+          const items = parseJsonList(trip.payment_items);
+          if (items.length === 0) {
+            return `<tr>
+              <td class="center">1</td>
+              <td>—</td>
+              <td>Trip total</td>
+              <td class="num" style="color:#15803d">₹${printInr(trip.total_received)}</td>
+              <td class="num" style="color:${Number(trip.balance_due) > 0 ? '#b91c1c' : '#15803d'}">₹${printInr(trip.balance_due)}</td>
+            </tr>`;
+          }
+          return items.map((item: any, idx: number) => `
+            <tr>
+              <td>${idx + 1}</td>
+              <td>${item.payment_date ? formatDateDMY(item.payment_date) : '—'}</td>
+              <td>${item.notes || item.payment_status || '—'}</td>
+              <td class="num" style="color:#15803d">₹${printInr(item.received_amount)}</td>
+              <td class="num">₹${printInr(item.balance_due)}</td>
+            </tr>`).join('');
+        })()}
+        <tr class="footer-row">
+          <td colspan="3">Total Party Received / Balance Due</td>
+          <td class="num">₹${printInr(paymentPrint.totalReceived)}</td>
+          <td class="num">₹${printInr(paymentPrint.totalDue)}</td>
+        </tr>
+      </tbody>
+    </table>
 
     <div class="signatures">
       <div class="sig-line">Driver's Signature</div>
@@ -507,7 +873,7 @@ export const ReportsPage: React.FC = () => {
             </span>
           </div>
           <p style={{ color: 'var(--text-muted)', fontSize: '13.5px', marginTop: '4px' }}>
-            Comprehensive freight dispatch audit and trip logistics report
+            Trip details with driver, expenses, driver payment and party collection
           </p>
         </div>
       </div>
@@ -665,6 +1031,24 @@ export const ReportsPage: React.FC = () => {
             </select>
           </div>
 
+          {!isOwnerUser && (
+          <div style={{ flex: '1 1 160px', minWidth: '150px' }}>
+            <select
+              className="form-control form-select"
+              style={{ width: '100%', height: '38px' }}
+              value={ownerId}
+              onChange={e => setOwnerId(e.target.value)}
+            >
+              <option value="">All Truck Owners</option>
+              {owners.map(o => (
+                <option key={o.id} value={o.id}>
+                  {o.name} {o.mobile_number ? `(${o.mobile_number})` : ''}
+                </option>
+              ))}
+            </select>
+          </div>
+          )}
+
           {/* Truck Wise */}
           <div style={{ flex: '1 1 150px', minWidth: '140px' }}>
             <select
@@ -673,8 +1057,18 @@ export const ReportsPage: React.FC = () => {
               value={vehicleId}
               onChange={e => setVehicleId(e.target.value)}
             >
-              <option value="">All Trucks</option>
-              {vehicles.map(v => <option key={v.id} value={v.id}>{v.lorry_number}</option>)}
+              <option value="">{isOwnerUser ? 'My Trucks' : 'All Trucks'}</option>
+              {vehicles
+                .filter(v => {
+                  if (isOwnerUser && ownerScopeIds.length && !ownerScopeIds.includes(Number(v.owner_id))) return false;
+                  if (ownerId && String(v.owner_id) !== String(ownerId)) return false;
+                  return true;
+                })
+                .map(v => (
+                  <option key={v.id} value={v.id}>
+                    {v.lorry_number} {v.owner_name ? `• ${v.owner_name}` : ''}
+                  </option>
+                ))}
             </select>
           </div>
 
@@ -730,12 +1124,15 @@ export const ReportsPage: React.FC = () => {
               <tr>
                 <th>Date</th>
                 <th>Lorry</th>
+                <th>Driver</th>
                 <th>Party</th>
                 <th>Route / Destination</th>
                 <th>Unit &amp; Weight</th>
-                <th style={{ textAlign: 'right' }}>Total Freight</th>
-                <th style={{ textAlign: 'right' }}>Received</th>
-                <th style={{ textAlign: 'right' }}>Balance Due</th>
+                <th style={{ textAlign: 'right' }}>Freight</th>
+                <th>Driver Expenses</th>
+                <th>Driver Payment</th>
+                <th style={{ textAlign: 'right' }}>Party Received</th>
+                <th style={{ textAlign: 'right' }}>Party Balance</th>
                 <th style={{ textAlign: 'center' }}>Status</th>
                 <th style={{ textAlign: 'center' }}>Actions</th>
               </tr>
@@ -743,13 +1140,13 @@ export const ReportsPage: React.FC = () => {
             <tbody>
               {isLoading ? (
                 <tr>
-                  <td colSpan={10} style={{ textAlign: 'center', padding: '36px', color: 'var(--text-muted)' }}>
+                  <td colSpan={13} style={{ textAlign: 'center', padding: '36px', color: 'var(--text-muted)' }}>
                     Loading trip report records...
                   </td>
                 </tr>
               ) : tripData.trips.length === 0 ? (
                 <tr>
-                  <td colSpan={10} style={{ textAlign: 'center', padding: '36px', color: 'var(--text-muted)' }}>
+                  <td colSpan={13} style={{ textAlign: 'center', padding: '36px', color: 'var(--text-muted)' }}>
                     No trip records match the selected report criteria.
                   </td>
                 </tr>
@@ -757,11 +1154,52 @@ export const ReportsPage: React.FC = () => {
                 tripData.trips.map(t => (
                   <tr key={t.id}>
                     <td style={{ whiteSpace: 'nowrap' }}>{formatDateDMY(t.trip_date)}</td>
-                    <td><strong>{t.lorry_number}</strong></td>
+                    <td>
+                      <strong>{t.lorry_number}</strong>
+                      {t.owner_name && (
+                        <div style={{ marginTop: '2px' }}>
+                          <span style={{ fontSize: '10.5px', fontWeight: 600, color: '#4338ca', background: '#e0e7ff', padding: '1px 5px', borderRadius: '3px', border: '1px solid #c7d2fe' }}>
+                            🏢 {t.owner_name}
+                          </span>
+                        </div>
+                      )}
+                    </td>
+                    <td>
+                      <strong>{t.driver_name || '—'}</strong>
+                    </td>
                     <td>{t.party_name}</td>
                     <td style={{ fontSize: '13px' }}>{t.from_location} &rarr; {t.to_location}</td>
                     <td style={{ whiteSpace: 'nowrap' }}>{t.goods_weight} {t.unit_name || 'Tons'}</td>
                     <td style={{ textAlign: 'right', fontWeight: 700 }}>{formatCurrency(t.total_freight)}</td>
+                    <td>
+                      {(() => {
+                        const bal = driverExpenseBalance(t);
+                        return (
+                          <div style={{ fontSize: 11.5, display: 'flex', flexDirection: 'column', gap: 3, minWidth: 132, textAlign: 'right' }}>
+                            <span>Expenses: <strong style={{ color: '#6d28d9' }}>{formatCurrency(bal.total)}</strong></span>
+                            <span style={{ color: '#15803d' }}>Settled: <strong>{formatCurrency(bal.settled)}</strong></span>
+                            <span style={{ color: bal.toPay > 0 ? '#b91c1c' : '#15803d' }}>To Pay: <strong>{formatCurrency(bal.toPay)}</strong></span>
+                            <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 2 }}>
+                              <StatusBadge status={driverExpenseStatus(t)} />
+                            </div>
+                          </div>
+                        );
+                      })()}
+                    </td>
+                    <td>
+                      <div style={{ fontSize: 11.5, display: 'flex', flexDirection: 'column', gap: 3, minWidth: 140 }}>
+                        <span>Advance: <strong>{formatCurrency(t.manager_advance ?? t.advance_paid)}</strong></span>
+                        {Number(t.need_to_pay) > 0 && (
+                          <span style={{ color: '#b91c1c' }}>Need to Pay: <strong>{formatCurrency(t.need_to_pay)}</strong></span>
+                        )}
+                        {Number(t.in_hand) > 0 && (
+                          <span style={{ color: '#047857' }}>In Hand: <strong>{formatCurrency(t.in_hand)}</strong></span>
+                        )}
+                        {Number(t.driver_cash_paid) > 0 && (
+                          <span>Driver paid: <strong>{formatCurrency(t.driver_cash_paid)}</strong></span>
+                        )}
+                      </div>
+                    </td>
                     <td style={{ textAlign: 'right', color: 'var(--success-700)', fontWeight: 600 }}>{formatCurrency(t.total_received)}</td>
                     <td style={{ textAlign: 'right', fontWeight: 700, color: Number(t.balance_due) > 0 ? 'var(--danger-700)' : 'var(--success-700)' }}>
                       {formatCurrency(t.balance_due)}
@@ -807,7 +1245,7 @@ export const ReportsPage: React.FC = () => {
             {tripData.trips.length > 0 && (
               <tfoot>
                 <tr style={{ background: '#f8fafc', fontWeight: 800, borderTop: '2px solid var(--border-medium, #cbd5e1)' }}>
-                  <td colSpan={4} style={{ padding: '12px 14px' }}>
+                  <td colSpan={5} style={{ padding: '12px 14px' }}>
                     <strong>TOTAL ({totalTripsCount} Trips)</strong>
                   </td>
                   <td style={{ whiteSpace: 'nowrap', fontWeight: 700 }}>
@@ -815,6 +1253,16 @@ export const ReportsPage: React.FC = () => {
                   </td>
                   <td style={{ textAlign: 'right', fontWeight: 800, color: 'var(--accent-hover, #2563eb)' }}>
                     {formatCurrency(totalFreightAmount)}
+                  </td>
+                  <td style={{ fontWeight: 800, color: '#6d28d9' }}>
+                    {formatCurrency(totalDriverExpenses)}
+                    <div style={{ fontSize: 11, color: '#15803d' }}>Settled {formatCurrency(Math.max(0, totalDriverExpenses - totalNeedToPay))}</div>
+                    <div style={{ fontSize: 11, color: '#b91c1c' }}>To Pay {formatCurrency(totalNeedToPay)}</div>
+                  </td>
+                  <td style={{ fontWeight: 800 }}>
+                    Adv {formatCurrency(totalDriverAdvance)}
+                    <div style={{ fontSize: 11, color: '#b91c1c' }}>Pay {formatCurrency(totalNeedToPay)}</div>
+                    <div style={{ fontSize: 11, color: '#047857' }}>Hand {formatCurrency(totalInHand)}</div>
                   </td>
                   <td style={{ textAlign: 'right', color: 'var(--success-700, #15803d)', fontWeight: 800 }}>
                     {formatCurrency(totalReceivedAmount)}

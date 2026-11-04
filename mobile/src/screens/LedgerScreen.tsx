@@ -59,7 +59,7 @@ export const LedgerScreen: React.FC = () => {
 
   const formatCurrency = (val: number | string) => {
     const num = parseFloat(String(val)) || 0;
-    return `₹${num.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    return `₹${Math.round(num).toLocaleString('en-IN')}`;
   };
 
   const totalBilled = ledgerEntries.reduce((acc, curr) => acc + parseFloat(curr.freight || 0), 0);

@@ -3,9 +3,11 @@ import { query } from '../config/database';
 import { AppError, asyncHandler } from '../middleware/errorHandler';
 import { AuthRequest } from '../middleware/auth';
 import { createAuditLog } from '../utils/auditLog';
+import { assertTripInOwnerScope } from '../utils/ownerScope';
 
 export const getTripExpenses = asyncHandler(async (req: AuthRequest, res: Response): Promise<void> => {
   const { trip_id } = req.params;
+  await assertTripInOwnerScope(req, trip_id);
   const result = await query(
     `SELECT de.*, u.name as created_by_name FROM driver_expenses de
      JOIN users u ON de.created_by = u.id
@@ -39,6 +41,7 @@ export const getTripExpenses = asyncHandler(async (req: AuthRequest, res: Respon
 
 export const addExpense = asyncHandler(async (req: AuthRequest, res: Response): Promise<void> => {
   const { trip_id } = req.params;
+  await assertTripInOwnerScope(req, trip_id);
   const { expense_type, description, amount } = req.body;
 
   if (!expense_type || amount === undefined || amount === null) {
@@ -55,13 +58,15 @@ export const addExpense = asyncHandler(async (req: AuthRequest, res: Response): 
   if (tripResult.rows.length === 0) throw new AppError('Trip not found.', 404);
   if (tripResult.rows[0].status === 'CANCELLED') throw new AppError('Cannot add expenses to a cancelled trip.', 400);
 
+  const roundedAmount = Math.round(parseFloat(amount));
+
   const result = await query(
     `INSERT INTO driver_expenses (trip_id, expense_type, description, amount, created_by)
      VALUES ($1, $2, $3, $4, $5) RETURNING *`,
-    [trip_id, expense_type, description || null, amount, req.user?.id]
+    [trip_id, expense_type, description || null, roundedAmount, req.user?.id]
   );
 
-  await createAuditLog(req.user?.id, 'ADD_EXPENSE', 'EXPENSES', result.rows[0].id, { trip_id, expense_type, amount });
+  await createAuditLog(req.user?.id, 'ADD_EXPENSE', 'EXPENSES', result.rows[0].id, { trip_id, expense_type, amount: roundedAmount });
   res.status(201).json({ success: true, message: 'Expense added.', data: result.rows[0] });
 });
 
@@ -70,12 +75,13 @@ export const updateExpense = asyncHandler(async (req: AuthRequest, res: Response
   const { expense_type, description, amount } = req.body;
 
   if (amount !== undefined && parseFloat(amount) < 0) throw new AppError('Amount must be >= 0.', 400);
+  const roundedAmount = amount !== undefined ? Math.round(parseFloat(amount)) : undefined;
 
   const result = await query(
     `UPDATE driver_expenses SET expense_type = COALESCE($1, expense_type),
      description = COALESCE($2, description), amount = COALESCE($3, amount), updated_at = NOW()
      WHERE id = $4 RETURNING *`,
-    [expense_type, description, amount, id]
+    [expense_type, description, roundedAmount, id]
   );
   if (result.rows.length === 0) throw new AppError('Expense not found.', 404);
 

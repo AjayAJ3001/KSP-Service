@@ -8,7 +8,7 @@ router.use(authenticate);
 router.get('/', getOwners);
 router.get('/:id', getOwnerById);
 router.post('/', authorize('ADMIN'), createOwner);
-router.put('/:id', authorize('ADMIN'), updateOwner);
+router.put('/:id', authorize('ADMIN', 'OWNER'), updateOwner);
 router.delete('/:id', authorize('ADMIN'), deleteOwner);
 
 export default router;

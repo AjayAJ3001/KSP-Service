@@ -5,6 +5,7 @@ import { query } from '../config/database';
 import { AppError, asyncHandler } from '../middleware/errorHandler';
 import { AuthRequest } from '../middleware/auth';
 import { createAuditLog } from '../utils/auditLog';
+import { loadOwnerScope } from '../utils/ownerScope';
 
 export const login = asyncHandler(async (req: Request, res: Response): Promise<void> => {
   const { username, password } = req.body;
@@ -51,6 +52,21 @@ export const login = asyncHandler(async (req: Request, res: Response): Promise<v
   // Audit log
   await createAuditLog(user.id, 'LOGIN', 'AUTH', user.id, { username: user.username });
 
+  const ownersRes = await query(
+    `SELECT o.id, o.name
+     FROM user_owners uo
+     JOIN owners o ON o.id = uo.owner_id
+     WHERE uo.user_id = $1
+     UNION
+     SELECT o.id, o.name
+     FROM manager_owners mo
+     JOIN owners o ON o.id = mo.owner_id
+     WHERE mo.user_id = $1
+     ORDER BY name`,
+    [user.id]
+  );
+  const scope = await loadOwnerScope(user.id, user.role);
+
   res.json({
     success: true,
     message: 'Login successful.',
@@ -64,6 +80,9 @@ export const login = asyncHandler(async (req: Request, res: Response): Promise<v
         email: user.email,
         mobile_number: user.mobile_number,
         driver_id: user.driver_id,
+        owners: ownersRes.rows,
+        ownerIds: scope.ownerIds,
+        vehicleIds: scope.vehicleIds,
       },
     },
   });
@@ -89,7 +108,30 @@ export const getMe = asyncHandler(async (req: AuthRequest, res: Response): Promi
     throw new AppError('User not found.', 404);
   }
 
-  res.json({ success: true, message: 'User retrieved.', data: result.rows[0] });
+  const ownersRes = await query(
+    `SELECT o.id, o.name
+     FROM user_owners uo
+     JOIN owners o ON o.id = uo.owner_id
+     WHERE uo.user_id = $1
+     UNION
+     SELECT o.id, o.name
+     FROM manager_owners mo
+     JOIN owners o ON o.id = mo.owner_id
+     WHERE mo.user_id = $1
+     ORDER BY name`,
+    [req.user?.id]
+  );
+
+  res.json({
+    success: true,
+    message: 'User retrieved.',
+    data: {
+      ...result.rows[0],
+      owners: ownersRes.rows,
+      ownerIds: req.user?.ownerIds || [],
+      vehicleIds: req.user?.vehicleIds || [],
+    },
+  });
 });
 
 export const changePassword = asyncHandler(async (req: AuthRequest, res: Response): Promise<void> => {

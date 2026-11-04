@@ -2,7 +2,7 @@ import api from './api';
 import {
   User, Driver, Vehicle, Party, Owner, OwnerAdvance, Unit, Route, FreightRate, ExpenseRate, CleaningExpenseRate, UnloadingRate, DriverBataRate, OtherExpenseLimit,
   Trip, TripPayment, DriverExpense, Settlement, AuditLog, DashboardData,
-  ApiResponse, PaginatedData
+  ApiResponse, PaginatedData, TruckAdvance, DriverAdvance, DriverAdvanceSummary
 } from '../types';
 
 // Dashboard Service
@@ -15,7 +15,7 @@ export const adminDashboardService = {
 
 // User Service
 export const adminUserService = {
-  getUsers: async (params?: { page?: number; limit?: number; search?: string; role?: string; status?: string }): Promise<ApiResponse<PaginatedData<User>>> => {
+  getUsers: async (params?: { page?: number; limit?: number; search?: string; role?: string; status?: string; for_advance?: boolean }): Promise<ApiResponse<PaginatedData<User>>> => {
     const res = await api.get('/users', { params });
     return res.data;
   },
@@ -79,7 +79,7 @@ export const adminDriverService = {
 
 // Vehicle Service
 export const adminVehicleService = {
-  getVehicles: async (params?: { page?: number; limit?: number; search?: string; status?: string }): Promise<ApiResponse<PaginatedData<Vehicle>>> => {
+  getVehicles: async (params?: { page?: number; limit?: number; search?: string; status?: string; owner_id?: number | string }): Promise<ApiResponse<PaginatedData<Vehicle>>> => {
     const res = await api.get('/vehicles', { params });
     return res.data;
   },
@@ -263,7 +263,7 @@ export const adminExpenseService = {
 
 // Settlement Service
 export const adminSettlementService = {
-  getSettlements: async (params?: { page?: number; limit?: number; status?: string }): Promise<ApiResponse<PaginatedData<Settlement>>> => {
+  getSettlements: async (params?: { page?: number; limit?: number; status?: string; owner_id?: string | number; driver_id?: string | number; vehicle_id?: string | number; party_id?: string | number; from_date?: string; to_date?: string; search?: string }): Promise<ApiResponse<PaginatedData<Settlement>>> => {
     const res = await api.get('/settlements', { params });
     return res.data;
   },
@@ -277,6 +277,14 @@ export const adminSettlementService = {
   },
   verifySettlement: async (id: number): Promise<ApiResponse<Settlement>> => {
     const res = await api.patch(`/settlements/${id}/verify`);
+    return res.data;
+  },
+  settlePayment: async (id: number, data: { payment_mode: string; payment_date?: string; paid_amount?: number; reference_no?: string; notes?: string }): Promise<ApiResponse<Settlement>> => {
+    const res = await api.post(`/settlements/${id}/settle`, data);
+    return res.data;
+  },
+  getSettlementPayments: async (id: number): Promise<ApiResponse<any[]>> => {
+    const res = await api.get(`/settlements/${id}/payments`);
     return res.data;
   },
   deleteSettlement: async (id: number): Promise<ApiResponse> => {
@@ -415,7 +423,10 @@ export const adminOwnerAdvanceService = {
     page?: number;
     limit?: number;
     owner_id?: number;
+    recipient_type?: 'MANAGER' | 'DRIVER' | string;
     manager_id?: number;
+    driver_id?: number;
+    payment_mode?: string;
     from_date?: string;
     to_date?: string;
     search?: string;
@@ -425,7 +436,10 @@ export const adminOwnerAdvanceService = {
   },
   createOwnerAdvance: async (data: {
     owner_id: number;
-    manager_id: number;
+    recipient_type?: 'MANAGER' | 'DRIVER';
+    manager_id?: number | null;
+    driver_id?: number | null;
+    vehicle_id?: number | null;
     amount: number;
     advance_date?: string;
     payment_mode?: string;
@@ -439,7 +453,10 @@ export const adminOwnerAdvanceService = {
     id: number,
     data: Partial<{
       owner_id: number;
-      manager_id: number;
+      recipient_type?: 'MANAGER' | 'DRIVER';
+      manager_id?: number | null;
+      driver_id?: number | null;
+      vehicle_id?: number | null;
       amount: number;
       advance_date: string;
       payment_mode: string;
@@ -455,3 +472,114 @@ export const adminOwnerAdvanceService = {
     return res.data;
   },
 };
+
+// Truck Advance Service
+export const adminTruckAdvanceService = {
+  getTruckAdvances: async (params?: {
+    page?: number;
+    limit?: number;
+    vehicle_id?: string;
+    owner_id?: string | number;
+    driver_id?: string;
+    manager_id?: string;
+    party_id?: string;
+    from_date?: string;
+    to_date?: string;
+    search?: string;
+  }): Promise<ApiResponse<{ items: TruckAdvance[]; total: number; totalAmount: number; page: number; limit: number; totalPages: number }>> => {
+    const res = await api.get('/truck-advances', { params });
+    return res.data;
+  },
+  createTruckAdvance: async (data: {
+    vehicle_id: number;
+    driver_id?: number;
+    manager_id?: number;
+    amount: number;
+    advance_date?: string;
+    notes?: string;
+    trip_id?: number;
+  }): Promise<ApiResponse<TruckAdvance>> => {
+    const res = await api.post('/truck-advances', data);
+    return res.data;
+  },
+  deleteTruckAdvance: async (id: number): Promise<ApiResponse> => {
+    const res = await api.delete(`/truck-advances/${id}`);
+    return res.data;
+  },
+  getManagerSummary: async (params?: { manager_id?: string }): Promise<ApiResponse<{ managers: any[]; grand_totals: any }>> => {
+    const res = await api.get('/truck-advances/manager-summary', { params });
+    return res.data;
+  },
+};
+
+// Driver Advance Service
+export const adminDriverAdvanceService = {
+  getDriverAdvances: async (params?: {
+    page?: number;
+    limit?: number;
+    driver_id?: string;
+    owner_id?: string | number;
+    manager_id?: string;
+    vehicle_id?: string;
+    payment_mode?: string;
+    from_date?: string;
+    to_date?: string;
+    search?: string;
+  }): Promise<ApiResponse<{ items: DriverAdvance[]; total: number; totalAmount: number; page: number; limit: number; totalPages: number }>> => {
+    const res = await api.get('/driver-advances', { params });
+    return res.data;
+  },
+  getDriverSummary: async (params?: {
+    driver_id?: string;
+    owner_id?: string | number;
+    vehicle_id?: string | number;
+    search?: string;
+    from_date?: string;
+    to_date?: string;
+  }): Promise<ApiResponse<{ drivers: DriverAdvanceSummary[]; grand_totals: any }>> => {
+    const res = await api.get('/driver-advances/summary', { params });
+    return res.data;
+  },
+  getDriverAdvanceById: async (id: number): Promise<ApiResponse<DriverAdvance>> => {
+    const res = await api.get(`/driver-advances/${id}`);
+    return res.data;
+  },
+  createDriverAdvance: async (data: {
+    driver_id: number;
+    manager_id?: number;
+    vehicle_id?: number;
+    trip_id?: number;
+    amount: number;
+    advance_date?: string;
+    payment_mode?: string;
+    notes?: string;
+  }): Promise<ApiResponse<DriverAdvance>> => {
+    const res = await api.post('/driver-advances', data);
+    return res.data;
+  },
+  updateDriverAdvance: async (
+    id: number,
+    data: Partial<{
+      driver_id: number;
+      manager_id: number;
+      vehicle_id: number;
+      trip_id: number;
+      amount: number;
+      advance_date: string;
+      payment_mode: string;
+      notes: string;
+    }>
+  ): Promise<ApiResponse<DriverAdvance>> => {
+    const res = await api.put(`/driver-advances/${id}`, data);
+    return res.data;
+  },
+  deleteDriverAdvance: async (id: number): Promise<ApiResponse> => {
+    const res = await api.delete(`/driver-advances/${id}`);
+    return res.data;
+  },
+  getDriverStatement: async (driverId: number): Promise<ApiResponse<any>> => {
+    const res = await api.get(`/driver-advances/driver/${driverId}/statement`);
+    return res.data;
+  },
+};
+

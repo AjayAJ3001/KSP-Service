@@ -47,7 +47,7 @@ export const TripHistoryScreen: React.FC<{ navigation: any }> = ({ navigation })
 
   const formatCurrency = (val: number | string) => {
     const num = parseFloat(String(val)) || 0;
-    return `₹${num.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    return `₹${Math.round(num).toLocaleString('en-IN')}`;
   };
 
   const getStatusStyle = (status: string) => {
@@ -153,6 +153,13 @@ export const TripHistoryScreen: React.FC<{ navigation: any }> = ({ navigation })
                     <View style={{ alignItems: 'flex-end' }}>
                       <Text style={styles.freightText}>{formatCurrency(trip.total_freight)}</Text>
                       <Text style={styles.lorryText}>{trip.lorry_number}</Text>
+                      {trip.owner_name ? (
+                        <View style={{ backgroundColor: '#f3e8ff', borderRadius: 4, paddingHorizontal: 6, paddingVertical: 2, marginTop: 3 }}>
+                          <Text style={{ fontSize: 10.5, fontWeight: '700', color: '#6d28d9' }}>
+                            👤 {trip.owner_name}
+                          </Text>
+                        </View>
+                      ) : null}
                     </View>
                   </View>
 

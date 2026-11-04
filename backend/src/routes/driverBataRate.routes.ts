@@ -16,8 +16,8 @@ router.get('/', getDriverBataRates);
 router.get('/effective', getEffectiveBataRate);
 
 // Admin-only management routes
-router.post('/', authorize('ADMIN'), createDriverBataRate);
-router.put('/:id', authorize('ADMIN'), updateDriverBataRate);
-router.delete('/:id', authorize('ADMIN'), deleteDriverBataRate);
+router.post('/', authorize('ADMIN', 'OWNER'), createDriverBataRate);
+router.put('/:id', authorize('ADMIN', 'OWNER'), updateDriverBataRate);
+router.delete('/:id', authorize('ADMIN', 'OWNER'), deleteDriverBataRate);
 
 export default router;

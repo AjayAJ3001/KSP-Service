@@ -23,7 +23,10 @@ import {
   Edit2,
   Trash2,
   RefreshCw,
+  Printer,
+  Download,
 } from 'lucide-react-native';
+import { printMastersPdf, downloadMastersPdf } from '../../utils/pdfGenerator';
 import { adminPartyService } from '../../services/adminService';
 import { Party } from '../../types';
 import { COLORS, SPACING, RADIUS, SHADOWS } from '../../constants/theme';
@@ -33,6 +36,7 @@ export const AdminPartiesScreen: React.FC<{ navigation: any }> = ({ navigation }
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [pdfLoading, setPdfLoading] = useState<'print' | 'download' | null>(null);
 
   // Add / Edit Modal
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -161,6 +165,41 @@ export const AdminPartiesScreen: React.FC<{ navigation: any }> = ({ navigation }
     ]);
   };
 
+  const handlePrintPdf = async () => {
+    try {
+      setPdfLoading('print');
+      await printMastersPdf({
+        tab: 'PARTIES',
+        tabLabel: 'Parties Directory',
+        parties: filteredParties,
+      });
+    } catch (err: any) {
+      console.error('Print parties PDF failed', err);
+      Alert.alert('Print Error', err.message || 'Failed to print parties directory.');
+    } finally {
+      setPdfLoading(null);
+    }
+  };
+
+  const handleDownloadPdf = async () => {
+    try {
+      setPdfLoading('download');
+      const result = await downloadMastersPdf({
+        tab: 'PARTIES',
+        tabLabel: 'Parties Directory',
+        parties: filteredParties,
+      });
+      if (result.success && result.savedDirectly) {
+        Alert.alert('PDF Saved', `Parties directory saved:\n${result.filename}`);
+      }
+    } catch (err: any) {
+      console.error('Download parties PDF failed', err);
+      Alert.alert('Download Error', err.message || 'Failed to download PDF.');
+    } finally {
+      setPdfLoading(null);
+    }
+  };
+
   return (
     <View style={styles.container}>
       {/* Search Header */}
@@ -180,9 +219,42 @@ export const AdminPartiesScreen: React.FC<{ navigation: any }> = ({ navigation }
               </TouchableOpacity>
             ) : null}
           </View>
+
+          <TouchableOpacity
+            style={[styles.pdfBtn, styles.printBtn, pdfLoading === 'print' && { opacity: 0.7 }]}
+            onPress={handlePrintPdf}
+            disabled={pdfLoading !== null || isLoading}
+            activeOpacity={0.8}
+          >
+            {pdfLoading === 'print' ? (
+              <ActivityIndicator size="small" color={COLORS.white} />
+            ) : (
+              <>
+                <Printer size={13} color={COLORS.white} />
+                <Text style={styles.pdfBtnText}>Print</Text>
+              </>
+            )}
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[styles.pdfBtn, styles.downloadBtn, pdfLoading === 'download' && { opacity: 0.7 }]}
+            onPress={handleDownloadPdf}
+            disabled={pdfLoading !== null || isLoading}
+            activeOpacity={0.8}
+          >
+            {pdfLoading === 'download' ? (
+              <ActivityIndicator size="small" color={COLORS.white} />
+            ) : (
+              <>
+                <Download size={13} color={COLORS.white} />
+                <Text style={styles.pdfBtnText}>PDF</Text>
+              </>
+            )}
+          </TouchableOpacity>
+
           <TouchableOpacity style={styles.addBtn} onPress={openAddModal}>
             <Plus size={16} color={COLORS.white} />
-            <Text style={styles.addBtnText}>Add Party</Text>
+            <Text style={styles.addBtnText}>Add</Text>
           </TouchableOpacity>
         </View>
 
@@ -420,8 +492,8 @@ const styles = StyleSheet.create({
   },
   listContainer: {
     padding: SPACING.md,
-    gap: 10,
-    paddingBottom: 40,
+    gap: 8,
+    paddingBottom: 28,
   },
   centerBox: {
     flex: 1,
@@ -605,6 +677,25 @@ const styles = StyleSheet.create({
   saveBtnText: {
     fontSize: 12,
     fontWeight: '800',
+    color: COLORS.white,
+  },
+  pdfBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 9,
+    paddingVertical: 7,
+    borderRadius: RADIUS.md,
+  },
+  printBtn: {
+    backgroundColor: '#0284c7',
+  },
+  downloadBtn: {
+    backgroundColor: '#059669',
+  },
+  pdfBtnText: {
+    fontSize: 11,
+    fontWeight: '700',
     color: COLORS.white,
   },
 });

@@ -24,9 +24,17 @@ import { DriverBataPage } from './pages/DriverBataPage';
 import { OtherExpenseLimitPage } from './pages/OtherExpenseLimitPage';
 import { TruckAdvancesPage } from './pages/TruckAdvancesPage';
 import { ManagerAdvanceLedgerPage } from './pages/ManagerAdvanceLedgerPage';
-import { DriverAdvancesPage } from './pages/DriverAdvancesPage';
+import { DriverBalanceMasterPage } from './pages/DriverBalanceMasterPage';
 
 // Protected Route Component
+const FullAdminRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const { user } = useAuth();
+  if (user?.role !== 'ADMIN') {
+    return <Navigate to="/dashboard" replace />;
+  }
+  return <>{children}</>;
+};
+
 const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { isAuthenticated, isLoading } = useAuth();
 
@@ -80,11 +88,13 @@ export function App() {
             <Route path="driver-bata" element={<DriverBataPage />} />
             <Route path="other-expense-limit" element={<OtherExpenseLimitPage />} />
             <Route path="truck-advances" element={<TruckAdvancesPage />} />
-            <Route path="driver-advances" element={<DriverAdvancesPage />} />
+            <Route path="driver-advances" element={<Navigate to="/driver-balance-master" replace />} />
+            <Route path="driver-balance-master" element={<DriverBalanceMasterPage />} />
+            <Route path="driver-balance" element={<DriverBalanceMasterPage />} />
             <Route path="manager-ledger" element={<ManagerAdvanceLedgerPage />} />
             <Route path="manager-advances" element={<ManagerAdvanceLedgerPage />} />
             <Route path="reports" element={<ReportsPage />} />
-            <Route path="audit-logs" element={<AuditLogsPage />} />
+            <Route path="audit-logs" element={<FullAdminRoute><AuditLogsPage /></FullAdminRoute>} />
             <Route path="profile" element={<ProfilePage />} />
           </Route>
 

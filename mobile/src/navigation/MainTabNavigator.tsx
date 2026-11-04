@@ -15,14 +15,18 @@ const Tab = createBottomTabNavigator<MainTabParamList>();
 
 export const MainTabNavigator: React.FC = () => {
   const { user } = useAuth();
-  const isAdmin = user?.role === 'ADMIN';
+  const isAdmin = user?.role === 'ADMIN' || user?.role === 'OWNER';
 
   return (
     <Tab.Navigator
       initialRouteName={isAdmin ? 'Admin' : 'Home'}
       screenOptions={{
         headerStyle: {
-          backgroundColor: COLORS.primary,
+          backgroundColor: COLORS.indigo,
+          elevation: 8,
+          shadowColor: COLORS.indigo,
+          shadowOpacity: 0.35,
+          shadowRadius: 8,
         },
         headerTintColor: COLORS.white,
         headerTitleStyle: {
@@ -31,13 +35,18 @@ export const MainTabNavigator: React.FC = () => {
         },
         tabBarStyle: {
           backgroundColor: COLORS.white,
-          borderTopColor: COLORS.border,
-          height: 60,
+          borderTopColor: '#c7d2fe',
+          height: 64,
           paddingBottom: 8,
           paddingTop: 8,
+          elevation: 16,
+          shadowColor: COLORS.indigo,
+          shadowOpacity: 0.18,
+          shadowRadius: 12,
         },
-        tabBarActiveTintColor: COLORS.accent,
+        tabBarActiveTintColor: COLORS.indigo,
         tabBarInactiveTintColor: COLORS.textMuted,
+        tabBarActiveBackgroundColor: '#eef2ff',
         tabBarLabelStyle: {
           fontSize: 12,
           fontWeight: '700',
@@ -52,7 +61,7 @@ export const MainTabNavigator: React.FC = () => {
           component={AdminDashboardScreen}
           options={{
             title: 'Admin',
-            headerTitle: 'Admin Control Center',
+            headerTitle: user?.role === 'OWNER' ? 'Owner Control Center' : 'Admin Control Center',
             tabBarIcon: ({ color, size }) => <ShieldCheck color={color} size={size} />,
           }}
         />

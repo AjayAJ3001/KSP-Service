@@ -2,9 +2,17 @@ import { Response } from 'express';
 import { query } from '../config/database';
 import { asyncHandler } from '../middleware/errorHandler';
 import { AuthRequest } from '../middleware/auth';
+import { isFleetScoped, isLinkedManager } from '../utils/ownerScope';
 
 export const getDashboard = asyncHandler(async (req: AuthRequest, res: Response): Promise<void> => {
   const today = new Date().toISOString().split('T')[0];
+  const ownerFleet = isFleetScoped(req);
+  const vids = req.user?.vehicleIds?.length ? req.user.vehicleIds : [0];
+  const tripScope = ownerFleet ? 'AND t.vehicle_id = ANY($2::int[])' : '';
+  const tripScope1 = ownerFleet ? 'AND t.vehicle_id = ANY($1::int[])' : '';
+  const vehScope = ownerFleet ? 'AND id = ANY($1::int[])' : '';
+  const tripParams1 = ownerFleet ? [vids] : [];
+  const tripParamsToday = ownerFleet ? [today, vids] : [today];
 
   const [
     usersResult, driversResult, vehiclesResult, partiesResult,
@@ -12,30 +20,67 @@ export const getDashboard = asyncHandler(async (req: AuthRequest, res: Response)
     pendingSettlementsResult, recentTripsResult, totalFreightResult,
     complianceAlertsResult
   ] = await Promise.all([
-    query(`SELECT COUNT(*) as total, COUNT(*) FILTER (WHERE status = 'ACTIVE') as active FROM users`),
-    query(`SELECT COUNT(*) as total FROM drivers WHERE status = 'ACTIVE'`),
-    query(`SELECT COUNT(*) as total FROM vehicles WHERE status = 'ACTIVE'`),
-    query(`SELECT COUNT(*) as total FROM parties WHERE status = 'ACTIVE'`),
-    query(`SELECT COUNT(*) as total FROM trips WHERE trip_date = $1 AND status != 'DRAFT'`, [today]),
-    query(`SELECT COUNT(*) as total FROM trips WHERE status IN ('PAYMENT_PENDING', 'PARTIALLY_PAID')`),
-    query(`SELECT COUNT(*) as total FROM trips WHERE status = 'SETTLED'`),
-    query(`SELECT COUNT(*) as total FROM settlements WHERE settlement_status = 'PENDING'`),
+    ownerFleet
+      ? query(`SELECT 0 as total, 0 as active`)
+      : query(`SELECT COUNT(*) as total, COUNT(*) FILTER (WHERE status = 'ACTIVE') as active FROM users`),
+    ownerFleet
+      ? query(
+          `SELECT COUNT(DISTINCT t.driver_id) as total FROM trips t
+           WHERE t.status NOT IN ('CANCELLED', 'DRAFT') AND t.vehicle_id = ANY($1::int[])`,
+          [vids]
+        )
+      : query(`SELECT COUNT(*) as total FROM drivers WHERE status = 'ACTIVE'`),
+    query(
+      `SELECT COUNT(*) as total FROM vehicles WHERE status = 'ACTIVE' ${vehScope}`,
+      tripParams1
+    ),
+    ownerFleet
+      ? query(
+          `SELECT COUNT(DISTINCT t.party_id) as total FROM trips t
+           WHERE t.status NOT IN ('CANCELLED', 'DRAFT') AND t.vehicle_id = ANY($1::int[])`,
+          [vids]
+        )
+      : query(`SELECT COUNT(*) as total FROM parties WHERE status = 'ACTIVE'`),
+    query(
+      `SELECT COUNT(*) as total FROM trips t WHERE t.trip_date = $1 AND t.status != 'DRAFT' ${tripScope}`,
+      tripParamsToday
+    ),
+    query(
+      `SELECT COUNT(*) as total FROM trips t WHERE t.status IN ('PAYMENT_PENDING', 'PARTIALLY_PAID') ${tripScope1}`,
+      tripParams1
+    ),
+    query(
+      `SELECT COUNT(*) as total FROM trips t WHERE t.status = 'SETTLED' ${tripScope1}`,
+      tripParams1
+    ),
+    query(
+      `SELECT COUNT(*) as total FROM settlements s
+       JOIN trips t ON s.trip_id = t.id
+       WHERE s.settlement_status = 'PENDING' ${tripScope1}`,
+      tripParams1
+    ),
     query(
       `SELECT t.id, t.trip_date, t.total_freight, t.status, t.advance_paid,
               t.goods_weight, t.freight_rate,
               v.lorry_number, d.name as driver_name, p.name as party_name,
               r.from_location, r.to_location,
               u.name as unit_name, u.abbreviation as unit_abbreviation,
-              COALESCE((SELECT SUM(received_amount) FROM trip_payments WHERE trip_id = t.id), 0) as total_received,
-              (t.total_freight - COALESCE((SELECT SUM(received_amount) FROM trip_payments WHERE trip_id = t.id), 0)) as balance_due
+              COALESCE(pay.total_received, 0) as total_received,
+              (t.total_freight - COALESCE(pay.total_received, 0)) as balance_due
        FROM trips t
        JOIN vehicles v ON t.vehicle_id = v.id
        JOIN drivers d ON t.driver_id = d.id
        JOIN parties p ON t.party_id = p.id
        JOIN routes r ON t.route_id = r.id
        LEFT JOIN units u ON t.unit_id = u.id
-       WHERE t.status != 'DRAFT'
-        ORDER BY t.created_at DESC LIMIT 10`
+       LEFT JOIN (
+         SELECT trip_id, SUM(received_amount) as total_received
+         FROM trip_payments
+         GROUP BY trip_id
+       ) pay ON pay.trip_id = t.id
+       WHERE t.status != 'DRAFT' ${tripScope1}
+        ORDER BY t.created_at DESC LIMIT 10`,
+      tripParams1
     ),
     query(
       `SELECT COALESCE(SUM(t.total_freight), 0) as total_freight,
@@ -44,14 +89,14 @@ export const getDashboard = asyncHandler(async (req: AuthRequest, res: Response)
        FROM trips t
        LEFT JOIN (SELECT trip_id, SUM(received_amount) as received FROM trip_payments GROUP BY trip_id) tp
        ON t.id = tp.trip_id
-       WHERE t.status NOT IN ('CANCELLED', 'DRAFT')`
+       WHERE t.status NOT IN ('CANCELLED', 'DRAFT') ${tripScope1}`,
+      tripParams1
     ),
-    // Vehicles with any document expiring within 30 days (or already expired)
     query(
       `SELECT lorry_number,
               fc_expiry_date, insurance_expiry_date, permit_expiry_date, tax_expiry_date
        FROM vehicles
-       WHERE status = 'ACTIVE'
+       WHERE status = 'ACTIVE' ${vehScope}
          AND (
            (fc_expiry_date IS NOT NULL AND fc_expiry_date <= CURRENT_DATE + INTERVAL '30 days')
            OR (insurance_expiry_date IS NOT NULL AND insurance_expiry_date <= CURRENT_DATE + INTERVAL '30 days')
@@ -63,7 +108,8 @@ export const getDashboard = asyncHandler(async (req: AuthRequest, res: Response)
          COALESCE(insurance_expiry_date, '9999-12-31'::date),
          COALESCE(permit_expiry_date, '9999-12-31'::date),
          COALESCE(tax_expiry_date, '9999-12-31'::date)
-       ) ASC`
+       ) ASC`,
+      tripParams1
     ),
   ]);
 
@@ -92,28 +138,80 @@ export const getDashboard = asyncHandler(async (req: AuthRequest, res: Response)
 export const getMobileDashboard = asyncHandler(async (req: AuthRequest, res: Response): Promise<void> => {
   const today = new Date().toISOString().split('T')[0];
   const userId = req.user?.id;
-  const isTransportUser = req.user?.role === 'TRANSPORT_USER';
+  const isNonAdmin = req.user?.role !== 'ADMIN' && req.user?.role !== 'OWNER';
+  const isOwner = req.user?.role === 'OWNER';
+  const linked = isLinkedManager(req);
+  const managerOnly = isNonAdmin && !linked;
+  const fleet = isOwner || linked;
+  const vids = req.user?.vehicleIds?.length ? req.user.vehicleIds : [0];
+  const oids = req.user?.ownerIds?.length ? req.user.ownerIds : [0];
+  const fleetParams = [userId, oids, vids];
+  const tripCountSql = managerOnly
+    ? `SELECT COUNT(*) as total FROM trips WHERE created_by = $1 AND trip_date = $2`
+    : fleet
+      ? `SELECT COUNT(*) as total FROM trips WHERE trip_date = $1 AND vehicle_id = ANY($2::int[])`
+      : `SELECT COUNT(*) as total FROM trips WHERE trip_date = $1`;
+  const tripCountParams = managerOnly ? [userId, today] : fleet ? [today, vids] : [today];
+  const recentTripFilter = managerOnly
+    ? 'AND t.created_by = $1'
+    : fleet
+      ? 'AND t.vehicle_id = ANY($1::int[])'
+      : '';
+  const recentTripParams = managerOnly ? [userId] : fleet ? [vids] : [];
+  const daFilter = managerOnly
+    ? 'da.manager_id = $1'
+    : fleet
+      ? `(da.manager_id = $1 OR EXISTS (SELECT 1 FROM vehicles dav WHERE dav.id = da.vehicle_id AND dav.owner_id = ANY($2::int[])))`
+      : '1=1';
+  const taFilter = managerOnly
+    ? 'AND ta.manager_id = $1'
+    : fleet
+      ? 'AND (ta.manager_id = $1 OR ta.vehicle_id = ANY($3::int[]))'
+      : '';
+  const tripAdvFilter = managerOnly
+    ? 'AND tr.created_by = $1'
+    : fleet
+      ? 'AND tr.vehicle_id = ANY($3::int[])'
+      : '';
+  const oaFilter = managerOnly
+    ? `AND (
+         EXISTS (SELECT 1 FROM driver_advances x WHERE x.driver_id = oa.driver_id AND x.manager_id = $1)
+         OR EXISTS (SELECT 1 FROM truck_advances x WHERE x.driver_id = oa.driver_id AND x.manager_id = $1)
+         OR EXISTS (
+           SELECT 1 FROM trips x
+           WHERE x.driver_id = oa.driver_id
+             AND x.created_by = $1
+             AND x.status NOT IN ('CANCELLED', 'DRAFT')
+         )
+       )`
+    : fleet
+      ? 'AND oa.owner_id = ANY($2::int[])'
+      : '';
+  const expenseFilter = managerOnly
+    ? `AND (
+                 t.created_by = $1
+                 OR EXISTS (SELECT 1 FROM manager_driver_advances mda WHERE mda.trip_id = t.id)
+               )`
+    : fleet
+      ? 'AND t.vehicle_id = ANY($3::int[])'
+      : '';
+  const driverExists = managerOnly
+    ? `AND EXISTS (SELECT 1 FROM manager_driver_advances mda WHERE mda.driver_id = d.id)`
+    : '';
+  const balanceParams = managerOnly ? [userId] : fleet ? fleetParams : [userId];
 
-  const [todayTripsResult, balanceDueResult, recentTripsResult, advanceCreditSummaryResult, truckAdvanceUsedResult, advanceCreditResult] = await Promise.all([
+  const [todayTripsResult, balanceDueResult, recentTripsResult, advanceCreditSummaryResult, truckAdvanceUsedResult, advanceCreditResult, driverBalancesResult] = await Promise.all([
+    query(tripCountSql, tripCountParams),
     query(
-      isTransportUser
-        ? `SELECT COUNT(*) as total FROM trips WHERE created_by = $1 AND trip_date = $2`
-        : `SELECT COUNT(*) as total FROM trips WHERE trip_date = $1`,
-      isTransportUser ? [userId, today] : [today]
-    ),
-    query(
-      isTransportUser
-        ? `SELECT COALESCE(SUM(t.total_freight - COALESCE(tp.received, 0)), 0) as balance_due
-           FROM trips t
-           LEFT JOIN (SELECT trip_id, SUM(received_amount) as received FROM trip_payments GROUP BY trip_id) tp
-           ON t.id = tp.trip_id
-           WHERE t.created_by = $1 AND t.status NOT IN ('SETTLED', 'CANCELLED')`
+      isNonAdmin
+        ? `SELECT 0::numeric as balance_due`
         : `SELECT COALESCE(SUM(t.total_freight - COALESCE(tp.received, 0)), 0) as balance_due
            FROM trips t
            LEFT JOIN (SELECT trip_id, SUM(received_amount) as received FROM trip_payments GROUP BY trip_id) tp
            ON t.id = tp.trip_id
-           WHERE t.status NOT IN ('SETTLED', 'CANCELLED')`,
-      isTransportUser ? [userId] : []
+           WHERE t.status NOT IN ('SETTLED', 'CANCELLED')
+             ${isOwner ? 'AND t.vehicle_id = ANY($1::int[])' : ''}`,
+      isOwner ? [vids] : []
     ),
     query(
       `SELECT t.id, t.trip_date, t.total_freight, t.status, t.advance_paid,
@@ -129,9 +227,9 @@ export const getMobileDashboard = asyncHandler(async (req: AuthRequest, res: Res
        JOIN parties p ON t.party_id = p.id
        JOIN routes r ON t.route_id = r.id
        LEFT JOIN units u ON t.unit_id = u.id
-       WHERE t.status != 'DRAFT' ${isTransportUser ? 'AND t.created_by = $1' : ''}
+       WHERE t.status != 'DRAFT' ${recentTripFilter}
        ORDER BY t.created_at DESC LIMIT 10`,
-      isTransportUser ? [userId] : []
+      recentTripParams
     ),
     // Total owner advance credit received by this manager
     query(
@@ -159,9 +257,103 @@ export const getMobileDashboard = asyncHandler(async (req: AuthRequest, res: Res
        ORDER BY oa.advance_date DESC, oa.created_at DESC`,
       [userId]
     ),
+    // Per-driver advance balance for this manager:
+    // balance_in_manager_hand = total advance given + total settled cash paid - total driver expenses
+    // Positive: manager still has money in hand (expenses were less than advance)
+    // Negative: expenses exceeded advance -> manager/office needs to pay balance amount to driver
+    query(
+      `WITH manager_driver_advances AS (
+         SELECT da.driver_id, da.amount, da.trip_id
+         FROM driver_advances da
+         WHERE ${daFilter}
+
+         UNION ALL
+
+         SELECT ta.driver_id, ta.amount, ta.trip_id
+         FROM truck_advances ta
+         WHERE ta.driver_id IS NOT NULL ${taFilter}
+
+         UNION ALL
+
+         SELECT tr.driver_id, COALESCE(tr.advance_paid, 0) as amount, tr.id as trip_id
+         FROM trips tr
+         WHERE tr.driver_id IS NOT NULL 
+           AND tr.status NOT IN ('CANCELLED', 'DRAFT')
+           ${managerOnly ? '' : 'AND tr.advance_paid > 0'}
+           AND NOT EXISTS (SELECT 1 FROM truck_advances ta2 WHERE ta2.trip_id = tr.id)
+           AND NOT EXISTS (SELECT 1 FROM driver_advances da2 WHERE da2.trip_id = tr.id)
+           ${tripAdvFilter}
+
+         UNION ALL
+
+         SELECT oa.driver_id, oa.amount, NULL::integer as trip_id
+         FROM owner_advances oa
+         WHERE oa.driver_id IS NOT NULL
+           ${oaFilter}
+       ),
+       driver_totals AS (
+         SELECT
+           d.id as driver_id,
+           d.name as driver_name,
+           d.mobile_number as driver_mobile,
+           COALESCE((
+             SELECT SUM(mda.amount)
+             FROM manager_driver_advances mda
+             WHERE mda.driver_id = d.id
+           ), 0) as total_advance_given,
+           COALESCE((
+             SELECT SUM(
+               COALESCE(s.total_expenses, (SELECT SUM(de.amount) FROM driver_expenses de WHERE de.trip_id = t.id), 0)
+             )
+             FROM trips t
+             LEFT JOIN settlements s ON s.trip_id = t.id
+             WHERE t.driver_id = d.id
+               AND t.status NOT IN ('CANCELLED', 'DRAFT')
+               ${expenseFilter}
+           ), 0) as total_expenses,
+           COALESCE((
+             SELECT SUM(dsp.amount)
+             FROM driver_settlement_payments dsp
+             JOIN settlements s ON dsp.settlement_id = s.id
+             JOIN trips t ON s.trip_id = t.id
+             WHERE t.driver_id = d.id
+               AND dsp.payment_mode != 'ADJUSTED_ADVANCE'
+               ${expenseFilter}
+           ), 0) as total_settled_cash_paid
+         FROM drivers d
+         WHERE d.status = 'ACTIVE'
+           ${driverExists}
+       )
+       SELECT
+         driver_id,
+         driver_name,
+         driver_mobile,
+         total_advance_given,
+         total_expenses,
+         total_settled_cash_paid,
+         (total_advance_given + total_settled_cash_paid - total_expenses) as balance_in_manager_hand
+       FROM driver_totals
+       ${isNonAdmin ? `WHERE (
+         total_advance_given > 0
+         OR total_expenses > 0
+         OR EXISTS (SELECT 1 FROM manager_driver_advances mda WHERE mda.driver_id = driver_totals.driver_id)
+       )` : ''}
+       ORDER BY 
+         CASE WHEN (total_advance_given > 0 OR total_expenses > 0) THEN 0 ELSE 1 END,
+         driver_name ASC`,
+      balanceParams
+    ),
   ]);
 
   const ownerAdvanceBreakdown = advanceCreditResult.rows;
+  const driverBalances = driverBalancesResult.rows.map((r: any) => ({
+    driver_id: parseInt(r.driver_id),
+    driver_name: r.driver_name,
+    driver_mobile: r.driver_mobile,
+    total_advance_given: parseFloat(r.total_advance_given),
+    total_expenses: parseFloat(r.total_expenses),
+    balance_in_manager_hand: parseFloat(r.balance_in_manager_hand),
+  }));
 
   res.json({
     success: true,
@@ -177,6 +369,7 @@ export const getMobileDashboard = asyncHandler(async (req: AuthRequest, res: Res
         parseFloat(advanceCreditSummaryResult.rows[0].total_credit) -
         parseFloat(truckAdvanceUsedResult.rows[0].total_used),
       owner_advance_breakdown: ownerAdvanceBreakdown,
+      driver_advance_balances: driverBalances,
     },
   });
 });

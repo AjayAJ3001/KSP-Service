@@ -1,20 +1,24 @@
 import React, { useState, useEffect } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import * as XLSX from 'xlsx';
 import { Navigation, Plus, Eye, CheckCircle, Search, Filter, Trash2, AlertTriangle, Calendar, Truck, Printer, FileSpreadsheet, Loader2, RefreshCw } from 'lucide-react';
-import { tripService, vehicleService, driverService, partyService, routeService, unitService, freightRateService } from '../services/adminService';
-import { Trip, Vehicle, Driver, Party, Route, Unit, FreightRate } from '../types';
+import { tripService, vehicleService, driverService, partyService, routeService, unitService, freightRateService, ownerService } from '../services/adminService';
+import { Trip, Vehicle, Driver, Party, Route, Unit, FreightRate, Owner } from '../types';
 import { DataTable, Column } from '../components/Common/DataTable';
 import { Modal } from '../components/Common/Modal';
 import { StatusBadge } from '../components/Common/StatusBadge';
 import { formatDateDMY } from '../utils/dateUtils';
 import { DateField } from '../components/Common/DateField';
+import { PRINT_BRAND_CSS, printBrandLockup } from '../utils/printBrand';
 
 export const TripsPage: React.FC = () => {
+  const [searchParams, setSearchParams] = useSearchParams();
   const [trips, setTrips] = useState<Trip[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
   const [statusFilter, setStatusFilter] = useState('');
   const [partyFilter, setPartyFilter] = useState('');
+  const [ownerFilter, setOwnerFilter] = useState('');
   const [fromDate, setFromDate] = useState('');
   const [toDate, setToDate] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -23,6 +27,7 @@ export const TripsPage: React.FC = () => {
 
   // Lookups
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
+  const [owners, setOwners] = useState<Owner[]>([]);
   const [drivers, setDrivers] = useState<Driver[]>([]);
   const [parties, setParties] = useState<Party[]>([]);
   const [routes, setRoutes] = useState<Route[]>([]);
@@ -133,7 +138,29 @@ export const TripsPage: React.FC = () => {
   useEffect(() => {
     loadTrips();
     loadLookups();
-  }, [page, statusFilter, partyFilter, fromDate, toDate]);
+  }, [page, statusFilter, partyFilter, ownerFilter, fromDate, toDate]);
+
+  // Support prefilled Create Trip from Driver Balance Master / Advances
+  useEffect(() => {
+    if (searchParams.get('create') === 'true') {
+      const pDriverId = searchParams.get('driver_id') || '';
+      const pVehicleId = searchParams.get('vehicle_id') || '';
+      const pAdvance = searchParams.get('advance_paid') || '';
+      setFormData((prev) => ({
+        ...prev,
+        driver_id: pDriverId || prev.driver_id,
+        vehicle_id: pVehicleId || prev.vehicle_id,
+        advance_paid: pAdvance || prev.advance_paid,
+      }));
+      setIsCreateModalOpen(true);
+      const nextParams = new URLSearchParams(searchParams);
+      nextParams.delete('create');
+      nextParams.delete('driver_id');
+      nextParams.delete('vehicle_id');
+      nextParams.delete('advance_paid');
+      setSearchParams(nextParams, { replace: true });
+    }
+  }, [searchParams]);
 
   const loadTrips = async () => {
     try {
@@ -143,6 +170,7 @@ export const TripsPage: React.FC = () => {
         limit: 10,
         status: statusFilter || undefined,
         party_id: partyFilter || undefined,
+        owner_id: ownerFilter || undefined,
         from_date: fromDate || undefined,
         to_date: toDate || undefined,
       });
@@ -157,8 +185,9 @@ export const TripsPage: React.FC = () => {
 
   const loadLookups = async () => {
     try {
-      const [vRes, dRes, pRes, rRes, uRes, frRes] = await Promise.all([
+      const [vRes, oRes, dRes, pRes, rRes, uRes, frRes] = await Promise.all([
         vehicleService.getVehicles({ limit: 100, status: 'ACTIVE' }),
+        ownerService.getOwners({ limit: 100, status: 'ACTIVE' }),
         driverService.getDrivers({ limit: 100, status: 'ACTIVE' }),
         partyService.getParties({ limit: 100, status: 'ACTIVE' }),
         routeService.getRoutes({ limit: 100, status: 'ACTIVE' }),
@@ -166,6 +195,7 @@ export const TripsPage: React.FC = () => {
         freightRateService.getFreightRates({ limit: 100, status: 'ACTIVE' }),
       ]);
       setVehicles(vRes.data.items);
+      setOwners(oRes.data.items);
       setDrivers(dRes.data.items);
       setParties(pRes.data.items);
       setRoutes(rRes.data.items);
@@ -235,7 +265,7 @@ export const TripsPage: React.FC = () => {
   const previewTotalFreight = () => {
     const weight = parseFloat(formData.goods_weight) || 0;
     const rate = parseFloat(formData.freight_rate) || 0;
-    return (weight * rate).toFixed(2);
+    return Math.round(weight * rate).toFixed(0);
   };
 
   const handleCreate = async (e: React.FormEvent) => {
@@ -310,15 +340,20 @@ export const TripsPage: React.FC = () => {
 
   const formatCurrency = (val: number | string) => {
     const num = parseFloat(String(val)) || 0;
-    return `₹${num.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    return `₹${Math.round(num).toLocaleString('en-IN')}`;
   };
 
   const resetFilters = () => {
+    const hadFilter = Boolean(statusFilter || partyFilter || ownerFilter || fromDate || toDate || page !== 1);
     setStatusFilter('');
     setPartyFilter('');
+    setOwnerFilter('');
     setFromDate('');
     setToDate('');
     setPage(1);
+    if (!hadFilter) {
+      loadTrips();
+    }
   };
 
   const handleExportExcel = async () => {
@@ -329,6 +364,7 @@ export const TripsPage: React.FC = () => {
         limit: 10000,
         status: statusFilter || undefined,
         party_id: partyFilter || undefined,
+        owner_id: ownerFilter || undefined,
         from_date: fromDate || undefined,
         to_date: toDate || undefined,
       });
@@ -353,6 +389,7 @@ export const TripsPage: React.FC = () => {
         'Trip ID': `TRIP-${t.id}`,
         'Trip Date': formatDateDMY(t.trip_date),
         'Lorry Number': t.lorry_number || '-',
+        'Truck Owner': t.owner_name || '-',
         'Party Name': t.party_name || '-',
         'Unit / Destination': t.to_location || t.from_location || t.unit_name || '-',
         'Driver Name': t.driver_name || '-',
@@ -432,6 +469,7 @@ export const TripsPage: React.FC = () => {
 
       // Create Executive Summary Sheet
       const selectedPartyName = partyFilter ? parties.find((p) => String(p.id) === String(partyFilter))?.name : 'All';
+      const selectedOwnerName = ownerFilter ? owners.find((o) => String(o.id) === String(ownerFilter))?.name : 'All';
       const summaryRows = [
         { 'Summary Field': 'TOTAL TRIPS COUNT', 'Value': `${totalTripsCount} Trips` },
         { 'Summary Field': 'Total Goods Weight', 'Value': `${totalWeight.toFixed(3)} MT/Tons` },
@@ -441,6 +479,7 @@ export const TripsPage: React.FC = () => {
         { 'Summary Field': 'Total Balance Due', 'Value': `₹${totalBalanceDue.toLocaleString('en-IN', { minimumFractionDigits: 2 })}` },
         { 'Summary Field': 'Status Filter', 'Value': statusFilter || 'All Statuses' },
         { 'Summary Field': 'Party Filter', 'Value': selectedPartyName || 'All Parties' },
+        { 'Summary Field': 'Truck Owner Filter', 'Value': selectedOwnerName || 'All Owners' },
         { 'Summary Field': 'From Date', 'Value': fromDate ? formatDateDMY(fromDate) : 'All' },
         { 'Summary Field': 'To Date', 'Value': toDate ? formatDateDMY(toDate) : 'All' },
         { 'Summary Field': 'Generated Date & Time', 'Value': new Date().toLocaleString('en-IN') },
@@ -469,6 +508,7 @@ export const TripsPage: React.FC = () => {
         limit: 10000,
         status: statusFilter || undefined,
         party_id: partyFilter || undefined,
+        owner_id: ownerFilter || undefined,
         from_date: fromDate || undefined,
         to_date: toDate || undefined,
       });
@@ -488,6 +528,7 @@ export const TripsPage: React.FC = () => {
       const totalBalanceDue = items.reduce((sum, t) => sum + (Number(t.balance_due) || 0), 0);
 
       const selectedPartyName = partyFilter ? parties.find((p) => String(p.id) === String(partyFilter))?.name : 'All';
+      const selectedOwnerName = ownerFilter ? owners.find((o) => String(o.id) === String(ownerFilter))?.name : 'All';
       const dateRangeText = fromDate && toDate ? `${formatDateDMY(fromDate)} to ${formatDateDMY(toDate)}` : fromDate ? `From ${formatDateDMY(fromDate)}` : toDate ? `Up to ${formatDateDMY(toDate)}` : 'All Dates';
 
       const printHtml = `
@@ -497,10 +538,11 @@ export const TripsPage: React.FC = () => {
   <meta charset="utf-8" />
   <title>KSP Logistics - Trips Master Dispatch Report</title>
   <style>
+    ${PRINT_BRAND_CSS}
     * { box-sizing: border-box; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
     body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif; margin: 0; padding: 20px; color: #1e293b; background: #fff; font-size: 12px; }
     @page { size: landscape; margin: 10mm; }
-    .header-bar { display: flex; justify-content: space-between; align-items: flex-start; padding-bottom: 14px; border-bottom: 2px solid #0f172a; margin-bottom: 14px; }
+    .header-bar { display: flex; justify-content: space-between; align-items: center; padding-bottom: 10px; border-bottom: 3px solid #0f172a; margin-bottom: 14px; }
     .company-title { font-size: 20px; font-weight: 800; color: #0f172a; letter-spacing: 0.5px; margin: 0 0 4px 0; }
     .report-subtitle { font-size: 13px; font-weight: 700; color: #2563eb; margin: 0 0 4px 0; text-transform: uppercase; letter-spacing: 0.5px; }
     .meta-text { font-size: 11px; color: #64748b; margin: 0; }
@@ -534,10 +576,10 @@ export const TripsPage: React.FC = () => {
 
   <div class="header-bar">
     <div>
-      <h1 class="company-title">KSP TRANSPORT &amp; LOGISTICS</h1>
+      ${printBrandLockup()}
       <div class="report-subtitle">TRIPS MASTER DISPATCH REPORT</div>
       <p class="meta-text">
-        <strong>Filters:</strong> Status: ${statusFilter || 'All'} | Party: ${selectedPartyName || 'All'} | Date Range: ${dateRangeText}
+        <strong>Filters:</strong> Status: ${statusFilter || 'All'} | Party: ${selectedPartyName || 'All'} | Owner: ${selectedOwnerName || 'All'} | Date Range: ${dateRangeText}
       </p>
     </div>
     <div style="text-align: right;">
@@ -550,7 +592,8 @@ export const TripsPage: React.FC = () => {
       <tr>
         <th class="center" style="width: 35px;">S.No</th>
         <th style="width: 70px;">Date</th>
-        <th style="width: 85px;">Lorry No</th>
+        <th style="width: 90px;">Lorry No</th>
+        <th style="width: 100px;">Truck Owner</th>
         <th>Party Name</th>
         <th>Unit / Destination</th>
         <th>Driver</th>
@@ -576,6 +619,7 @@ export const TripsPage: React.FC = () => {
           <td class="center">${idx + 1}</td>
           <td>${formatDateDMY(t.trip_date)}</td>
           <td><strong>${t.lorry_number || '-'}</strong></td>
+          <td>${t.owner_name || '-'}</td>
           <td>${t.party_name || '-'}</td>
           <td>${t.to_location || t.from_location || t.unit_name || '-'}</td>
           <td>${t.driver_name || '-'}</td>
@@ -591,7 +635,7 @@ export const TripsPage: React.FC = () => {
       }).join('')}
       <tr class="footer-row">
         <td class="center" colspan="2">TOTAL</td>
-        <td colspan="4"><strong>Total Count: ${totalTripsCount} Trips</strong></td>
+        <td colspan="5"><strong>Total Count: ${totalTripsCount} Trips</strong></td>
         <td class="num"><strong>${totalWeight.toFixed(2)} MT</strong></td>
         <td></td>
         <td class="num"><strong>₹${totalFreight.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</strong></td>
@@ -640,6 +684,7 @@ export const TripsPage: React.FC = () => {
   <meta charset="utf-8" />
   <title>Trip Voucher #${trip.id} - ${trip.lorry_number}</title>
   <style>
+    ${PRINT_BRAND_CSS}
     * { box-sizing: border-box; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
     body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif; margin: 0; padding: 24px; color: #1e293b; background: #fff; font-size: 13px; }
     @page { size: portrait; margin: 12mm; }
@@ -668,13 +713,14 @@ export const TripsPage: React.FC = () => {
   </div>
   <div class="card">
     <div class="header">
-      <h1 class="title">KSP TRANSPORT &amp; LOGISTICS</h1>
+      ${printBrandLockup()}
       <div class="sub">OFFICIAL FREIGHT DISPATCH VOUCHER / CHALLAN</div>
       <div style="margin-top: 6px; font-size: 12px; font-weight: 700; color: #2563eb;">Trip Reference #TRIP-${trip.id}</div>
     </div>
     <div class="grid">
       <div class="row-item"><span class="label">Trip Date:</span><span class="val">${formatDateDMY(trip.trip_date)}</span></div>
       <div class="row-item"><span class="label">Lorry Number:</span><span class="val">${trip.lorry_number}</span></div>
+      ${trip.owner_name ? `<div class="row-item"><span class="label">Truck Owner:</span><span class="val" style="color:#4338ca;font-weight:800">${trip.owner_name}</span></div>` : ''}
       <div class="row-item"><span class="label">Party Name:</span><span class="val">${trip.party_name}</span></div>
       <div class="row-item"><span class="label">Driver Name:</span><span class="val">${trip.driver_name}</span></div>
       <div class="row-item"><span class="label">Unit / Destination:</span><span class="val">${trip.to_location || trip.from_location}</span></div>
@@ -717,7 +763,16 @@ export const TripsPage: React.FC = () => {
     {
       header: 'Lorry Number',
       accessor: 'lorry_number',
-      render: (t) => <strong>{t.lorry_number}</strong>,
+      render: (t) => (
+        <div>
+          <strong style={{ fontSize: '13.5px' }}>{t.lorry_number}</strong>
+          {t.owner_name && (
+            <div style={{ fontSize: '11px', color: '#6366f1', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '3px', marginTop: '2px' }}>
+              <span>👤</span><span>{t.owner_name}</span>
+            </div>
+          )}
+        </div>
+      ),
     },
     { header: 'Party Name', accessor: 'party_name' },
     {
@@ -861,6 +916,28 @@ export const TripsPage: React.FC = () => {
               ))}
             </select>
           </div>
+
+          <div style={{ width: '200px', flexShrink: 0 }}>
+            <label style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-muted)', display: 'block', marginBottom: '4px' }}>
+              Truck Owner
+            </label>
+            <select
+              className="form-control form-select"
+              style={{ width: '100%' }}
+              value={ownerFilter}
+              onChange={(e) => {
+                setOwnerFilter(e.target.value);
+                setPage(1);
+              }}
+            >
+              <option value="">All Owners</option>
+              {owners.map((o) => (
+                <option key={o.id} value={o.id}>
+                  {o.name}
+                </option>
+              ))}
+            </select>
+          </div>
         </div>
 
         {/* Second filter row: From Date, To Date, Clear Filters, Print, Download */}
@@ -907,7 +984,7 @@ export const TripsPage: React.FC = () => {
           <button
             type="button"
             onClick={resetFilters}
-            disabled={!statusFilter && !partyFilter && !fromDate && !toDate}
+            disabled={!statusFilter && !partyFilter && !ownerFilter && !fromDate && !toDate}
             className="btn btn-outline"
             style={{
               fontSize: '13px',
@@ -916,6 +993,8 @@ export const TripsPage: React.FC = () => {
               gap: '6px',
               height: '38px',
               flexShrink: 0,
+              cursor: (!statusFilter && !partyFilter && !ownerFilter && !fromDate && !toDate) ? 'not-allowed' : 'pointer',
+              opacity: (!statusFilter && !partyFilter && !ownerFilter && !fromDate && !toDate) ? 0.6 : 1,
             }}
             title="Clear all filters"
           >
@@ -1026,11 +1105,35 @@ export const TripsPage: React.FC = () => {
                     : '';
                   return (
                     <option key={v.id} value={v.id}>
-                      {v.lorry_number} ({v.capacity_tons || 0} Tons){expBadge}
+                      {v.lorry_number} {v.owner_name ? `• ${v.owner_name}` : ''} ({v.capacity_tons || 0} Tons){expBadge}
                     </option>
                   );
                 })}
               </select>
+              {(() => {
+                const selVehicle = vehicles.find((v) => v.id === Number(formData.vehicle_id));
+                if (!selVehicle || !selVehicle.owner_name) return null;
+                return (
+                  <div
+                    style={{
+                      marginTop: '6px',
+                      fontSize: '12px',
+                      color: '#4338ca',
+                      background: '#e0e7ff',
+                      padding: '6px 10px',
+                      borderRadius: '6px',
+                      border: '1px solid #c7d2fe',
+                      fontWeight: 700,
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '6px',
+                    }}
+                  >
+                    <span>👤 Truck Owner: <strong>{selVehicle.owner_name}</strong></span>
+                    {selVehicle.owner_mobile && <span style={{ opacity: 0.8, fontSize: '11px' }}>({selVehicle.owner_mobile})</span>}
+                  </div>
+                );
+              })()}
               {(() => {
                 const selVehicle = vehicles.find((v) => v.id === Number(formData.vehicle_id));
                 if (!selVehicle) return null;
@@ -1112,6 +1215,14 @@ export const TripsPage: React.FC = () => {
                       </div>
                     );
                   }
+                }
+                const owed = parseFloat(String(selDriver?.pending_owed_to_driver || 0));
+                if (owed > 0) {
+                  return (
+                    <div style={{ marginTop: '6px', fontSize: '12px', color: '#c2410c', background: '#fff7ed', padding: '6px 10px', borderRadius: '6px', border: '1px solid #fed7aa', display: 'flex', alignItems: 'center', gap: '6px', fontWeight: 600 }}>
+                      <span>⚠️ Office owes driver: ₹{owed.toLocaleString('en-IN', { maximumFractionDigits: 0 })} (from prior trip dues)</span>
+                    </div>
+                  );
                 }
                 if (selDriver && Number(selDriver.remaining_advance_balance || 0) > 0) {
                   const bal = parseFloat(String(selDriver.remaining_advance_balance));
@@ -1221,7 +1332,23 @@ export const TripsPage: React.FC = () => {
               />
               {(() => {
                 const selDriver = drivers.find((d) => d.id === Number(formData.driver_id));
+                const owed = parseFloat(String(selDriver?.pending_owed_to_driver || 0));
                 const bal = parseFloat(String(selDriver?.remaining_advance_balance ?? 0));
+                const entered = parseFloat(formData.advance_paid) || 0;
+                if (owed > 0) {
+                  const deducted = Math.min(entered, owed);
+                  const effective = Math.max(0, entered - deducted);
+                  return (
+                    <div style={{ marginTop: '8px', padding: '10px', background: '#fff7ed', border: '1px solid #fed7aa', borderRadius: '8px', fontSize: '11.5px' }}>
+                      <div style={{ color: '#9a3412', fontWeight: 700, marginBottom: '4px' }}>
+                        Advance Adjustment Breakdown:
+                      </div>
+                      <div style={{ color: '#7c2d12' }}>• Cash given: ₹{entered.toLocaleString('en-IN')}</div>
+                      <div style={{ color: '#c2410c', fontWeight: 600 }}>• Settles prior trip dues: −₹{deducted.toLocaleString('en-IN')} (auto-settles prior trip)</div>
+                      <div style={{ color: '#15803d', fontWeight: 800, marginTop: '2px' }}>• Effective advance for this trip: ₹{effective.toLocaleString('en-IN')}</div>
+                    </div>
+                  );
+                }
                 if (bal > 0) {
                   return (
                     <div style={{ marginTop: '4px', fontSize: '11.5px', color: '#1d4ed8' }}>
@@ -1256,7 +1383,7 @@ export const TripsPage: React.FC = () => {
               </div>
             </div>
             <div style={{ fontSize: '24px', fontWeight: 800, color: '#f59e0b', fontFamily: 'var(--font-heading)' }}>
-              ₹{parseFloat(previewTotalFreight()).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+              ₹{Math.round(parseFloat(previewTotalFreight())).toLocaleString('en-IN')}
             </div>
           </div>
 
@@ -1295,6 +1422,14 @@ export const TripsPage: React.FC = () => {
                 <span>Lorry Number:</span>
                 <strong>{selectedTrip.lorry_number}</strong>
               </div>
+              {selectedTrip.owner_name && (
+                <div className="slip-row">
+                  <span>Truck Owner:</span>
+                  <strong style={{ color: '#4338ca', fontWeight: 800 }}>
+                    {selectedTrip.owner_name} {selectedTrip.owner_mobile ? `(${selectedTrip.owner_mobile})` : ''}
+                  </strong>
+                </div>
+              )}
               <div className="slip-row">
                 <span>Driver:</span>
                 <strong>{selectedTrip.driver_name}</strong>

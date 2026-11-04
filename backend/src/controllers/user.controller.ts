@@ -4,6 +4,7 @@ import { query } from '../config/database';
 import { AppError, asyncHandler } from '../middleware/errorHandler';
 import { AuthRequest } from '../middleware/auth';
 import { createAuditLog } from '../utils/auditLog';
+import { assertOwnerManager, isOwnerUser } from '../utils/ownerScope';
 
 export const getUsers = asyncHandler(async (req: AuthRequest, res: Response): Promise<void> => {
   const page = parseInt(req.query.page as string) || 1;
@@ -24,6 +25,22 @@ export const getUsers = asyncHandler(async (req: AuthRequest, res: Response): Pr
   }
   if (role) { conditions.push(`u.role = $${paramIdx}`); params.push(role); paramIdx++; }
   if (status) { conditions.push(`u.status = $${paramIdx}`); params.push(status); paramIdx++; }
+  if (isOwnerUser(req)) {
+    const forAdvance = req.query.for_advance === 'true' || req.query.for_advance === '1';
+    if (forAdvance) {
+      conditions.push(`u.role IN ('MANAGER', 'ADMIN')`);
+    } else {
+      conditions.push(`u.role = 'MANAGER'`);
+      const ownerIds = req.user?.ownerIds || [];
+      if (ownerIds.length === 0) {
+        conditions.push('FALSE');
+      } else {
+        conditions.push(`EXISTS (SELECT 1 FROM manager_owners mo WHERE mo.user_id = u.id AND mo.owner_id = ANY($${paramIdx}::int[]))`);
+        params.push(ownerIds);
+        paramIdx++;
+      }
+    }
+  }
 
   const where = conditions.join(' AND ');
 
@@ -59,6 +76,7 @@ export const getUsers = asyncHandler(async (req: AuthRequest, res: Response): Pr
 
 export const getUserById = asyncHandler(async (req: AuthRequest, res: Response): Promise<void> => {
   const { id } = req.params;
+  await assertOwnerManager(req, id);
   const result = await query(
     `SELECT u.id, u.username, u.name, u.email, u.mobile_number, u.role, u.status,
             u.driver_id, u.created_at, u.updated_at, u.last_login,
@@ -72,14 +90,18 @@ export const getUserById = asyncHandler(async (req: AuthRequest, res: Response):
 });
 
 export const createUser = asyncHandler(async (req: AuthRequest, res: Response): Promise<void> => {
-  const { username, name, password, email, mobile_number, role, driver_id } = req.body;
+  const { username, name, password, email, mobile_number, driver_id } = req.body;
+  let { role } = req.body;
 
+  if (isOwnerUser(req)) {
+    throw new AppError('Owner logins cannot create managers. Ask an administrator.', 403);
+  }
   if (!username || !name || !password || !role) {
     throw new AppError('Username, name, password and role are required.', 400);
   }
   if (password.length < 6) throw new AppError('Password must be at least 6 characters.', 400);
-  if (!['ADMIN', 'MANAGER', 'TRANSPORT_USER'].includes(role)) {
-    throw new AppError('Invalid role. Must be ADMIN, MANAGER, or TRANSPORT_USER.', 400);
+  if (!['ADMIN', 'MANAGER', 'TRANSPORT_USER', 'OWNER'].includes(role)) {
+    throw new AppError('Invalid role. Must be ADMIN, MANAGER, TRANSPORT_USER, or OWNER.', 400);
   }
 
   const existing = await query('SELECT id FROM users WHERE username = $1', [username.trim().toLowerCase()]);
@@ -95,17 +117,22 @@ export const createUser = asyncHandler(async (req: AuthRequest, res: Response): 
     [username.trim().toLowerCase(), name.trim(), passwordHash, email || null, mobile_number || null, role, driver_id || null]
   );
 
-  await createAuditLog(req.user?.id, 'CREATE_USER', 'USERS', result.rows[0].id, { username });
+  await createAuditLog(req.user?.id, 'CREATE_USER', 'USERS', result.rows[0].id, { username, role });
 
   res.status(201).json({ success: true, message: 'User created successfully.', data: result.rows[0] });
 });
 
 export const updateUser = asyncHandler(async (req: AuthRequest, res: Response): Promise<void> => {
   const { id } = req.params;
-  const { name, email, mobile_number, role, driver_id } = req.body;
+  const { name, email, mobile_number, driver_id } = req.body;
+  let { role } = req.body;
+  await assertOwnerManager(req, id);
 
-  const existing = await query('SELECT id FROM users WHERE id = $1', [id]);
+  const existing = await query('SELECT id, role FROM users WHERE id = $1', [id]);
   if (existing.rows.length === 0) throw new AppError('User not found.', 404);
+  if (isOwnerUser(req)) {
+    role = 'MANAGER';
+  }
 
   const result = await query(
     `UPDATE users SET name = COALESCE($1, name), email = COALESCE($2, email),
@@ -122,6 +149,7 @@ export const updateUser = asyncHandler(async (req: AuthRequest, res: Response): 
 
 export const updateUserStatus = asyncHandler(async (req: AuthRequest, res: Response): Promise<void> => {
   const { id } = req.params;
+  await assertOwnerManager(req, id);
   const { status } = req.body;
 
   if (!['ACTIVE', 'INACTIVE'].includes(status)) {
@@ -142,6 +170,7 @@ export const updateUserStatus = asyncHandler(async (req: AuthRequest, res: Respo
 
 export const resetPassword = asyncHandler(async (req: AuthRequest, res: Response): Promise<void> => {
   const { id } = req.params;
+  await assertOwnerManager(req, id);
   const { new_password } = req.body;
 
   if (!new_password || new_password.length < 6) {
@@ -165,8 +194,12 @@ export const deleteUser = asyncHandler(async (req: AuthRequest, res: Response): 
   if (parseInt(id, 10) === req.user?.id) {
     throw new AppError('You cannot delete your own account.', 400);
   }
-  const existing = await query('SELECT id, username FROM users WHERE id = $1', [id]);
+  await assertOwnerManager(req, id);
+  const existing = await query('SELECT id, username, role FROM users WHERE id = $1', [id]);
   if (existing.rows.length === 0) throw new AppError('User not found.', 404);
+  if (isOwnerUser(req) && existing.rows[0].role !== 'MANAGER') {
+    throw new AppError('You can only delete managers you created.', 403);
+  }
 
   await query('DELETE FROM users WHERE id = $1', [id]);
   await createAuditLog(req.user?.id, 'DELETE_USER', 'USERS', parseInt(id, 10), { username: existing.rows[0].username });

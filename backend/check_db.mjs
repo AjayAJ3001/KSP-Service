@@ -1,0 +1,12 @@
+import 'dotenv/config';
+import pg from 'pg';
+const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL });
+const r1 = await pool.query("SELECT column_name, data_type FROM information_schema.columns WHERE table_name = 'vehicles' ORDER BY ordinal_position");
+console.log('VEHICLES:', JSON.stringify(r1.rows));
+const r2 = await pool.query("SELECT column_name, data_type FROM information_schema.columns WHERE table_name = 'owners' ORDER BY ordinal_position");
+console.log('OWNERS:', JSON.stringify(r2.rows));
+const r3 = await pool.query("SELECT id, lorry_number, owner_id FROM vehicles LIMIT 10");
+console.log('VEHICLE_ROWS:', JSON.stringify(r3.rows));
+const r4 = await pool.query("SELECT id, name FROM owners LIMIT 10");
+console.log('OWNER_ROWS:', JSON.stringify(r4.rows));
+await pool.end();

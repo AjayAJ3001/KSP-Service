@@ -10,6 +10,7 @@ import {
   Alert,
   Modal,
   Image,
+  FlatList,
 } from 'react-native';
 import {
   Truck,
@@ -30,10 +31,15 @@ import {
   Sparkles,
   ChevronDown,
   Hash,
+  Printer,
+  Download,
+  Check,
+  RotateCcw,
 } from 'lucide-react-native';
 import * as ImagePicker from 'expo-image-picker';
-import { adminVehicleService } from '../../services/adminService';
-import { Vehicle } from '../../types';
+import { printMastersPdf, downloadMastersPdf } from '../../utils/pdfGenerator';
+import { adminVehicleService, adminOwnerService } from '../../services/adminService';
+import { Vehicle, Owner } from '../../types';
 import { COLORS, SPACING, RADIUS, SHADOWS } from '../../constants/theme';
 import { formatDateDMY } from '../../utils/dateUtils';
 import {
@@ -61,7 +67,7 @@ const pickImage = async (): Promise<string | null> => {
     return null;
   }
   const result = await ImagePicker.launchImageLibraryAsync({
-    mediaTypes: ImagePicker.MediaTypeOptions.Images,
+    mediaTypes: ['images'],
     allowsEditing: false,
     quality: 0.85,
     base64: true,
@@ -180,6 +186,7 @@ const emptyVehicleForm = () => ({
   goodshed_loading_expense: '',
   status: 'ACTIVE',
   truck_image_url: '',
+  owner_id: '' as string,
   // RC
   rc_number: '',
   rc_reg_date: '',
@@ -220,9 +227,15 @@ type VehicleFormData = ReturnType<typeof emptyVehicleForm>;
 // ─── Main Screen ──────────────────────────────────────────────────────────────
 export const AdminVehiclesScreen: React.FC<{ navigation: any }> = ({ navigation }) => {
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
+  const [owners, setOwners] = useState<Owner[]>([]);
+  const [ownerFilter, setOwnerFilter] = useState<string>('');
   const [search, setSearch] = useState('');
   const [filterType, setFilterType] = useState<VehicleFilter>('ALL');
+  const [showOwnerDropdown, setShowOwnerDropdown] = useState(false);
+  const [isOwnerFilterModalOpen, setIsOwnerFilterModalOpen] = useState(false);
+  const [ownerFilterSearch, setOwnerFilterSearch] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [pdfLoading, setPdfLoading] = useState<'print' | 'download' | null>(null);
 
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingVehicle, setEditingVehicle] = useState<Vehicle | null>(null);
@@ -240,16 +253,44 @@ export const AdminVehiclesScreen: React.FC<{ navigation: any }> = ({ navigation 
   const loadVehicles = useCallback(async () => {
     try {
       setIsLoading(true);
-      const res = await adminVehicleService.getVehicles({ limit: 100 });
+      const params: any = { limit: 100 };
+      if (ownerFilter) params.owner_id = ownerFilter;
+      const res = await adminVehicleService.getVehicles(params);
       setVehicles(res.data.items || []);
     } catch (err: any) {
       Alert.alert('Error', err.message || 'Could not fetch vehicles.');
     } finally {
       setIsLoading(false);
     }
+  }, [ownerFilter]);
+
+  const filteredOwnersList = React.useMemo(() => {
+    const allOption = { id: '', name: 'All Owners', mobile_number: '' };
+    const list = owners.map(o => ({ id: String(o.id), name: o.name, mobile_number: o.mobile_number || '' }));
+    if (!ownerFilterSearch.trim()) return [allOption, ...list];
+    const q = ownerFilterSearch.toLowerCase();
+    return [allOption, ...list.filter(o => o.name.toLowerCase().includes(q) || (o.mobile_number && o.mobile_number.includes(q)))];
+  }, [owners, ownerFilterSearch]);
+
+  const hasActiveFilters = Boolean(search || filterType !== 'ALL' || ownerFilter);
+
+  const handleClearAllFilters = () => {
+    setSearch('');
+    setFilterType('ALL');
+    setOwnerFilter('');
+  };
+
+  const loadOwners = useCallback(async () => {
+    try {
+      const res = await adminOwnerService.getOwners({ limit: 200 });
+      setOwners(res.data.items || []);
+    } catch (e) {
+      console.warn('Failed to load owners', e);
+    }
   }, []);
 
   useEffect(() => { loadVehicles(); }, [loadVehicles]);
+  useEffect(() => { loadOwners(); }, [loadOwners]);
 
   const getDaysLeft = (dateStr?: string | null) => {
     if (!dateStr) return null;
@@ -260,7 +301,8 @@ export const AdminVehiclesScreen: React.FC<{ navigation: any }> = ({ navigation 
     if (search) {
       const q = search.toLowerCase();
       if (!v.lorry_number.toLowerCase().includes(q) &&
-          !(v.vehicle_type?.toLowerCase().includes(q))) return false;
+          !(v.vehicle_type?.toLowerCase().includes(q)) &&
+          !(v.owner_name?.toLowerCase().includes(q))) return false;
     }
     if (filterType === 'ACTIVE') return v.status === 'ACTIVE';
     if (filterType === 'INACTIVE') return v.status === 'INACTIVE';
@@ -404,6 +446,7 @@ export const AdminVehiclesScreen: React.FC<{ navigation: any }> = ({ navigation 
       goodshed_loading_expense: v.goodshed_loading_expense?.toString() || '',
       status: v.status,
       truck_image_url: v.truck_image_url || '',
+      owner_id: v.owner_id?.toString() || '',
       rc_number: v.rc_number || '',
       rc_reg_date: v.rc_reg_date ? v.rc_reg_date.split('T')[0] : '',
       rc_photo_url: v.rc_photo_url || '',
@@ -450,6 +493,7 @@ export const AdminVehiclesScreen: React.FC<{ navigation: any }> = ({ navigation 
         goodshed_loading_expense: formData.goodshed_loading_expense ? parseFloat(formData.goodshed_loading_expense) : undefined,
         status: formData.status || 'ACTIVE',
         truck_image_url: formData.truck_image_url || undefined,
+        owner_id: formData.owner_id ? parseInt(formData.owner_id as string) : null,
         rc_number: formData.rc_number.trim() || undefined,
         rc_reg_date: formData.rc_reg_date || undefined,
         rc_photo_url: formData.rc_photo_url || undefined,
@@ -531,6 +575,41 @@ export const AdminVehiclesScreen: React.FC<{ navigation: any }> = ({ navigation 
   const setField = (key: keyof VehicleFormData, value: string) =>
     setFormData(prev => ({ ...prev, [key]: value }));
 
+  const handlePrintPdf = async () => {
+    try {
+      setPdfLoading('print');
+      await printMastersPdf({
+        tab: 'VEHICLES',
+        tabLabel: 'Fleet Vehicles Directory',
+        vehicles: filteredVehicles,
+      });
+    } catch (err: any) {
+      console.error('Print vehicles PDF failed', err);
+      Alert.alert('Print Error', err.message || 'Failed to print vehicles.');
+    } finally {
+      setPdfLoading(null);
+    }
+  };
+
+  const handleDownloadPdf = async () => {
+    try {
+      setPdfLoading('download');
+      const result = await downloadMastersPdf({
+        tab: 'VEHICLES',
+        tabLabel: 'Fleet Vehicles Directory',
+        vehicles: filteredVehicles,
+      });
+      if (result.success && result.savedDirectly) {
+        Alert.alert('PDF Saved', `Fleet vehicles directory saved:\n${result.filename}`);
+      }
+    } catch (err: any) {
+      console.error('Download vehicles PDF failed', err);
+      Alert.alert('Download Error', err.message || 'Failed to download PDF.');
+    } finally {
+      setPdfLoading(null);
+    }
+  };
+
   const TAB_LABELS = ['Basic', 'RC / FC', 'Insurance / Permit', 'TDS / Tax', 'PAN / Bank'];
 
   // ─── Render ──────────────────────────────────────────────────────────────────
@@ -550,6 +629,39 @@ export const AdminVehiclesScreen: React.FC<{ navigation: any }> = ({ navigation 
             />
             {search ? <TouchableOpacity onPress={() => setSearch('')}><X size={16} color={COLORS.textMuted} /></TouchableOpacity> : null}
           </View>
+
+          <TouchableOpacity
+            style={[styles.pdfBtn, styles.printBtn, pdfLoading === 'print' && { opacity: 0.7 }]}
+            onPress={handlePrintPdf}
+            disabled={pdfLoading !== null || isLoading}
+            activeOpacity={0.8}
+          >
+            {pdfLoading === 'print' ? (
+              <ActivityIndicator size="small" color={COLORS.white} />
+            ) : (
+              <>
+                <Printer size={13} color={COLORS.white} />
+                <Text style={styles.pdfBtnText}>Print</Text>
+              </>
+            )}
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[styles.pdfBtn, styles.downloadBtn, pdfLoading === 'download' && { opacity: 0.7 }]}
+            onPress={handleDownloadPdf}
+            disabled={pdfLoading !== null || isLoading}
+            activeOpacity={0.8}
+          >
+            {pdfLoading === 'download' ? (
+              <ActivityIndicator size="small" color={COLORS.white} />
+            ) : (
+              <>
+                <Download size={13} color={COLORS.white} />
+                <Text style={styles.pdfBtnText}>PDF</Text>
+              </>
+            )}
+          </TouchableOpacity>
+
           <TouchableOpacity style={styles.addBtn} onPress={openAddModal}>
             <Plus size={16} color="#fff" />
             <Text style={styles.addBtnTxt}>Add</Text>
@@ -561,7 +673,7 @@ export const AdminVehiclesScreen: React.FC<{ navigation: any }> = ({ navigation 
             <TouchableOpacity
               key={f}
               style={[styles.pill, filterType === f && (f === 'EXPIRING' ? styles.pillExpiring : styles.pillActive)]}
-              onPress={() => setFilterType(f)}
+              onPress={() => setFilterType(filterType === f ? 'ALL' : f)}
             >
               {f === 'EXPIRING' && <AlertTriangle size={11} color={filterType === 'EXPIRING' ? '#b91c1c' : '#ea580c'} />}
               <Text style={[styles.pillTxt, filterType === f && (f === 'EXPIRING' ? { color: '#b91c1c', fontWeight: '800' } : styles.pillTxtActive)]}>
@@ -570,6 +682,46 @@ export const AdminVehiclesScreen: React.FC<{ navigation: any }> = ({ navigation 
             </TouchableOpacity>
           ))}
         </ScrollView>
+
+        {/* Owner Filter & Clear */}
+        <View style={{ paddingTop: 6, flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+          <TouchableOpacity
+            style={[styles.pill, ownerFilter ? styles.pillActive : null, { flexDirection: 'row', gap: 5, alignItems: 'center', alignSelf: 'flex-start' }]}
+            onPress={() => {
+              setOwnerFilterSearch('');
+              setIsOwnerFilterModalOpen(true);
+            }}
+          >
+            <Building size={11} color={ownerFilter ? '#fff' : COLORS.textMuted} />
+            <Text style={[styles.pillTxt, ownerFilter && styles.pillTxtActive]}>
+              {ownerFilter ? owners.find(o => String(o.id) === ownerFilter)?.name || 'Owner' : 'All Owners'}
+            </Text>
+            {ownerFilter ? (
+              <TouchableOpacity
+                onPress={(e) => {
+                  e.stopPropagation();
+                  setOwnerFilter('');
+                }}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              >
+                <X size={11} color="#fff" />
+              </TouchableOpacity>
+            ) : (
+              <ChevronDown size={10} color={COLORS.textMuted} />
+            )}
+          </TouchableOpacity>
+
+          {hasActiveFilters && (
+            <TouchableOpacity
+              style={styles.clearFiltersBtn}
+              onPress={handleClearAllFilters}
+              activeOpacity={0.7}
+            >
+              <RotateCcw size={11} color="#dc2626" />
+              <Text style={styles.clearFiltersBtnText}>Clear</Text>
+            </TouchableOpacity>
+          )}
+        </View>
       </View>
 
       {/* Vehicle List */}
@@ -598,6 +750,13 @@ export const AdminVehiclesScreen: React.FC<{ navigation: any }> = ({ navigation 
                     <View style={{ flex: 1 }}>
                       <Text style={styles.lorryNumber}>{v.lorry_number}</Text>
                       <Text style={styles.vehicleType}>{v.vehicle_type || '—'} {v.capacity_tons ? `· ${v.capacity_tons}T` : ''}</Text>
+                      {v.owner_name ? (
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 2 }}>
+                          <Building size={10} color="#7c3aed" />
+                          <Text style={{ fontSize: 11, color: '#7c3aed', fontWeight: '700' }}>{v.owner_name}</Text>
+                          {v.owner_mobile ? <Text style={{ fontSize: 10, color: COLORS.textMuted }}>({v.owner_mobile})</Text> : null}
+                        </View>
+                      ) : null}
                     </View>
                   </View>
                   <View style={styles.cardRight}>
@@ -681,6 +840,41 @@ export const AdminVehiclesScreen: React.FC<{ navigation: any }> = ({ navigation 
                 <View>
                   <Label text="Truck / Lorry Number *" />
                   <TextInput style={styles.input} value={formData.lorry_number} onChangeText={v => setField('lorry_number', v.toUpperCase())} placeholder="e.g. TN 33 AE 1357" placeholderTextColor={COLORS.textMuted} autoCapitalize="characters" />
+
+                  <Label text="Truck Owner" />
+                  <View style={[styles.dropdown, { paddingVertical: 0 }]}>
+                    <Building size={14} color="#7c3aed" style={{ marginRight: 6 }} />
+                    {/* Native picker equivalent using ScrollView items */}
+                    <TouchableOpacity
+                      style={{ flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 10 }}
+                      onPress={() => setShowOwnerDropdown(!showOwnerDropdown)}
+                    >
+                      <Text style={[styles.dropdownVal, { color: formData.owner_id ? COLORS.text : COLORS.textMuted }]}>
+                        {formData.owner_id ? owners.find(o => String(o.id) === formData.owner_id)?.name || 'Select Owner' : 'No Owner / Direct'}
+                      </Text>
+                      <ChevronDown size={16} color={COLORS.textMuted} />
+                    </TouchableOpacity>
+                  </View>
+                  {showOwnerDropdown && (
+                    <View style={styles.dropdownMenu}>
+                      <TouchableOpacity
+                        style={[styles.dropdownItem, !formData.owner_id && styles.dropdownItemActive]}
+                        onPress={() => { setField('owner_id', ''); setShowOwnerDropdown(false); }}
+                      >
+                        <Text style={[styles.dropdownItemTxt, !formData.owner_id && { color: COLORS.accent, fontWeight: '700' }]}>No Owner / Direct</Text>
+                      </TouchableOpacity>
+                      {owners.map(o => (
+                        <TouchableOpacity
+                          key={o.id}
+                          style={[styles.dropdownItem, formData.owner_id === String(o.id) && styles.dropdownItemActive]}
+                          onPress={() => { setField('owner_id', String(o.id)); setShowOwnerDropdown(false); }}
+                        >
+                          <Text style={[styles.dropdownItemTxt, formData.owner_id === String(o.id) && { color: COLORS.accent, fontWeight: '700' }]}>{o.name}</Text>
+                          {o.mobile_number ? <Text style={{ fontSize: 11, color: COLORS.textMuted, marginTop: 1 }}>{o.mobile_number}</Text> : null}
+                        </TouchableOpacity>
+                      ))}
+                    </View>
+                  )}
 
                   <Label text="Vehicle Type" />
                   <TouchableOpacity style={styles.dropdown} onPress={() => setShowVehicleTypeDropdown(!showVehicleTypeDropdown)}>
@@ -830,6 +1024,88 @@ export const AdminVehiclesScreen: React.FC<{ navigation: any }> = ({ navigation 
           </View>
         </View>
       </Modal>
+
+      {/* Modal Bottom Sheet for Owner Filter Picker */}
+      <Modal
+        visible={isOwnerFilterModalOpen}
+        animationType="slide"
+        transparent={true}
+        onRequestClose={() => {
+          setIsOwnerFilterModalOpen(false);
+          setOwnerFilterSearch('');
+        }}
+      >
+        <TouchableOpacity
+          style={styles.pickerOverlay}
+          activeOpacity={1}
+          onPress={() => {
+            setIsOwnerFilterModalOpen(false);
+            setOwnerFilterSearch('');
+          }}
+        >
+          <View
+            style={styles.pickerContent}
+            onStartShouldSetResponder={() => true}
+          >
+            <View style={styles.pickerHeader}>
+              <Text style={styles.pickerTitle}>Select Truck Owner</Text>
+              <TouchableOpacity onPress={() => { setIsOwnerFilterModalOpen(false); setOwnerFilterSearch(''); }}>
+                <X size={20} color={COLORS.text} />
+              </TouchableOpacity>
+            </View>
+
+            {owners.length > 4 && (
+              <View style={styles.pickerSearchBox}>
+                <Search size={14} color={COLORS.textMuted} />
+                <TextInput
+                  style={styles.pickerSearchInput}
+                  placeholder="Search owner or phone..."
+                  placeholderTextColor={COLORS.textMuted}
+                  value={ownerFilterSearch}
+                  onChangeText={setOwnerFilterSearch}
+                  autoCapitalize="none"
+                />
+                {ownerFilterSearch ? (
+                  <TouchableOpacity onPress={() => setOwnerFilterSearch('')}>
+                    <X size={14} color={COLORS.textMuted} />
+                  </TouchableOpacity>
+                ) : null}
+              </View>
+            )}
+
+            <FlatList
+              data={filteredOwnersList}
+              keyExtractor={(item) => String(item.id)}
+              keyboardShouldPersistTaps="handled"
+              renderItem={({ item }) => {
+                const isSelected = (item.id === '' && !ownerFilter) || ownerFilter === item.id;
+                return (
+                  <TouchableOpacity
+                    style={[styles.pickerItem, isSelected && styles.pickerItemSelected]}
+                    onPress={() => {
+                      setOwnerFilter(item.id);
+                      setIsOwnerFilterModalOpen(false);
+                      setOwnerFilterSearch('');
+                    }}
+                  >
+                    <View style={{ flex: 1 }}>
+                      <Text style={[styles.pickerItemText, isSelected && styles.pickerItemTextSelected]}>
+                        {item.name}
+                      </Text>
+                      {item.mobile_number ? (
+                        <Text style={{ fontSize: 11, color: COLORS.textMuted, marginTop: 2 }}>
+                          📞 {item.mobile_number}
+                        </Text>
+                      ) : null}
+                    </View>
+                    {isSelected && <Check size={18} color={COLORS.accentDark} />}
+                  </TouchableOpacity>
+                );
+              }}
+            />
+          </View>
+        </TouchableOpacity>
+      </Modal>
     </View>
   );
 };
@@ -861,7 +1137,7 @@ const styles = StyleSheet.create({
   pillTxtActive: { color: '#fff', fontWeight: '700' },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 12, padding: 40 },
   centerTxt: { fontSize: 15, color: COLORS.textMuted, fontWeight: '600' },
-  list: { padding: SPACING.md, gap: SPACING.md },
+  list: { padding: SPACING.md, gap: 8 },
   card: { backgroundColor: COLORS.white, borderRadius: RADIUS.lg, padding: SPACING.md, ...SHADOWS.sm },
   cardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 10 },
   cardLeft: { flexDirection: 'row', gap: 10, alignItems: 'flex-start', flex: 1 },
@@ -914,6 +1190,105 @@ const styles = StyleSheet.create({
   nextBtnTxt: { fontSize: 13, fontWeight: '700', color: '#1d4ed8' },
   saveBtn: { paddingHorizontal: 22, paddingVertical: 10, borderRadius: RADIUS.md, backgroundColor: COLORS.accent, alignItems: 'center', justifyContent: 'center', minWidth: 110 },
   saveBtnTxt: { fontSize: 14, fontWeight: '800', color: '#fff' },
+  pdfBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 9,
+    paddingVertical: 7,
+    borderRadius: RADIUS.md,
+  },
+  printBtn: {
+    backgroundColor: '#0284c7',
+  },
+  downloadBtn: {
+    backgroundColor: '#059669',
+  },
+  pdfBtnText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#fff',
+  },
+  clearFiltersBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: '#fef2f2',
+    borderWidth: 1,
+    borderColor: '#fca5a5',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 20,
+  },
+  clearFiltersBtnText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#dc2626',
+  },
+  pickerOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'flex-end',
+  },
+  pickerContent: {
+    backgroundColor: COLORS.white,
+    borderTopLeftRadius: RADIUS.xl,
+    borderTopRightRadius: RADIUS.xl,
+    padding: SPACING.md,
+    maxHeight: '75%',
+  },
+  pickerHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: SPACING.md,
+    paddingBottom: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.border,
+  },
+  pickerTitle: {
+    fontSize: 16,
+    fontWeight: '800',
+    color: COLORS.text,
+  },
+  pickerItem: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 14,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f1f5f9',
+  },
+  pickerItemSelected: {
+    backgroundColor: '#fffbeb',
+  },
+  pickerItemText: {
+    fontSize: 14,
+    color: COLORS.text,
+    fontWeight: '600',
+  },
+  pickerItemTextSelected: {
+    color: COLORS.accentDark,
+    fontWeight: '800',
+  },
+  pickerSearchBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: '#f8fafc',
+    borderRadius: RADIUS.md,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+    marginBottom: SPACING.sm,
+  },
+  pickerSearchInput: {
+    flex: 1,
+    fontSize: 13,
+    color: COLORS.text,
+    padding: 0,
+  },
 });
 
 const docSt = StyleSheet.create({

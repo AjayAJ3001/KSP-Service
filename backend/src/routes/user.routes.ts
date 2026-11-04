@@ -3,8 +3,7 @@ import { getUsers, getUserById, createUser, updateUser, updateUserStatus, resetP
 import { authenticate, authorize } from '../middleware/auth';
 
 const router = Router();
-
-router.use(authenticate, authorize('ADMIN'));
+router.use(authenticate, authorize('ADMIN', 'OWNER'));
 
 router.get('/', getUsers);
 router.get('/:id', getUserById);

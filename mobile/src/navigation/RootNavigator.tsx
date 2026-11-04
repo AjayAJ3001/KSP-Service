@@ -20,7 +20,12 @@ import { AdminDriversScreen } from '../screens/admin/AdminDriversScreen';
 import { AdminPartiesScreen } from '../screens/admin/AdminPartiesScreen';
 import { AdminMastersScreen } from '../screens/admin/AdminMastersScreen';
 import { AdminTripsScreen } from '../screens/admin/AdminTripsScreen';
+import { AdminPaymentsScreen } from '../screens/admin/AdminPaymentsScreen';
+import { AdminSettlementsScreen } from '../screens/admin/AdminSettlementsScreen';
 import { AdminOwnerAdvancesScreen } from '../screens/admin/AdminOwnerAdvancesScreen';
+import { AdminManagerLedgerScreen } from '../screens/admin/AdminManagerLedgerScreen';
+import { AdminTruckAdvancesScreen } from '../screens/admin/AdminTruckAdvancesScreen';
+import { AdminDriverBalanceMasterScreen } from '../screens/admin/AdminDriverBalanceMasterScreen';
 
 import { RootStackParamList } from '../types';
 import { COLORS } from '../constants/theme';
@@ -122,7 +127,7 @@ export const RootNavigator: React.FC = () => {
       <Stack.Screen
         name="AdminMasters"
         component={AdminMastersScreen}
-        options={{ title: 'Rates & Masters Hub' }}
+        options={{ title: 'Master Settings' }}
       />
       <Stack.Screen
         name="AdminTrips"
@@ -130,9 +135,39 @@ export const RootNavigator: React.FC = () => {
         options={{ title: 'Trips Operations' }}
       />
       <Stack.Screen
+        name="AdminPayments"
+        component={AdminPaymentsScreen}
+        options={{ title: 'Party Payments' }}
+      />
+      <Stack.Screen
+        name="AdminSettlements"
+        component={AdminSettlementsScreen}
+        options={{ title: 'Settlements Master' }}
+      />
+      <Stack.Screen
         name="AdminOwnerAdvances"
         component={AdminOwnerAdvancesScreen}
-        options={{ title: 'Advance to Manager' }}
+        options={{ title: 'Owner Advances' }}
+      />
+      <Stack.Screen
+        name="AdminManagerLedger"
+        component={AdminManagerLedgerScreen}
+        options={{ title: 'Manager Advances' }}
+      />
+      <Stack.Screen
+        name="AdminTruckAdvances"
+        component={AdminTruckAdvancesScreen}
+        options={{ title: 'Truck Advances Master' }}
+      />
+      <Stack.Screen
+        name="AdminDriverAdvances"
+        component={AdminDriverBalanceMasterScreen}
+        options={{ title: 'Driver Balance Master' }}
+      />
+      <Stack.Screen
+        name="AdminDriverBalanceMaster"
+        component={AdminDriverBalanceMasterScreen}
+        options={{ title: 'Driver Balance Master' }}
       />
     </Stack.Navigator>
   );

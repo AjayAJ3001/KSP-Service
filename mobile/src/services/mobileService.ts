@@ -72,7 +72,7 @@ export const mobileLookupService = {
     const res = await api.get('/other-expense-limits/effective', { params: { party_id: partyId } });
     return res.data;
   },
-  getCleaningExpenseRates: async (): Promise<ApiResponse<{ id: number; unit_name: string; cleaning_charge: number; loading_expense?: number; status: string }[]>> => {
+  getCleaningExpenseRates: async (): Promise<ApiResponse<{ id: number; unit_name: string; cleaning_charge: number; loading_expense?: number; status: string; party_id?: number | null; vehicle_id?: number | null; party_name?: string; lorry_number?: string }[]>> => {
     const res = await api.get('/cleaning-expense-rates', { params: { status: 'ACTIVE' } });
     return res.data;
   },
@@ -93,6 +93,10 @@ export const mobileTripService = {
     const res = await api.get(`/trips/${id}`);
     return res.data;
   },
+  parseWeighBill: async (data: { image_base64: string; exclude_trip_id?: number }) => {
+    const res = await api.post('/trips/weigh-bill/parse', data, { timeout: 90000 });
+    return res.data;
+  },
   createTrip: async (data: {
     vehicle_id: number;
     driver_id: number;
@@ -105,6 +109,12 @@ export const mobileTripService = {
     advance_paid?: number;
     trip_date: string;
     cancel_draft_trip_id?: number;
+    weigh_bill_hash?: string;
+    weigh_bill_slip_no?: string | null;
+    weigh_bill_vehicle_no?: string | null;
+    weigh_bill_net_weight?: number | null;
+    weigh_bill_accepted_weight?: number | null;
+    weigh_bill_image?: string | null;
   }): Promise<ApiResponse<Trip>> => {
     const res = await api.post('/trips', data);
     return res.data;
@@ -177,4 +187,65 @@ export const mobileSettlementService = {
     const res = await api.post(`/settlements/trip/${tripId}/generate`);
     return res.data;
   },
+  settlePayment: async (
+    settlementId: number,
+    data: {
+      payment_mode?: string;
+      paid_amount?: number;
+      payment_date?: string;
+      notes?: string;
+      reference_no?: string;
+    }
+  ): Promise<ApiResponse<any>> => {
+    const res = await api.post(`/settlements/${settlementId}/settle`, data);
+    return res.data;
+  },
+  settleDriverBalance: async (
+    driverId: number,
+    data: {
+      payment_mode?: string;
+      paid_amount?: number;
+      payment_date?: string;
+      notes?: string;
+      reference_no?: string;
+    }
+  ): Promise<ApiResponse<any>> => {
+    const res = await api.post(`/settlements/driver/${driverId}/settle`, data);
+    return res.data;
+  },
 };
+
+export const mobileDriverAdvanceService = {
+  // Manager gives cash advance to a driver with no trip / truck required
+  giveAdvance: async (data: {
+    driver_id: number;
+    amount: number;
+    notes?: string;
+    payment_mode?: string;
+  }): Promise<ApiResponse<any>> => {
+    const res = await api.post('/driver-advances', data);
+    return res.data;
+  },
+  getDriverStatement: async (driverId: number): Promise<ApiResponse<{
+    driver: Driver;
+    summary: {
+      total_advance_given: number;
+      total_expenses: number;
+      total_settled_cash_paid: number;
+      balance_in_manager_hand: number;
+      is_deficit: boolean;
+      is_surplus: boolean;
+      is_settled: boolean;
+      deficit_amount: number;
+      surplus_amount: number;
+    };
+    advances: any[];
+    trips_and_expenses: any[];
+    settlement_payments: any[];
+    timeline: any[];
+  }>> => {
+    const res = await api.get(`/driver-advances/driver/${driverId}/statement`);
+    return res.data;
+  },
+};
+

@@ -3,6 +3,7 @@ import { query } from '../config/database';
 import { AppError, asyncHandler } from '../middleware/errorHandler';
 import { AuthRequest } from '../middleware/auth';
 import { createAuditLog } from '../utils/auditLog';
+import { applyOwnerScope, assertOwnerOwner, assertOwnerVehicle, isFleetScoped, isOwnerUser } from '../utils/ownerScope';
 
 // ===== DRIVERS =====
 export const getDrivers = asyncHandler(async (req: AuthRequest, res: Response): Promise<void> => {
@@ -27,6 +28,7 @@ export const getDrivers = asyncHandler(async (req: AuthRequest, res: Response): 
     `SELECT d.*,
             (
               COALESCE((SELECT SUM(da.amount) FROM driver_advances da WHERE da.driver_id = d.id), 0) +
+              COALESCE((SELECT SUM(oa.amount) FROM owner_advances oa WHERE oa.driver_id = d.id), 0) +
               COALESCE((SELECT SUM(ta.amount) FROM truck_advances ta WHERE ta.driver_id = d.id), 0) +
               COALESCE((SELECT SUM(tr.advance_paid) FROM trips tr WHERE tr.driver_id = d.id AND tr.status NOT IN ('CANCELLED', 'DRAFT') AND NOT EXISTS (SELECT 1 FROM truck_advances ta WHERE ta.trip_id = tr.id)), 0) +
               COALESCE((SELECT SUM(dsp.amount) FROM driver_settlement_payments dsp JOIN settlements st ON dsp.settlement_id = st.id JOIN trips tr ON st.trip_id = tr.id WHERE tr.driver_id = d.id), 0)
@@ -40,6 +42,7 @@ export const getDrivers = asyncHandler(async (req: AuthRequest, res: Response): 
             ), 0) as total_expenses_reported,
             GREATEST(0,
               COALESCE((SELECT SUM(da.amount) FROM driver_advances da WHERE da.driver_id = d.id), 0) +
+              COALESCE((SELECT SUM(oa.amount) FROM owner_advances oa WHERE oa.driver_id = d.id), 0) +
               COALESCE((SELECT SUM(ta.amount) FROM truck_advances ta WHERE ta.driver_id = d.id), 0) +
               COALESCE((SELECT SUM(tr.advance_paid) FROM trips tr WHERE tr.driver_id = d.id AND tr.status NOT IN ('CANCELLED', 'DRAFT') AND NOT EXISTS (SELECT 1 FROM truck_advances ta WHERE ta.trip_id = tr.id)), 0) +
               COALESCE((SELECT SUM(dsp.amount) FROM driver_settlement_payments dsp JOIN settlements st ON dsp.settlement_id = st.id JOIN trips tr ON st.trip_id = tr.id WHERE tr.driver_id = d.id), 0) -
@@ -50,7 +53,39 @@ export const getDrivers = asyncHandler(async (req: AuthRequest, res: Response): 
                 FROM trips t LEFT JOIN settlements s ON s.trip_id = t.id
                 WHERE t.driver_id = d.id AND t.status NOT IN ('CANCELLED', 'DRAFT')
               ), 0)
-            ) as remaining_advance_balance
+            ) as remaining_advance_balance,
+            (
+              (
+                COALESCE((SELECT SUM(da.amount) FROM driver_advances da WHERE da.driver_id = d.id), 0) +
+              COALESCE((SELECT SUM(oa.amount) FROM owner_advances oa WHERE oa.driver_id = d.id), 0) +
+                COALESCE((SELECT SUM(ta.amount) FROM truck_advances ta WHERE ta.driver_id = d.id), 0) +
+                COALESCE((SELECT SUM(tr.advance_paid) FROM trips tr WHERE tr.driver_id = d.id AND tr.status NOT IN ('CANCELLED', 'DRAFT') AND NOT EXISTS (SELECT 1 FROM truck_advances ta WHERE ta.trip_id = tr.id)), 0) +
+                COALESCE((SELECT SUM(dsp.amount) FROM driver_settlement_payments dsp JOIN settlements st ON dsp.settlement_id = st.id JOIN trips tr ON st.trip_id = tr.id WHERE tr.driver_id = d.id), 0)
+              ) -
+              COALESCE((
+                SELECT SUM(
+                  COALESCE(s.total_expenses, (SELECT SUM(de.amount) FROM driver_expenses de WHERE de.trip_id = t.id), 0)
+                )
+                FROM trips t LEFT JOIN settlements s ON s.trip_id = t.id
+                WHERE t.driver_id = d.id AND t.status NOT IN ('CANCELLED', 'DRAFT')
+              ), 0)
+            ) as driver_balance,
+            GREATEST(0,
+              COALESCE((
+                SELECT SUM(
+                  COALESCE(s.total_expenses, (SELECT SUM(de.amount) FROM driver_expenses de WHERE de.trip_id = t.id), 0)
+                )
+                FROM trips t LEFT JOIN settlements s ON s.trip_id = t.id
+                WHERE t.driver_id = d.id AND t.status NOT IN ('CANCELLED', 'DRAFT')
+              ), 0) -
+              (
+                COALESCE((SELECT SUM(da.amount) FROM driver_advances da WHERE da.driver_id = d.id), 0) +
+              COALESCE((SELECT SUM(oa.amount) FROM owner_advances oa WHERE oa.driver_id = d.id), 0) +
+                COALESCE((SELECT SUM(ta.amount) FROM truck_advances ta WHERE ta.driver_id = d.id), 0) +
+                COALESCE((SELECT SUM(tr.advance_paid) FROM trips tr WHERE tr.driver_id = d.id AND tr.status NOT IN ('CANCELLED', 'DRAFT') AND NOT EXISTS (SELECT 1 FROM truck_advances ta WHERE ta.trip_id = tr.id)), 0) +
+                COALESCE((SELECT SUM(dsp.amount) FROM driver_settlement_payments dsp JOIN settlements st ON dsp.settlement_id = st.id JOIN trips tr ON st.trip_id = tr.id WHERE tr.driver_id = d.id), 0)
+              )
+            ) as pending_owed_to_driver
      FROM drivers d WHERE ${where} ORDER BY name ASC LIMIT $${paramIdx} OFFSET $${paramIdx + 1}`,
     [...params, limit, offset]
   );
@@ -63,6 +98,7 @@ export const getDriverById = asyncHandler(async (req: AuthRequest, res: Response
     `SELECT d.*,
             (
               COALESCE((SELECT SUM(da.amount) FROM driver_advances da WHERE da.driver_id = d.id), 0) +
+              COALESCE((SELECT SUM(oa.amount) FROM owner_advances oa WHERE oa.driver_id = d.id), 0) +
               COALESCE((SELECT SUM(ta.amount) FROM truck_advances ta WHERE ta.driver_id = d.id), 0) +
               COALESCE((SELECT SUM(tr.advance_paid) FROM trips tr WHERE tr.driver_id = d.id AND tr.status NOT IN ('CANCELLED', 'DRAFT') AND NOT EXISTS (SELECT 1 FROM truck_advances ta WHERE ta.trip_id = tr.id)), 0) +
               COALESCE((SELECT SUM(dsp.amount) FROM driver_settlement_payments dsp JOIN settlements st ON dsp.settlement_id = st.id JOIN trips tr ON st.trip_id = tr.id WHERE tr.driver_id = d.id), 0)
@@ -76,6 +112,7 @@ export const getDriverById = asyncHandler(async (req: AuthRequest, res: Response
             ), 0) as total_expenses_reported,
             GREATEST(0,
               COALESCE((SELECT SUM(da.amount) FROM driver_advances da WHERE da.driver_id = d.id), 0) +
+              COALESCE((SELECT SUM(oa.amount) FROM owner_advances oa WHERE oa.driver_id = d.id), 0) +
               COALESCE((SELECT SUM(ta.amount) FROM truck_advances ta WHERE ta.driver_id = d.id), 0) +
               COALESCE((SELECT SUM(tr.advance_paid) FROM trips tr WHERE tr.driver_id = d.id AND tr.status NOT IN ('CANCELLED', 'DRAFT') AND NOT EXISTS (SELECT 1 FROM truck_advances ta WHERE ta.trip_id = tr.id)), 0) +
               COALESCE((SELECT SUM(dsp.amount) FROM driver_settlement_payments dsp JOIN settlements st ON dsp.settlement_id = st.id JOIN trips tr ON st.trip_id = tr.id WHERE tr.driver_id = d.id), 0) -
@@ -86,7 +123,39 @@ export const getDriverById = asyncHandler(async (req: AuthRequest, res: Response
                 FROM trips t LEFT JOIN settlements s ON s.trip_id = t.id
                 WHERE t.driver_id = d.id AND t.status NOT IN ('CANCELLED', 'DRAFT')
               ), 0)
-            ) as remaining_advance_balance
+            ) as remaining_advance_balance,
+            (
+              (
+                COALESCE((SELECT SUM(da.amount) FROM driver_advances da WHERE da.driver_id = d.id), 0) +
+              COALESCE((SELECT SUM(oa.amount) FROM owner_advances oa WHERE oa.driver_id = d.id), 0) +
+                COALESCE((SELECT SUM(ta.amount) FROM truck_advances ta WHERE ta.driver_id = d.id), 0) +
+                COALESCE((SELECT SUM(tr.advance_paid) FROM trips tr WHERE tr.driver_id = d.id AND tr.status NOT IN ('CANCELLED', 'DRAFT') AND NOT EXISTS (SELECT 1 FROM truck_advances ta WHERE ta.trip_id = tr.id)), 0) +
+                COALESCE((SELECT SUM(dsp.amount) FROM driver_settlement_payments dsp JOIN settlements st ON dsp.settlement_id = st.id JOIN trips tr ON st.trip_id = tr.id WHERE tr.driver_id = d.id), 0)
+              ) -
+              COALESCE((
+                SELECT SUM(
+                  COALESCE(s.total_expenses, (SELECT SUM(de.amount) FROM driver_expenses de WHERE de.trip_id = t.id), 0)
+                )
+                FROM trips t LEFT JOIN settlements s ON s.trip_id = t.id
+                WHERE t.driver_id = d.id AND t.status NOT IN ('CANCELLED', 'DRAFT')
+              ), 0)
+            ) as driver_balance,
+            GREATEST(0,
+              COALESCE((
+                SELECT SUM(
+                  COALESCE(s.total_expenses, (SELECT SUM(de.amount) FROM driver_expenses de WHERE de.trip_id = t.id), 0)
+                )
+                FROM trips t LEFT JOIN settlements s ON s.trip_id = t.id
+                WHERE t.driver_id = d.id AND t.status NOT IN ('CANCELLED', 'DRAFT')
+              ), 0) -
+              (
+                COALESCE((SELECT SUM(da.amount) FROM driver_advances da WHERE da.driver_id = d.id), 0) +
+              COALESCE((SELECT SUM(oa.amount) FROM owner_advances oa WHERE oa.driver_id = d.id), 0) +
+                COALESCE((SELECT SUM(ta.amount) FROM truck_advances ta WHERE ta.driver_id = d.id), 0) +
+                COALESCE((SELECT SUM(tr.advance_paid) FROM trips tr WHERE tr.driver_id = d.id AND tr.status NOT IN ('CANCELLED', 'DRAFT') AND NOT EXISTS (SELECT 1 FROM truck_advances ta WHERE ta.trip_id = tr.id)), 0) +
+                COALESCE((SELECT SUM(dsp.amount) FROM driver_settlement_payments dsp JOIN settlements st ON dsp.settlement_id = st.id JOIN trips tr ON st.trip_id = tr.id WHERE tr.driver_id = d.id), 0)
+              )
+            ) as pending_owed_to_driver
      FROM drivers d WHERE id = $1`,
     [req.params.id]
   );
@@ -184,20 +253,26 @@ export const getVehicles = asyncHandler(async (req: AuthRequest, res: Response):
   const offset = (page - 1) * limit;
   const search = req.query.search as string;
   const status = req.query.status as string;
+  const owner_id = req.query.owner_id as string;
 
   let conditions = ['1=1'];
   const params: any[] = [];
   let paramIdx = 1;
 
-  if (search) { conditions.push(`(lorry_number ILIKE $${paramIdx} OR vehicle_type ILIKE $${paramIdx})`); params.push(`%${search}%`); paramIdx++; }
-  if (status) { conditions.push(`status = $${paramIdx}`); params.push(status); paramIdx++; }
+  if (search) { conditions.push(`(v.lorry_number ILIKE $${paramIdx} OR v.vehicle_type ILIKE $${paramIdx} OR o.name ILIKE $${paramIdx})`); params.push(`%${search}%`); paramIdx++; }
+  if (status) { conditions.push(`v.status = $${paramIdx}`); params.push(status); paramIdx++; }
+  if (owner_id) { conditions.push(`v.owner_id = $${paramIdx}`); params.push(parseInt(owner_id)); paramIdx++; }
+  paramIdx = applyOwnerScope(req, conditions, params, paramIdx, 'v.owner_id');
 
   const where = conditions.join(' AND ');
-  const countResult = await query(`SELECT COUNT(*) FROM vehicles WHERE ${where}`, params);
+  const countResult = await query(`SELECT COUNT(*) FROM vehicles v LEFT JOIN owners o ON v.owner_id = o.id WHERE ${where}`, params);
   const total = parseInt(countResult.rows[0].count);
 
   const result = await query(
-    `SELECT * FROM vehicles WHERE ${where} ORDER BY lorry_number ASC LIMIT $${paramIdx} OFFSET $${paramIdx + 1}`,
+    `SELECT v.*, o.id as owner_id, o.name as owner_name, o.mobile_number as owner_mobile
+     FROM vehicles v
+     LEFT JOIN owners o ON v.owner_id = o.id
+     WHERE ${where} ORDER BY v.lorry_number ASC LIMIT $${paramIdx} OFFSET $${paramIdx + 1}`,
     [...params, limit, offset]
   );
 
@@ -205,8 +280,13 @@ export const getVehicles = asyncHandler(async (req: AuthRequest, res: Response):
 });
 
 export const getVehicleById = asyncHandler(async (req: AuthRequest, res: Response): Promise<void> => {
-  const result = await query('SELECT * FROM vehicles WHERE id = $1', [req.params.id]);
+  const result = await query(
+    `SELECT v.*, o.id as owner_id, o.name as owner_name, o.mobile_number as owner_mobile
+     FROM vehicles v LEFT JOIN owners o ON v.owner_id = o.id WHERE v.id = $1`,
+    [req.params.id]
+  );
   if (result.rows.length === 0) throw new AppError('Vehicle not found.', 404);
+  assertOwnerVehicle(req, result.rows[0].id);
   res.json({ success: true, message: 'Vehicle retrieved.', data: result.rows[0] });
 });
 
@@ -228,6 +308,7 @@ export const getExpiringVehicles = asyncHandler(async (req: AuthRequest, res: Re
        COALESCE(rc_reg_date, rc_expiry_date) as rc_reg_date
      FROM vehicles
      WHERE status = 'ACTIVE'
+       ${isFleetScoped(req) && req.user?.vehicleIds?.length ? `AND id = ANY($1::int[])` : isFleetScoped(req) ? 'AND FALSE' : ''}
        AND (
          (COALESCE(tds_expiry_date, dts_expiry_date) IS NOT NULL AND COALESCE(tds_expiry_date, dts_expiry_date) <= CURRENT_DATE + (${interval})::INTERVAL)
          OR (insurance_expiry_date IS NOT NULL AND insurance_expiry_date <= CURRENT_DATE + (${interval})::INTERVAL)
@@ -242,7 +323,7 @@ export const getExpiringVehicles = asyncHandler(async (req: AuthRequest, res: Re
        COALESCE(fc_expiry_date, 'infinity'::date),
        COALESCE(tax_expiry_date, 'infinity'::date)
      ) ASC`,
-    []
+    isFleetScoped(req) && req.user?.vehicleIds?.length ? [req.user.vehicleIds] : []
   );
   res.json({ success: true, message: 'Expiring vehicles retrieved.', data: result.rows });
 });
@@ -276,8 +357,13 @@ export const createVehicle = asyncHandler(async (req: AuthRequest, res: Response
     permit_number, permit_expiry_date, permit_photo_url,
     fc_number, fc_expiry_date, fc_photo_url,
     tax_expiry_date, tax_photo_url,
+    owner_id,
   } = req.body;
   if (!lorry_number) throw new AppError('Lorry number is required.', 400);
+  if (isOwnerUser(req)) {
+    if (!owner_id) throw new AppError('Owner is required.', 400);
+    assertOwnerOwner(req, owner_id);
+  }
 
   const existing = await query('SELECT id FROM vehicles WHERE UPPER(REPLACE(lorry_number, \' \', \'\')) = UPPER(REPLACE($1, \' \', \'\'))', [lorry_number.trim()]);
   if (existing.rows.length > 0) throw new AppError('Vehicle with this lorry number already exists.', 409);
@@ -301,7 +387,7 @@ export const createVehicle = asyncHandler(async (req: AuthRequest, res: Response
       permit_number, permit_expiry_date, permit_photo_url,
       fc_number, fc_expiry_date, fc_photo_url,
       tax_expiry_date, tax_photo_url,
-      rc_reg_date, rc_expiry_date
+      rc_reg_date, rc_expiry_date, owner_id
     ) VALUES (
       $1, $2, $3, $4, $5,
       $6, $7, $8,
@@ -313,7 +399,7 @@ export const createVehicle = asyncHandler(async (req: AuthRequest, res: Response
       $26, $27, $28,
       $29, $30, $31,
       $32, $33,
-      $34, $35
+      $34, $35, $36
     ) RETURNING *`,
     [
       lorry_number.trim().toUpperCase(),
@@ -351,6 +437,7 @@ export const createVehicle = asyncHandler(async (req: AuthRequest, res: Response
       tax_photo_url || null,
       rc_reg_date,
       rc_reg_date,
+      owner_id ? parseInt(owner_id) : null,
     ]
   );
 
@@ -359,6 +446,7 @@ export const createVehicle = asyncHandler(async (req: AuthRequest, res: Response
 });
 
 export const updateVehicle = asyncHandler(async (req: AuthRequest, res: Response): Promise<void> => {
+  assertOwnerVehicle(req, req.params.id);
   const {
     lorry_number, truck_image_url, vehicle_type, capacity_tons, goodshed_loading_expense,
     rc_number, rc_photo_url, rc_photo_back_url,
@@ -368,6 +456,7 @@ export const updateVehicle = asyncHandler(async (req: AuthRequest, res: Response
     permit_number, permit_expiry_date, permit_photo_url,
     fc_number, fc_expiry_date, fc_photo_url,
     tax_expiry_date, tax_photo_url,
+    owner_id,
   } = req.body;
 
   const rc_reg_date = req.body.rc_reg_date !== undefined ? req.body.rc_reg_date : (req.body.rc_expiry_date !== undefined ? req.body.rc_expiry_date : undefined);
@@ -414,6 +503,7 @@ export const updateVehicle = asyncHandler(async (req: AuthRequest, res: Response
       rc_reg_date = COALESCE($29, rc_reg_date),
       rc_expiry_date = COALESCE($29, rc_expiry_date),
       truck_image_url = CASE WHEN $31 = true THEN $32 ELSE truck_image_url END,
+      owner_id = CASE WHEN $34 THEN $35 ELSE owner_id END,
       updated_at = NOW()
      WHERE id = $30 RETURNING *`,
     [
@@ -450,6 +540,8 @@ export const updateVehicle = asyncHandler(async (req: AuthRequest, res: Response
       truck_image_url !== undefined,
       truck_image_url || null,
       tds_certificate_url_2 !== undefined ? tds_certificate_url_2 : null,
+      owner_id !== undefined,  // $34: whether to update owner_id
+      owner_id !== undefined ? (owner_id ? parseInt(owner_id) : null) : null,  // $35: new owner_id value
     ]
   );
   if (result.rows.length === 0) throw new AppError('Vehicle not found.', 404);
@@ -458,6 +550,7 @@ export const updateVehicle = asyncHandler(async (req: AuthRequest, res: Response
 });
 
 export const updateVehicleStatus = asyncHandler(async (req: AuthRequest, res: Response): Promise<void> => {
+  assertOwnerVehicle(req, req.params.id);
   const { status } = req.body;
   if (!['ACTIVE', 'INACTIVE'].includes(status)) throw new AppError('Invalid status.', 400);
   const result = await query(`UPDATE vehicles SET status = $1, updated_at = NOW() WHERE id = $2 RETURNING *`, [status, req.params.id]);
@@ -554,6 +647,7 @@ export const deleteDriver = asyncHandler(async (req: AuthRequest, res: Response)
 });
 
 export const deleteVehicle = asyncHandler(async (req: AuthRequest, res: Response): Promise<void> => {
+  assertOwnerVehicle(req, req.params.id);
   const { id } = req.params;
   const existing = await query('SELECT id, lorry_number FROM vehicles WHERE id = $1', [id]);
   if (existing.rows.length === 0) throw new AppError('Vehicle not found.', 404);

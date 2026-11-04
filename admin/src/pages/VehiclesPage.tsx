@@ -5,8 +5,8 @@ import {
   FileText, Shield, CreditCard, Building, Hash, Calendar,
   Loader2, Sparkles, AlertTriangle, Share2, Printer
 } from 'lucide-react';
-import { vehicleService } from '../services/adminService';
-import { Vehicle } from '../types';
+import { vehicleService, ownerService } from '../services/adminService';
+import { Vehicle, Owner } from '../types';
 import { DataTable, Column } from '../components/Common/DataTable';
 import { Modal } from '../components/Common/Modal';
 import { extractTextFromFileOrData } from '../utils/fileExtraction';
@@ -26,6 +26,7 @@ import {
 import { formatDateDMY } from '../utils/dateUtils';
 import { DateField } from '../components/Common/DateField';
 import * as XLSX from 'xlsx';
+import { PRINT_BRAND_CSS, printBrandLockup } from '../utils/printBrand';
 
 const readAsBase64 = (file: File): Promise<string> =>
   new Promise((res, rej) => {
@@ -439,7 +440,7 @@ const VehicleDetailPanel: React.FC<VehicleDetailPanelProps> = ({ vehicle: v, onE
       <!-- HEADER -->
       <div class="pdf-block" style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px">
         <div>
-          <h2>KSP TRANSPORT SERVICES</h2>
+          ${printBrandLockup('Official Fleet Truck Master')}
           <div class="subtitle">Official Fleet Truck Master &amp; Verification Record</div>
         </div>
         <div style="text-align:right;border:1.5px solid #1d4ed8;border-radius:6px;padding:8px 16px;min-width:160px">
@@ -457,6 +458,7 @@ const VehicleDetailPanel: React.FC<VehicleDetailPanelProps> = ({ vehicle: v, onE
         <div class="section-title">1. Vehicle Specifications</div>
         <table style="margin-bottom:4px">
           <tr>${cell('Lorry / Truck No', num)}${cell('Vehicle Type', v.vehicle_type || '\u2014')}</tr>
+          <tr>${cell('Truck Owner', v.owner_name || '\u2014')}${cell('Owner Mobile', v.owner_mobile || '\u2014')}</tr>
           <tr>${cell('RC / Reg No', v.rc_number || '\u2014')}${cell('RC Registration Date', fmtD(rcRegDate) || '\u2014')}</tr>
           <tr>${cellFull('Status', `<span style="color:${v.status === 'ACTIVE' ? '#16a34a' : '#dc2626'};font-weight:800">${v.status}</span>`)}</tr>
         </table>
@@ -530,6 +532,7 @@ const VehicleDetailPanel: React.FC<VehicleDetailPanelProps> = ({ vehicle: v, onE
     const html = `<!DOCTYPE html><html><head>
       <title>KSP Transport — ${num}</title>
       <style>
+    ${PRINT_BRAND_CSS}
         *{box-sizing:border-box;margin:0;padding:0}
         body{font-family:'Segoe UI',Arial,sans-serif;color:#1e293b;background:#fff;padding:28px 32px;font-size:11px}
         h2{font-size:16px;font-weight:900;color:#1d4ed8;margin-bottom:2px;letter-spacing:0.5px}
@@ -582,6 +585,7 @@ const VehicleDetailPanel: React.FC<VehicleDetailPanelProps> = ({ vehicle: v, onE
       `;
       container.innerHTML = `
         <style>
+    ${PRINT_BRAND_CSS}
           *{box-sizing:border-box;margin:0;padding:0}
           body,div,table{font-family:'Segoe UI',Arial,sans-serif;color:#1e293b;font-size:11px}
           h2{font-size:16px;font-weight:900;color:#1d4ed8;margin-bottom:2px}
@@ -768,6 +772,25 @@ const VehicleDetailPanel: React.FC<VehicleDetailPanelProps> = ({ vehicle: v, onE
             </div>
             {v.vehicle_type && (
               <div style={{ fontSize: '12px', color: 'rgba(255,255,255,0.8)', marginTop: '2px' }}>{v.vehicle_type}</div>
+            )}
+            {v.owner_name && (
+              <div style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '6px',
+                marginTop: '6px',
+                padding: '3px 10px',
+                borderRadius: '6px',
+                background: 'rgba(255,255,255,0.2)',
+                backdropFilter: 'blur(4px)',
+                fontSize: '12px',
+                fontWeight: 700,
+                color: '#ffffff',
+                border: '1px solid rgba(255,255,255,0.3)',
+              }}>
+                <span>Owner: <strong>{v.owner_name}</strong></span>
+                {v.owner_mobile && <span style={{ opacity: 0.85, fontSize: '11px' }}>({v.owner_mobile})</span>}
+              </div>
             )}
           </div>
         </div>
@@ -1014,6 +1037,8 @@ export const VehiclesPage: React.FC = () => {
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
+  const [ownerFilter, setOwnerFilter] = useState<string>('');
+  const [ownersList, setOwnersList] = useState<Owner[]>([]);
   const [isPrintingList, setIsPrintingList] = useState(false);
   const [isExportingList, setIsExportingList] = useState(false);
 
@@ -1034,6 +1059,7 @@ export const VehiclesPage: React.FC = () => {
   // Form state — all vehicle document fields
   const emptyForm = () => ({
     lorry_number: '',
+    owner_id: '' as string,
     vehicle_type: '',
     capacity_tons: '',
     goodshed_loading_expense: '',
@@ -1096,14 +1122,22 @@ export const VehiclesPage: React.FC = () => {
     } catch { /* silent */ }
   };
 
+  const loadOwners = async () => {
+    try {
+      const res = await ownerService.getOwners({ limit: 100 });
+      if (res.data?.items) setOwnersList(res.data.items);
+    } catch { /* silent */ }
+  };
+
   useEffect(() => {
     loadAllVehiclesLookup();
+    loadOwners();
   }, []);
 
   useEffect(() => {
     loadVehicles();
     checkExpiringFleet();
-  }, [page, search, statusFilter]);
+  }, [page, search, statusFilter, ownerFilter]);
 
   const checkExpiringFleet = async () => {
     try {
@@ -1117,7 +1151,12 @@ export const VehiclesPage: React.FC = () => {
   const handlePrintVehicles = async () => {
     try {
       setIsPrintingList(true);
-      const res = await vehicleService.getVehicles({ limit: 10000, search: search || undefined, status: statusFilter || undefined });
+      const res = await vehicleService.getVehicles({
+        limit: 10000,
+        search: search || undefined,
+        status: statusFilter || undefined,
+        owner_id: ownerFilter || undefined,
+      });
       const items: Vehicle[] = res?.data?.items || [];
       if (items.length === 0) {
         alert('No vehicle records found to print.');
@@ -1138,6 +1177,7 @@ export const VehiclesPage: React.FC = () => {
 
       const fullyCompliant = items.filter(v => hasRC(v) && hasFC(v) && hasTax(v) && hasTDS(v) && hasIns(v) && hasPermit(v)).length;
       const generatedAt = new Date().toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' });
+      const selectedOwnerName = ownerFilter ? (ownersList.find(o => String(o.id) === String(ownerFilter))?.name || ownerFilter) : '';
 
       const printHtml = `
 <!DOCTYPE html>
@@ -1146,10 +1186,11 @@ export const VehiclesPage: React.FC = () => {
   <meta charset="utf-8" />
   <title>KSP Transport - Truck Master Compliance Directory</title>
   <style>
+    ${PRINT_BRAND_CSS}
     * { box-sizing: border-box; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
     body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif; margin: 0; padding: 20px; color: #1e293b; background: #fff; font-size: 12px; }
     @page { size: landscape; margin: 10mm; }
-    .header-bar { display: flex; justify-content: space-between; align-items: flex-start; padding-bottom: 14px; border-bottom: 2px solid #0f172a; margin-bottom: 14px; }
+    .header-bar { display: flex; justify-content: space-between; align-items: center; padding-bottom: 10px; border-bottom: 3px solid #0f172a; margin-bottom: 14px; }
     .company-title { font-size: 20px; font-weight: 800; color: #0f172a; letter-spacing: 0.5px; margin: 0 0 4px 0; }
     .report-subtitle { font-size: 13px; font-weight: 700; color: #2563eb; margin: 0 0 4px 0; text-transform: uppercase; letter-spacing: 0.5px; }
     .meta-text { font-size: 11px; color: #64748b; margin: 0; }
@@ -1183,13 +1224,14 @@ export const VehiclesPage: React.FC = () => {
 
   <div class="header-bar">
     <div>
-      <h1 class="company-title">KSP TRANSPORT</h1>
+      ${printBrandLockup()}
       <div class="report-subtitle">Truck Master Compliance Directory</div>
       <p class="meta-text">Vehicle fleet inventory with document compliance status (RC, FC, Tax, TDS, Insurance, Permit)</p>
     </div>
     <div style="text-align: right;">
       <p class="meta-text"><strong>Generated On:</strong> ${generatedAt}</p>
       <p class="meta-text"><strong>Total Trucks:</strong> ${totalCount}</p>
+      ${selectedOwnerName ? `<p class="meta-text"><strong>Truck Owner:</strong> ${selectedOwnerName}</p>` : ''}
       ${statusFilter ? `<p class="meta-text"><strong>Status:</strong> ${statusFilter}</p>` : ''}
       ${search ? `<p class="meta-text"><strong>Filter:</strong> ${search}</p>` : ''}
     </div>
@@ -1207,6 +1249,7 @@ export const VehiclesPage: React.FC = () => {
       <tr>
         <th style="width: 45px;" class="center">S.No</th>
         <th>Truck / Lorry Number</th>
+        <th>Truck Owner</th>
         <th>Type</th>
         <th class="center">RC</th>
         <th class="center">FC (Fitness)</th>
@@ -1222,6 +1265,7 @@ export const VehiclesPage: React.FC = () => {
         <tr>
           <td class="center">${idx + 1}</td>
           <td><strong style="color: #1e40af; font-size: 12.5px;">${v.lorry_number}</strong></td>
+          <td>${v.owner_name ? `<strong>${v.owner_name}</strong>${v.owner_mobile ? `<br/><span style="color:#64748b;font-size:10px">${v.owner_mobile}</span>` : ''}` : '—'}</td>
           <td>${v.vehicle_type || '—'}</td>
           <td class="center">
             <span class="badge ${hasRC(v) ? 'badge-yes' : 'badge-no'}">${hasRC(v) ? 'YES' : 'NO'}</span>
@@ -1248,7 +1292,7 @@ export const VehiclesPage: React.FC = () => {
       `).join('')}
       <tr class="footer-row">
         <td class="center" colspan="2">TOTAL FLEET</td>
-        <td colspan="7"><strong>${totalCount} Trucks (${activeCount} Active, ${inactiveCount} Inactive, ${fullyCompliant} Fully Compliant)</strong></td>
+        <td colspan="8"><strong>${totalCount} Trucks (${activeCount} Active, ${inactiveCount} Inactive, ${fullyCompliant} Fully Compliant)</strong></td>
         <td class="center"><strong>${totalCount} Trucks</strong></td>
       </tr>
     </tbody>
@@ -1286,7 +1330,12 @@ export const VehiclesPage: React.FC = () => {
   const handleExportExcel = async () => {
     try {
       setIsExportingList(true);
-      const res = await vehicleService.getVehicles({ limit: 10000, search: search || undefined, status: statusFilter || undefined });
+      const res = await vehicleService.getVehicles({
+        limit: 10000,
+        search: search || undefined,
+        status: statusFilter || undefined,
+        owner_id: ownerFilter || undefined,
+      });
       const items: Vehicle[] = res?.data?.items || [];
       if (items.length === 0) {
         alert('No vehicle records found to export.');
@@ -1304,6 +1353,8 @@ export const VehiclesPage: React.FC = () => {
       const excelRows: any[] = items.map((v, idx) => ({
         'S.No': idx + 1,
         'Truck / Lorry No': v.lorry_number,
+        'Truck Owner': v.owner_name || '—',
+        'Owner Mobile': v.owner_mobile || '—',
         'Vehicle Type': v.vehicle_type || '—',
         'Capacity (Tons)': v.capacity_tons || '—',
         'RC': hasRC(v) ? 'YES' : 'NO',
@@ -1319,6 +1370,8 @@ export const VehiclesPage: React.FC = () => {
       excelRows.push({
         'S.No': '',
         'Truck / Lorry No': '',
+        'Truck Owner': '',
+        'Owner Mobile': '',
         'Vehicle Type': '',
         'Capacity (Tons)': '',
         'RC': '',
@@ -1334,6 +1387,8 @@ export const VehiclesPage: React.FC = () => {
       excelRows.push({
         'S.No': '',
         'Truck / Lorry No': 'TOTAL TRUCKS',
+        'Truck Owner': '',
+        'Owner Mobile': '',
         'Vehicle Type': `Count: ${items.length}`,
         'Capacity (Tons)': `Active: ${items.filter(v => v.status === 'ACTIVE').length}`,
         'RC': '',
@@ -1348,7 +1403,9 @@ export const VehiclesPage: React.FC = () => {
       const worksheet = XLSX.utils.json_to_sheet(excelRows);
       worksheet['!cols'] = [
         { wch: 8 },  // S.No
-        { wch: 22 }, // Lorry No
+        { wch: 20 }, // Lorry No
+        { wch: 22 }, // Truck Owner
+        { wch: 16 }, // Owner Mobile
         { wch: 18 }, // Type
         { wch: 16 }, // Capacity
         { wch: 10 }, // RC
@@ -1381,6 +1438,7 @@ export const VehiclesPage: React.FC = () => {
         limit: 10,
         search: search || undefined,
         status: statusFilter || undefined,
+        owner_id: ownerFilter || undefined,
       });
       setVehicles(res.data.items);
       setTotal(res.data.total);
@@ -1404,6 +1462,7 @@ export const VehiclesPage: React.FC = () => {
     setSelectedVehicle(vehicle);
     setFormData({
       lorry_number: vehicle.lorry_number,
+      owner_id: vehicle.owner_id?.toString() || '',
       vehicle_type: vehicle.vehicle_type || '',
       capacity_tons: vehicle.capacity_tons?.toString() || '',
       goodshed_loading_expense: vehicle.goodshed_loading_expense?.toString() || '',
@@ -1672,6 +1731,7 @@ export const VehiclesPage: React.FC = () => {
       setFormError('');
       const payload: any = {
         lorry_number: formData.lorry_number.trim().toUpperCase(),
+        owner_id: formData.owner_id ? parseInt(formData.owner_id as string) : null,
         vehicle_type: formData.vehicle_type || null,
         capacity_tons: formData.capacity_tons ? parseFloat(formData.capacity_tons) : null,
         goodshed_loading_expense: formData.goodshed_loading_expense ? parseFloat(formData.goodshed_loading_expense) : 0,
@@ -1828,8 +1888,9 @@ export const VehiclesPage: React.FC = () => {
       header: 'Truck / Lorry Number',
       accessor: 'lorry_number',
       render: (v) => (
-        <button
-          onClick={() => setViewVehicle(v)}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+          <button
+            onClick={() => setViewVehicle(v)}
           style={{
             background: 'none',
             border: 'none',
@@ -1847,8 +1908,14 @@ export const VehiclesPage: React.FC = () => {
           title="Click to view all truck documents & compliance details"
         >
           <Truck size={17} color="#2563eb" />
-          <span>{v.lorry_number}</span>
-        </button>
+            <span>{v.lorry_number}</span>
+          </button>
+          {v.owner_name && (
+            <span style={{ fontSize: '11px', color: '#6366f1', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '4px' }}>
+              👤 {v.owner_name}
+            </span>
+          )}
+        </div>
       ),
     },
     {
@@ -1992,6 +2059,18 @@ export const VehiclesPage: React.FC = () => {
       {/* ── Table Card ──────────────────────────────────────────────────── */}
       <div className="card">
         <div className="search-filter-bar" style={{ marginBottom: '18px', display: 'flex', justifyContent: 'flex-start', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
+          {/* Owner Filter */}
+          <select
+            className="form-control form-select"
+            style={{ width: '170px', height: '38px', fontWeight: 600, fontSize: '13px', flexShrink: 0 }}
+            value={ownerFilter}
+            onChange={(e) => { setOwnerFilter(e.target.value); setPage(1); }}
+          >
+            <option value="">All Owners</option>
+            {ownersList.map(o => (
+              <option key={o.id} value={String(o.id)}>{o.name}</option>
+            ))}
+          </select>
           <div style={{ width: '200px', maxWidth: '100%' }}>
             <select
               className="form-control form-select"
@@ -2007,7 +2086,7 @@ export const VehiclesPage: React.FC = () => {
                 .sort((a, b) => a.lorry_number.localeCompare(b.lorry_number))
                 .map((v) => (
                   <option key={v.id} value={v.lorry_number}>
-                    {v.lorry_number}
+                    {v.lorry_number}{v.owner_name ? ` (${v.owner_name})` : ''}
                   </option>
                 ))}
             </select>
@@ -2075,12 +2154,13 @@ export const VehiclesPage: React.FC = () => {
             {isExportingList ? 'Exporting...' : 'Download'}
           </button>
 
-          {(search || statusFilter) && (
+          {(search || statusFilter || ownerFilter) && (
             <button
               type="button"
               onClick={() => {
                 setSearch('');
                 setStatusFilter('');
+                setOwnerFilter('');
                 setPage(1);
               }}
               className="btn btn-outline"
@@ -2169,6 +2249,18 @@ export const VehiclesPage: React.FC = () => {
           {formTab === 0 && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '18px' }}>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px' }}>
+                <div className="form-group" style={{ margin: 0, gridColumn: '1 / -1' }}>
+                  <label className="form-label" style={{ fontWeight: 700, fontSize: '13px' }}>Truck Owner</label>
+                  <select className="form-control"
+                    value={formData.owner_id}
+                    onChange={e => setFormData((p: any) => ({ ...p, owner_id: e.target.value }))}
+                  >
+                    <option value="">— Select Owner (Optional) —</option>
+                    {ownersList.map(o => (
+                      <option key={o.id} value={String(o.id)}>{o.name}</option>
+                    ))}
+                  </select>
+                </div>
                 <div className="form-group" style={{ margin: 0, gridColumn: '1 / -1' }}>
                   <label className="form-label" style={{ fontWeight: 700, fontSize: '13px' }}>Truck / Lorry Number <span style={{ color: '#ef4444' }}>*</span></label>
                   <input type="text" className="form-control"

@@ -1,6 +1,6 @@
 import http from 'http';
 import { execSync } from 'child_process';
-import app from './app';
+import app, { getLanIpv4Addresses } from './app';
 import pool from './config/database';
 
 const PORT = parseInt(process.env.PORT || '5000', 10);
@@ -66,19 +66,30 @@ const startServer = async () => {
       UPDATE vehicles SET rc_reg_date = rc_expiry_date WHERE rc_reg_date IS NULL AND rc_expiry_date IS NOT NULL;
       ALTER TABLE trips DROP CONSTRAINT IF EXISTS trips_status_check;
       ALTER TABLE trips ADD CONSTRAINT trips_status_check CHECK (status IN ('NEW', 'DRAFT', 'PAYMENT_PENDING', 'PARTIALLY_PAID', 'SETTLED', 'CANCELLED'));
+      ALTER TABLE trips
+        ADD COLUMN IF NOT EXISTS weigh_bill_hash VARCHAR(64),
+        ADD COLUMN IF NOT EXISTS weigh_bill_slip_no VARCHAR(80),
+        ADD COLUMN IF NOT EXISTS weigh_bill_vehicle_no VARCHAR(30),
+        ADD COLUMN IF NOT EXISTS weigh_bill_net_weight DECIMAL(12,3),
+        ADD COLUMN IF NOT EXISTS weigh_bill_accepted_weight DECIMAL(12,3),
+        ADD COLUMN IF NOT EXISTS weigh_bill_image TEXT;
     `);
     client.release();
 
     const server = http.createServer(app);
+    server.keepAliveTimeout = 65000;
+    server.headersTimeout = 66000;
 
     server.on('error', (err: any) => {
       console.error('❌ Server error:', err);
     });
 
-    server.listen(PORT, () => {
-      console.log(`🚀 KSP Transport API running on port ${PORT}`);
+    server.listen(PORT, '0.0.0.0', () => {
+      const lanIps = getLanIpv4Addresses();
+      console.log(`🚀 KSP Transport API running on port ${PORT} (0.0.0.0)`);
       console.log(`   Environment: ${process.env.NODE_ENV || 'development'}`);
       console.log(`   Health: http://localhost:${PORT}/health`);
+      lanIps.forEach((ip) => console.log(`   LAN:     http://${ip}:${PORT}/health`));
     });
 
     // Graceful shutdown handling for nodemon and terminal stops

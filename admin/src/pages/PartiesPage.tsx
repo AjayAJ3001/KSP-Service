@@ -20,6 +20,7 @@ import { Party, Route } from '../types';
 import { Modal } from '../components/Common/Modal';
 import { StatusBadge } from '../components/Common/StatusBadge';
 import * as XLSX from 'xlsx';
+import { PRINT_BRAND_CSS, printBrandLockup } from '../utils/printBrand';
 
 export const PartiesPage: React.FC = () => {
   // Parties state
@@ -131,10 +132,11 @@ export const PartiesPage: React.FC = () => {
   <meta charset="utf-8" />
   <title>KSP Transport - Parties & Customers Directory</title>
   <style>
+    ${PRINT_BRAND_CSS}
     * { box-sizing: border-box; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
     body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif; margin: 0; padding: 20px; color: #1e293b; background: #fff; font-size: 12px; }
     @page { size: landscape; margin: 10mm; }
-    .header-bar { display: flex; justify-content: space-between; align-items: flex-start; padding-bottom: 14px; border-bottom: 2px solid #0f172a; margin-bottom: 14px; }
+    .header-bar { display: flex; justify-content: space-between; align-items: center; padding-bottom: 10px; border-bottom: 3px solid #0f172a; margin-bottom: 14px; }
     .company-title { font-size: 20px; font-weight: 800; color: #0f172a; letter-spacing: 0.5px; margin: 0 0 4px 0; }
     .report-subtitle { font-size: 13px; font-weight: 700; color: #2563eb; margin: 0 0 4px 0; text-transform: uppercase; letter-spacing: 0.5px; }
     .meta-text { font-size: 11px; color: #64748b; margin: 0; }
@@ -165,7 +167,7 @@ export const PartiesPage: React.FC = () => {
 
   <div class="header-bar">
     <div>
-      <h1 class="company-title">KSP TRANSPORT</h1>
+      ${printBrandLockup()}
       <div class="report-subtitle">Parties & Customers Master Directory</div>
       <p class="meta-text">Client accounts, contact information, and delivery units</p>
     </div>
@@ -352,10 +354,11 @@ export const PartiesPage: React.FC = () => {
   <meta charset="utf-8" />
   <title>KSP Transport - Delivery Units & Freight Rates</title>
   <style>
+    ${PRINT_BRAND_CSS}
     * { box-sizing: border-box; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
     body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif; margin: 0; padding: 20px; color: #1e293b; background: #fff; font-size: 12px; }
     @page { size: landscape; margin: 10mm; }
-    .header-bar { display: flex; justify-content: space-between; align-items: flex-start; padding-bottom: 14px; border-bottom: 2px solid #0f172a; margin-bottom: 14px; }
+    .header-bar { display: flex; justify-content: space-between; align-items: center; padding-bottom: 10px; border-bottom: 3px solid #0f172a; margin-bottom: 14px; }
     .company-title { font-size: 20px; font-weight: 800; color: #0f172a; letter-spacing: 0.5px; margin: 0 0 4px 0; }
     .report-subtitle { font-size: 13px; font-weight: 700; color: #2563eb; margin: 0 0 4px 0; text-transform: uppercase; letter-spacing: 0.5px; }
     .meta-text { font-size: 11px; color: #64748b; margin: 0; }
@@ -388,7 +391,7 @@ export const PartiesPage: React.FC = () => {
 
   <div class="header-bar">
     <div>
-      <h1 class="company-title">KSP TRANSPORT</h1>
+      ${printBrandLockup()}
       <div class="report-subtitle">Delivery Units & Freight Rate Directory (${partyTitle})</div>
       <p class="meta-text">Destination delivery units, standard routes, distances, and freight charges</p>
     </div>

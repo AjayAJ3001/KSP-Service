@@ -6,8 +6,8 @@ const router = Router();
 router.use(authenticate);
 
 router.get('/', getRoutes);
-router.post('/', authorize('ADMIN'), createRoute);
-router.put('/:id', authorize('ADMIN'), updateRoute);
-router.delete('/:id', authorize('ADMIN'), deleteRoute);
+router.post('/', authorize('ADMIN', 'OWNER'), createRoute);
+router.put('/:id', authorize('ADMIN', 'OWNER'), updateRoute);
+router.delete('/:id', authorize('ADMIN', 'OWNER'), deleteRoute);
 
 export default router;

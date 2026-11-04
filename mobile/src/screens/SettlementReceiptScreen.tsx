@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useLayoutEffect } from 'react';
 import { formatDateDMY } from '../utils/dateUtils';
 import {
   View,
@@ -8,6 +8,7 @@ import {
   TouchableOpacity,
   ActivityIndicator,
   Alert,
+  BackHandler,
 } from 'react-native';
 import {
   Share2,
@@ -20,6 +21,9 @@ import {
   Sparkles,
   Receipt,
   FileText,
+  AlertCircle,
+  CheckCircle2,
+  ArrowLeft,
 } from 'lucide-react-native';
 import { mobileSettlementService, mobileExpenseService } from '../services/mobileService';
 import { Trip, Settlement } from '../types';
@@ -34,9 +38,10 @@ export const SettlementReceiptScreen: React.FC<{ route: any; navigation: any }> 
   route,
   navigation,
 }) => {
-  const { trip, settlement: initialSettlement } = route.params as {
+  const { trip, settlement: initialSettlement, fromGenerate } = route.params as {
     trip: Trip;
     settlement?: Settlement;
+    fromGenerate?: boolean;
   };
 
   const [settlement, setSettlement] = useState<Settlement | null>(initialSettlement || null);
@@ -45,6 +50,33 @@ export const SettlementReceiptScreen: React.FC<{ route: any; navigation: any }> 
   );
   const [isLoading, setIsLoading] = useState(!initialSettlement);
   const [actionLoading, setActionLoading] = useState<'print' | 'share' | 'download' | null>(null);
+
+  const goHome = () => {
+    navigation.reset({
+      index: 0,
+      routes: [{ name: 'MainTabs' }],
+    });
+  };
+
+  useLayoutEffect(() => {
+    if (!fromGenerate) return;
+    navigation.setOptions({
+      headerLeft: () => (
+        <TouchableOpacity onPress={goHome} hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }} style={{ paddingRight: 8 }}>
+          <ArrowLeft size={22} color={COLORS.white} />
+        </TouchableOpacity>
+      ),
+    });
+  }, [fromGenerate, navigation]);
+
+  useEffect(() => {
+    if (!fromGenerate) return;
+    const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+      goHome();
+      return true;
+    });
+    return () => sub.remove();
+  }, [fromGenerate]);
 
   useEffect(() => {
     loadSettlement();
@@ -77,7 +109,7 @@ export const SettlementReceiptScreen: React.FC<{ route: any; navigation: any }> 
 
   const formatCurrency = (val: number | string) => {
     const num = parseFloat(String(val)) || 0;
-    return `₹${num.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    return `₹${Math.round(num).toLocaleString('en-IN')}`;
   };
 
   const getFullSettlement = (): Settlement | null => {
@@ -227,19 +259,29 @@ export const SettlementReceiptScreen: React.FC<{ route: any; navigation: any }> 
 
   const goodsWeight = parseFloat(String(trip.goods_weight || 0));
   const freightRate = parseFloat(String(trip.freight_rate || 0));
-  const totalFreight = parseFloat(String(settlement.total_freight || 0));
-  const totalExpenses = parseFloat(String(settlement.total_expenses || 0));
-  const advancePaid = parseFloat(String(settlement.advance_paid || 0));
-  const balanceToDriver = parseFloat(String(settlement.balance_to_driver || 0));
-  const previousDriverBalance = parseFloat(String(settlement.previous_driver_balance || 0));
-  const totalAdvanceAvailable = advancePaid + previousDriverBalance;
+  const totalFreight = Math.round(parseFloat(String(settlement.total_freight || 0)));
+  const totalExpenses = Math.round(parseFloat(String(settlement.total_expenses || 0)));
+  const advancePaid = Math.round(parseFloat(String(settlement.advance_paid || 0)));
+  const initialTripAdvance = Math.round(parseFloat(String(settlement.initial_trip_advance || 0)));
+  const additionalAdvance = Math.round(parseFloat(String(settlement.additional_advance_paid || 0))) || (initialTripAdvance > 0 ? Math.max(0, advancePaid - initialTripAdvance) : 0);
+  const priorDeficitDeduction = Math.round(parseFloat(String(settlement.prior_deficit_deduction || 0)));
+  const effectiveAdvance = Math.max(0, advancePaid - priorDeficitDeduction);
+  const previousDriverBalance = Math.max(0, Math.round(parseFloat(String(settlement.previous_driver_balance || 0))));
+  const totalAdvanceAvailable = effectiveAdvance + previousDriverBalance;
 
-  // Advance vs expenses:
-  // If advance >= expenses: driver holds remaining advance in hand
-  // If expenses > advance: office owes driver net balance
-  const netDiff = totalExpenses - totalAdvanceAvailable;
-  const balanceInHand = netDiff < 0 ? Math.abs(netDiff) : 0;
-  const payableToDriver = netDiff > 0 ? netDiff : 0;
+  // Initial deficit/surplus before subsequent deductions:
+  const initialDeficit = Math.max(0, totalExpenses - totalAdvanceAvailable);
+  const initialSurplus = Math.max(0, totalAdvanceAvailable - totalExpenses);
+
+  // Subsequent advance adjustments or cash settlements:
+  const paidAmount = Math.round(parseFloat(String(settlement.paid_amount || 0)));
+
+  // Net payable remaining for this trip:
+  const payableToDriver = settlement.net_balance_to_driver !== undefined && settlement.net_balance_to_driver !== null
+    ? Math.max(0, Math.round(parseFloat(String(settlement.net_balance_to_driver))))
+    : Math.max(0, initialDeficit - paidAmount);
+
+  const balanceInHand = payableToDriver === 0 ? initialSurplus : 0;
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
@@ -287,12 +329,20 @@ export const SettlementReceiptScreen: React.FC<{ route: any; navigation: any }> 
             <Text style={styles.gridLabel}>Driver Name:</Text>
             <Text style={styles.gridValue}>{trip.driver_name || '—'}</Text>
           </View>
+          {(trip.owner_name || settlement.owner_name) ? (
+            <View style={styles.gridRow}>
+              <Text style={styles.gridLabel}>Truck Owner:</Text>
+              <Text style={[styles.gridValueBold, { color: '#6d28d9' }]}>
+                {trip.owner_name || settlement.owner_name}
+              </Text>
+            </View>
+          ) : null}
         </View>
 
         {/* 1. TOTAL FREIGHT AMOUNT (Displayed above Driver Expenses) */}
         <View style={styles.freightCard}>
           <View style={styles.freightHeaderRow}>
-            <View style={{ flex: 1 }}>
+            <View style={{ flex: 1, minWidth: 0 }}>
               <Text style={styles.freightCardTitle}>TOTAL FREIGHT AMOUNT</Text>
               {goodsWeight > 0 && freightRate > 0 ? (
                 <Text style={styles.freightFormula}>
@@ -322,7 +372,7 @@ export const SettlementReceiptScreen: React.FC<{ route: any; navigation: any }> 
                   <View style={styles.stepBadge}>
                     <Text style={styles.stepBadgeText}>Step {stepItem.step}</Text>
                   </View>
-                  <View style={{ flex: 1, marginLeft: 8 }}>
+                  <View style={styles.stepCardBody}>
                     <Text style={styles.stepCardTitle}>{stepItem.title}</Text>
                     <Text style={styles.stepCardDesc}>
                       {hasItems && stepItem.items[0].description
@@ -350,46 +400,111 @@ export const SettlementReceiptScreen: React.FC<{ route: any; navigation: any }> 
           </View>
         </View>
 
-        {/* 3. SETTLEMENT CALCULATION SUMMARY (Expenses, Advance & Net Balance / In-Hand Balance) */}
+        {/* 3. SETTLEMENT CALCULATION SUMMARY */}
         <View style={styles.financialSection}>
           <Text style={styles.finSectionTitle}>SETTLEMENT CALCULATION SUMMARY</Text>
 
           <View style={styles.finRow}>
-            <Text style={styles.finLabel}>Total Driver Expenses:</Text>
+            <Text style={styles.finLabel}>Total Driver Expenses</Text>
             <Text style={[styles.finVal, { color: COLORS.accent }]}>
               {formatCurrency(totalExpenses)}
             </Text>
           </View>
 
-          {previousDriverBalance > 0 && (
-            <View style={styles.finRow}>
-              <Text style={styles.finLabel}>Add: Prior Advance in Driver Hand:</Text>
-              <Text style={[styles.finVal, { color: '#1d4ed8' }]}>
-                (+) {formatCurrency(previousDriverBalance)}
+          {(() => {
+            const tripAdvance = Math.round(Number((settlement as any).manager_advance ?? initialTripAdvance ?? advancePaid));
+            const ownerAdvance = Math.round(Number((settlement as any).owner_given || 0));
+            const leftoverUsed = Math.round(Number((settlement as any).owner_leftover_used || 0));
+            const ownerName = String((settlement as any).advance_owner_name || '').trim();
+            const mode = String(settlement.payment_mode || '').toUpperCase();
+            const isCash = ['CASH', 'UPI', 'BANK_TRANSFER'].includes(mode);
+            const laterAdj = paidAmount > 0 && !isCash;
+            return (
+              <>
+                {tripAdvance > 0 && priorDeficitDeduction <= 0 ? (
+                  <View style={styles.finRow}>
+                    <Text style={styles.finLabel}>Less: Trip Advance</Text>
+                    <Text style={[styles.finVal, { color: '#1d4ed8' }]}>(-) {formatCurrency(tripAdvance)}</Text>
+                  </View>
+                ) : tripAdvance > 0 ? (
+                  <View style={styles.finRow}>
+                    <Text style={styles.finLabel}>Trip Advance (given)</Text>
+                    <Text style={[styles.finVal, { color: '#1d4ed8' }]}>{formatCurrency(tripAdvance)}</Text>
+                  </View>
+                ) : null}
+                {ownerAdvance > 0 && (
+                  <View style={[styles.finRow, { backgroundColor: '#f5f3ff' }]}>
+                    <Text style={styles.finLabel}>Advance from Owner{ownerName ? ` (${ownerName})` : ''}</Text>
+                    <Text style={[styles.finVal, { color: '#6d28d9' }]}>{formatCurrency(ownerAdvance)}</Text>
+                  </View>
+                )}
+                {priorDeficitDeduction > 0 && (
+                  <>
+                    <View style={styles.finRow}>
+                      <Text style={[styles.finLabel, { color: '#c2410c' }]}>Less: This trip advance adjusted to prior trip dues</Text>
+                      <Text style={[styles.finVal, { color: '#dc2626' }]}>(-) {formatCurrency(priorDeficitDeduction)}</Text>
+                    </View>
+                    <View style={[styles.finRow, styles.finRowDivider]}>
+                      <Text style={[styles.finLabel, { fontWeight: '700' }]}>Effective advance for this trip</Text>
+                      <Text style={[styles.finVal, { fontWeight: '700' }]}>{formatCurrency(effectiveAdvance)}</Text>
+                    </View>
+                  </>
+                )}
+                {leftoverUsed > 0 && priorDeficitDeduction <= 0 && (
+                  <View style={styles.finRow}>
+                    <Text style={[styles.finLabel, { color: '#c2410c' }]}>Less: Previous surplus used on this trip</Text>
+                    <Text style={[styles.finVal, { color: '#dc2626' }]}>(-) {formatCurrency(leftoverUsed)}</Text>
+                  </View>
+                )}
+                {laterAdj && (
+                  <View style={styles.finRow}>
+                    <Text style={[styles.finLabel, { color: '#c2410c' }]}>Less: Adjusted from later trip advance</Text>
+                    <Text style={[styles.finVal, { color: '#dc2626' }]}>(-) {formatCurrency(paidAmount)}</Text>
+                  </View>
+                )}
+                {isCash && paidAmount > 0 && (
+                  <View style={styles.finRow}>
+                    <Text style={[styles.finLabel, { color: '#16a34a' }]}>Less: Paid to driver ({mode})</Text>
+                    <Text style={[styles.finVal, { color: '#16a34a' }]}>(-) {formatCurrency(paidAmount)}</Text>
+                  </View>
+                )}
+              </>
+            );
+          })()}
+
+          {payableToDriver > 0 ? (
+            <View style={styles.resultAlertBox}>
+              <View style={styles.resultAlertHeader}>
+                <AlertCircle size={18} color="#dc2626" />
+                <Text style={styles.resultAlertTitle}>
+                  BALANCE NEED TO PAY TO DRIVER
+                </Text>
+              </View>
+              <Text style={styles.resultAlertBody}>
+                {paidAmount > 0 && settlement.payment_mode !== 'ADJUSTED_ADVANCE'
+                  ? `Trip expenses (${formatCurrency(totalExpenses)}) exceeded advance (${formatCurrency(advancePaid)}). ${formatCurrency(paidAmount)} was paid to driver. Remaining balance of ${formatCurrency(payableToDriver)} is payable by office to ${trip.driver_name || 'the driver'}.`
+                  : priorDeficitDeduction > 0
+                  ? `Trip advance (${formatCurrency(advancePaid)}) was reduced by ${formatCurrency(priorDeficitDeduction)} to settle previous trip dues. Full trip expenses of ${formatCurrency(totalExpenses)} are payable to ${trip.driver_name || 'the driver'} for this trip.`
+                  : `Trip expenses (${formatCurrency(totalExpenses)}) exceeded advance (${formatCurrency(advancePaid)}). Admin / Head Office will settle ${formatCurrency(payableToDriver)} with ${trip.driver_name || 'the driver'}.`
+                }
               </Text>
+              <View style={styles.resultAlertAmountRow}>
+                <Text style={styles.resultAlertAmount}>
+                  {formatCurrency(payableToDriver)}
+                </Text>
+                <View style={styles.pendingPill}>
+                  <Text style={styles.pendingPillText}>PENDING PAYMENT</Text>
+                </View>
+              </View>
             </View>
-          )}
-
-          <View style={styles.finRow}>
-            <Text style={styles.finLabel}>Less: Advance Paid for Trip:</Text>
-            <Text style={styles.finVal}>(-) {formatCurrency(advancePaid)}</Text>
-          </View>
-
-          {previousDriverBalance > 0 && (
-            <View style={[styles.finRow, { borderTopWidth: 1, borderTopColor: '#e2e8f0', paddingTop: 4, marginTop: 2 }]}>
-              <Text style={[styles.finLabel, { fontWeight: '700' }]}>Total Advance Available:</Text>
-              <Text style={[styles.finVal, { fontWeight: '700' }]}>{formatCurrency(totalAdvanceAvailable)}</Text>
-            </View>
-          )}
-
-          {balanceInHand > 0 ? (
+          ) : balanceInHand > 0 ? (
             <>
               {/* Highlight card for Balance in Driver Hand */}
               <View style={styles.inHandCard}>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.inHandTitle}>BALANCE IN DRIVER HAND:</Text>
+                <View style={{ flex: 1, minWidth: 0 }}>
+                  <Text style={styles.inHandTitle}>BALANCE IN DRIVER HAND</Text>
                   <Text style={styles.inHandSubtitle}>
-                    ✓ Remaining advance held by driver for subsequent trips
+                    Remaining advance held by driver for subsequent trips
                   </Text>
                 </View>
                 <Text style={styles.inHandAmount}>
@@ -397,34 +512,49 @@ export const SettlementReceiptScreen: React.FC<{ route: any; navigation: any }> 
                 </Text>
               </View>
 
-              <View style={[styles.finRow, { marginTop: 2, paddingVertical: 4 }]}>
+              <View style={[styles.finRow, { marginTop: 2 }]}>
                 <Text style={[styles.finLabel, { color: COLORS.textMuted }]}>
-                  Net Cash Payable by Office:
+                  Net cash payable by office
                 </Text>
                 <Text style={[styles.finVal, { color: COLORS.textMuted, fontWeight: '600' }]}>
-                  ₹0.00 (Covered by Advance)
+                  ₹0
                 </Text>
               </View>
             </>
           ) : (
-            <View style={styles.finHighlightRow}>
-              <View>
-                <Text style={styles.finHighlightLabel}>Net Balance to Driver:</Text>
-                <Text style={styles.finHighlightSub}>
-                  {payableToDriver > 0 ? '✓ Payable to Driver by Office' : '✓ Fully Settled (₹0.00)'}
-                </Text>
+            <View style={[styles.resultAlertBox, { backgroundColor: '#f0fdf4', borderColor: '#86efac' }]}>
+              <View style={styles.resultAlertHeader}>
+                <CheckCircle2 size={18} color="#16a34a" />
+                <Text style={[styles.resultAlertTitle, { color: '#16a34a' }]}>FULLY SETTLED (₹0)</Text>
               </View>
-              <Text
-                style={[
-                  styles.finHighlightValue,
-                  { color: payableToDriver > 0 ? COLORS.successDark : COLORS.textMuted },
-                ]}
-              >
-                {payableToDriver > 0 ? '+' : ''}{formatCurrency(payableToDriver)}
+              <Text style={[styles.resultAlertBody, { color: '#166534', marginBottom: 0 }]}>
+                Advance and expenses are perfectly balanced.
               </Text>
             </View>
           )}
         </View>
+
+        {/* Settled badge if already settled */}
+        {settlement.settlement_status === 'SETTLED' && payableToDriver === 0 && (
+          <View style={[styles.resultAlertHeader, {
+            backgroundColor: '#f0fdf4',
+            borderColor: '#86efac',
+            borderWidth: 1.5,
+            borderRadius: RADIUS.md,
+            padding: SPACING.sm,
+            marginTop: 12,
+          }]}>
+            <CheckCircle2 size={20} color="#16a34a" />
+            <View style={{ flex: 1, minWidth: 0 }}>
+              <Text style={{ fontSize: 13, fontWeight: '800', color: '#15803d' }}>
+                PAYMENT SETTLED ✓
+              </Text>
+              <Text style={{ fontSize: 11, color: '#166534', marginTop: 2 }}>
+                All balances for this trip have been fully settled with driver.
+              </Text>
+            </View>
+          </View>
+        )}
 
         {/* Signatures Row */}
         <View style={styles.signaturesRow}>
@@ -509,6 +639,7 @@ export const SettlementReceiptScreen: React.FC<{ route: any; navigation: any }> 
   );
 };
 
+
 const styles = StyleSheet.create({
   container: {
     flex: 1,
@@ -528,6 +659,8 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: 8,
     marginBottom: SPACING.md,
   },
   verifiedBadge: {
@@ -549,14 +682,16 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: COLORS.textMuted,
     fontWeight: '600',
+    flexShrink: 1,
   },
   slipCard: {
     backgroundColor: COLORS.card,
     borderRadius: RADIUS.xl,
-    padding: SPACING.lg,
+    padding: SPACING.md,
     borderWidth: 2,
     borderColor: '#cbd5e1',
     borderStyle: 'dashed',
+    overflow: 'hidden',
     ...SHADOWS.md,
   },
   slipHeader: {
@@ -591,6 +726,8 @@ const styles = StyleSheet.create({
   gridRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    gap: 8,
     paddingVertical: 5,
     borderBottomWidth: 1,
     borderBottomColor: COLORS.surface,
@@ -598,16 +735,22 @@ const styles = StyleSheet.create({
   gridLabel: {
     fontSize: 13,
     color: COLORS.textMuted,
+    flexShrink: 0,
+    maxWidth: '40%',
   },
   gridValue: {
     fontSize: 13,
     color: COLORS.primary,
     fontWeight: '600',
+    flex: 1,
+    textAlign: 'right',
   },
   gridValueBold: {
     fontSize: 13,
     color: COLORS.primary,
     fontWeight: '800',
+    flex: 1,
+    textAlign: 'right',
   },
   // Total Freight Card styles (Above Driver Expenses)
   freightCard: {
@@ -621,7 +764,8 @@ const styles = StyleSheet.create({
   freightHeaderRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'center',
+    alignItems: 'flex-start',
+    gap: 8,
   },
   freightCardTitle: {
     fontSize: 12,
@@ -636,9 +780,11 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
   freightCardAmount: {
-    fontSize: 19,
+    fontSize: 18,
     fontWeight: '900',
     color: '#1e3a8a',
+    flexShrink: 0,
+    textAlign: 'right',
   },
   // Step-by-Step Driver Expenses styles
   stepSection: {
@@ -676,8 +822,14 @@ const styles = StyleSheet.create({
   },
   stepCardHeader: {
     flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     justifyContent: 'space-between',
+    gap: 6,
+  },
+  stepCardBody: {
+    flex: 1,
+    minWidth: 0,
+    marginLeft: 4,
   },
   stepBadge: {
     backgroundColor: COLORS.primary,
@@ -704,12 +856,15 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '800',
     color: COLORS.primary,
-    marginLeft: 6,
+    flexShrink: 0,
+    textAlign: 'right',
+    minWidth: 72,
   },
   expenseSubtotalRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'center',
+    alignItems: 'flex-start',
+    gap: 8,
     borderTopWidth: 1.5,
     borderTopColor: '#cbd5e1',
     marginTop: 6,
@@ -719,6 +874,8 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '800',
     color: COLORS.primary,
+    flex: 1,
+    flexShrink: 1,
   },
   expenseSubtotalValue: {
     fontSize: 15,
@@ -729,8 +886,9 @@ const styles = StyleSheet.create({
   financialSection: {
     backgroundColor: COLORS.surface,
     borderRadius: RADIUS.md,
-    padding: SPACING.md,
+    padding: SPACING.sm,
     marginBottom: SPACING.sm,
+    overflow: 'hidden',
   },
   finSectionTitle: {
     fontSize: 11,
@@ -742,16 +900,33 @@ const styles = StyleSheet.create({
   finRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    paddingVertical: 5,
+    alignItems: 'flex-start',
+    gap: 10,
+    paddingVertical: 6,
+    paddingHorizontal: 2,
+  },
+  finRowDivider: {
+    borderTopWidth: 1,
+    borderTopColor: '#e2e8f0',
+    paddingTop: 8,
+    marginTop: 2,
   },
   finLabel: {
-    fontSize: 13,
+    flex: 1,
+    flexShrink: 1,
+    minWidth: 0,
+    fontSize: 12.5,
+    lineHeight: 18,
     color: COLORS.textMuted,
   },
   finVal: {
-    fontSize: 13,
+    fontSize: 12.5,
     fontWeight: '700',
     color: COLORS.primary,
+    textAlign: 'right',
+    flexShrink: 0,
+    minWidth: 92,
+    maxWidth: '42%',
   },
   finHighlightRow: {
     flexDirection: 'row',
@@ -781,30 +956,89 @@ const styles = StyleSheet.create({
     borderColor: '#3b82f6',
     borderWidth: 1.5,
     borderRadius: RADIUS.md,
-    padding: SPACING.md,
+    padding: SPACING.sm,
     marginTop: 10,
     marginBottom: 4,
     flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'center',
+    alignItems: 'flex-start',
+    gap: 8,
   },
   inHandTitle: {
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: '800',
     color: '#1d4ed8',
-    letterSpacing: 0.5,
+    letterSpacing: 0.3,
+    flexShrink: 1,
   },
   inHandSubtitle: {
     fontSize: 11,
     color: '#2563eb',
     marginTop: 2,
     fontWeight: '500',
+    flexShrink: 1,
   },
   inHandAmount: {
-    fontSize: 20,
+    fontSize: 18,
     fontWeight: '900',
     color: '#1d4ed8',
-    marginLeft: 12,
+    flexShrink: 0,
+    textAlign: 'right',
+  },
+  resultAlertBox: {
+    backgroundColor: '#fef2f2',
+    borderColor: '#fca5a5',
+    borderWidth: 1.5,
+    borderRadius: RADIUS.md,
+    padding: SPACING.sm,
+    marginTop: 8,
+  },
+  resultAlertHeader: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8,
+    marginBottom: 6,
+  },
+  resultAlertTitle: {
+    flex: 1,
+    flexShrink: 1,
+    fontSize: 12,
+    fontWeight: '800',
+    color: '#dc2626',
+    letterSpacing: 0.3,
+    lineHeight: 17,
+  },
+  resultAlertBody: {
+    fontSize: 11,
+    color: '#991b1b',
+    marginBottom: 8,
+    lineHeight: 16,
+  },
+  resultAlertAmountRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  resultAlertAmount: {
+    fontSize: 22,
+    fontWeight: '900',
+    color: '#dc2626',
+    flexShrink: 1,
+  },
+  pendingPill: {
+    backgroundColor: '#fee2e2',
+    borderColor: '#fca5a5',
+    borderWidth: 1,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 4,
+  },
+  pendingPillText: {
+    color: '#dc2626',
+    fontSize: 10,
+    fontWeight: '800',
   },
   signaturesRow: {
     flexDirection: 'row',

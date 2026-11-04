@@ -36,7 +36,7 @@ export const dashboardService = {
 
 // User Service
 export const userService = {
-  getUsers: async (params?: { page?: number; limit?: number; search?: string; role?: string; status?: string }): Promise<ApiResponse<PaginatedData<User>>> => {
+  getUsers: async (params?: { page?: number; limit?: number; search?: string; role?: string; status?: string; for_advance?: boolean }): Promise<ApiResponse<PaginatedData<User>>> => {
     const res = await api.get('/users', { params });
     return res.data;
   },
@@ -100,7 +100,7 @@ export const driverService = {
 
 // Vehicle Service
 export const vehicleService = {
-  getVehicles: async (params?: { page?: number; limit?: number; search?: string; status?: string }): Promise<ApiResponse<PaginatedData<Vehicle>>> => {
+  getVehicles: async (params?: { page?: number; limit?: number; search?: string; status?: string; owner_id?: number | string }): Promise<ApiResponse<PaginatedData<Vehicle>>> => {
     const res = await api.get('/vehicles', { params });
     return res.data;
   },
@@ -312,6 +312,7 @@ export const settlementService = {
     to_date?: string;
     driver_id?: string | number;
     vehicle_id?: string | number;
+    owner_id?: string | number;
     party_id?: string | number;
     search?: string;
   }): Promise<ApiResponse<PaginatedData<Settlement>>> => {
@@ -378,7 +379,7 @@ export const auditLogService = {
 
 // Owner Service
 export const ownerService = {
-  getOwners: async (params?: { page?: number; limit?: number; search?: string }): Promise<ApiResponse<PaginatedData<Owner>>> => {
+  getOwners: async (params?: { page?: number; limit?: number; search?: string; status?: string }): Promise<ApiResponse<PaginatedData<Owner>>> => {
     const res = await api.get('/owners', { params });
     return res.data;
   },
@@ -451,6 +452,8 @@ export const ownerAdvanceService = {
     limit?: number;
     owner_id?: number;
     manager_id?: number;
+    driver_id?: number;
+    recipient_type?: 'MANAGER' | 'DRIVER' | string;
     payment_mode?: string;
     from_date?: string;
     to_date?: string;
@@ -465,7 +468,10 @@ export const ownerAdvanceService = {
   },
   createOwnerAdvance: async (data: {
     owner_id: number;
-    manager_id: number;
+    recipient_type?: 'MANAGER' | 'DRIVER';
+    manager_id?: number | null;
+    driver_id?: number | null;
+    vehicle_id?: number | null;
     amount: number;
     advance_date?: string;
     payment_mode?: string;
@@ -479,7 +485,10 @@ export const ownerAdvanceService = {
     id: number,
     data: Partial<{
       owner_id: number;
-      manager_id: number;
+      recipient_type?: 'MANAGER' | 'DRIVER';
+      manager_id?: number | null;
+      driver_id?: number | null;
+      vehicle_id?: number | null;
       amount: number;
       advance_date: string;
       payment_mode: string;
@@ -551,6 +560,7 @@ export const otherExpenseLimitService = {
 export const truckAdvanceService = {
   getTruckAdvances: async (params?: {
     page?: number; limit?: number; vehicle_id?: string; driver_id?: string;
+    owner_id?: string | number;
     manager_id?: string; party_id?: string; from_date?: string; to_date?: string; search?: string;
   }): Promise<ApiResponse<{ items: any[]; total: number; totalAmount: number; page: number; limit: number; totalPages: number }>> => {
     const res = await api.get('/truck-advances', { params });
@@ -589,6 +599,7 @@ export const driverAdvanceService = {
     driver_id?: string;
     manager_id?: string;
     vehicle_id?: string;
+    owner_id?: string | number;
     payment_mode?: string;
     from_date?: string;
     to_date?: string;
@@ -599,6 +610,8 @@ export const driverAdvanceService = {
   },
   getDriverSummary: async (params?: {
     driver_id?: string;
+    owner_id?: string | number;
+    vehicle_id?: string | number;
     search?: string;
     from_date?: string;
     to_date?: string;
@@ -614,6 +627,7 @@ export const driverAdvanceService = {
     driver_id: number;
     manager_id?: number;
     vehicle_id?: number;
+    trip_id?: number;
     amount: number;
     advance_date?: string;
     payment_mode?: string;
@@ -628,6 +642,7 @@ export const driverAdvanceService = {
       driver_id: number;
       manager_id: number;
       vehicle_id: number;
+      trip_id: number;
       amount: number;
       advance_date: string;
       payment_mode: string;
@@ -639,6 +654,10 @@ export const driverAdvanceService = {
   },
   deleteDriverAdvance: async (id: number): Promise<ApiResponse> => {
     const res = await api.delete(`/driver-advances/${id}`);
+    return res.data;
+  },
+  getDriverStatement: async (driverId: number): Promise<ApiResponse<any>> => {
+    const res = await api.get(`/driver-advances/driver/${driverId}/statement`);
     return res.data;
   },
 };

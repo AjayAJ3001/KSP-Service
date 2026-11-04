@@ -6,8 +6,8 @@ const router = Router();
 router.use(authenticate);
 
 router.get('/', getFreightRates);
-router.post('/', authorize('ADMIN'), createFreightRate);
-router.put('/:id', authorize('ADMIN'), updateFreightRate);
-router.delete('/:id', authorize('ADMIN'), deleteFreightRate);
+router.post('/', authorize('ADMIN', 'OWNER'), createFreightRate);
+router.put('/:id', authorize('ADMIN', 'OWNER'), updateFreightRate);
+router.delete('/:id', authorize('ADMIN', 'OWNER'), deleteFreightRate);
 
 export default router;

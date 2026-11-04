@@ -24,20 +24,32 @@ import {
   RefreshCw,
   Clock,
   FileText,
+  Printer,
+  Download,
+  Truck,
 } from 'lucide-react-native';
-import { adminOwnerAdvanceService, adminOwnerService, adminUserService } from '../../services/adminService';
-import { OwnerAdvance, Owner, User } from '../../types';
+import { printMastersPdf, downloadMastersPdf } from '../../utils/pdfGenerator';
+import { adminOwnerAdvanceService, adminOwnerService, adminUserService, adminDriverService, adminVehicleService } from '../../services/adminService';
+import { OwnerAdvance, Owner, User, Driver, Vehicle } from '../../types';
 import { COLORS, SPACING, RADIUS, SHADOWS } from '../../constants/theme';
 import { formatDateDMY } from '../../utils/dateUtils';
+import { DatePickerModal, toDisplayDate } from '../../components/DatePickerModal';
 
 export const AdminOwnerAdvancesScreen: React.FC<{ navigation: any }> = ({ navigation }) => {
   const [advances, setAdvances] = useState<OwnerAdvance[]>([]);
   const [owners, setOwners] = useState<Owner[]>([]);
   const [managers, setManagers] = useState<User[]>([]);
+  const [drivers, setDrivers] = useState<Driver[]>([]);
+  const [vehicles, setVehicles] = useState<Vehicle[]>([]);
   const [total, setTotal] = useState(0);
   const [totalAmount, setTotalAmount] = useState(0);
   const [search, setSearch] = useState('');
+  const [recipientFilter, setRecipientFilter] = useState<'ALL' | 'MANAGER' | 'DRIVER'>('ALL');
+  const [fromDate, setFromDate] = useState('');
+  const [toDate, setToDate] = useState('');
+  const [datePickerTarget, setDatePickerTarget] = useState<'from' | 'to' | 'form' | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [pdfLoading, setPdfLoading] = useState<'print' | 'download' | null>(null);
 
   // Add / Edit Modal
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -46,7 +58,10 @@ export const AdminOwnerAdvancesScreen: React.FC<{ navigation: any }> = ({ naviga
 
   // Form Fields
   const [selectedOwnerId, setSelectedOwnerId] = useState<number | null>(null);
+  const [recipientType, setRecipientType] = useState<'MANAGER' | 'DRIVER'>('MANAGER');
   const [selectedManagerId, setSelectedManagerId] = useState<number | null>(null);
+  const [selectedDriverId, setSelectedDriverId] = useState<number | null>(null);
+  const [selectedVehicleId, setSelectedVehicleId] = useState<number | null>(null);
   const [amount, setAmount] = useState('');
   const [advanceDate, setAdvanceDate] = useState('');
   const [paymentMode, setPaymentMode] = useState<'CASH' | 'UPI' | 'BANK_TRANSFER' | 'CHEQUE'>('CASH');
@@ -54,15 +69,19 @@ export const AdminOwnerAdvancesScreen: React.FC<{ navigation: any }> = ({ naviga
 
   const loadLookups = useCallback(async () => {
     try {
-      const [oRes, uRes] = await Promise.all([
+      const [oRes, uRes, dRes, vRes] = await Promise.all([
         adminOwnerService.getOwners({ limit: 100 }),
-        adminUserService.getUsers({ limit: 100, status: 'ACTIVE' }),
+        adminUserService.getUsers({ limit: 200, status: 'ACTIVE', for_advance: true }),
+        adminDriverService.getDrivers({ limit: 500, status: 'ACTIVE' }),
+        adminVehicleService.getVehicles({ limit: 100 }),
       ]);
       setOwners(oRes.data.items || []);
       const managerList = (uRes.data.items || []).filter((u) => u.role === 'MANAGER' || u.role === 'ADMIN');
       setManagers(managerList);
+      setDrivers(dRes.data.items || []);
+      setVehicles(vRes.data.items || []);
     } catch (err) {
-      console.error('Failed to load owners/managers', err);
+      console.error('Failed to load owners/managers/drivers', err);
     }
   }, []);
 
@@ -72,6 +91,9 @@ export const AdminOwnerAdvancesScreen: React.FC<{ navigation: any }> = ({ naviga
       const res = await adminOwnerAdvanceService.getOwnerAdvances({
         limit: 100,
         search: search || undefined,
+        recipient_type: recipientFilter === 'ALL' ? undefined : recipientFilter,
+        from_date: fromDate.trim() || undefined,
+        to_date: toDate.trim() || undefined,
       });
       setAdvances(res.data.items || []);
       setTotal(res.data.total || 0);
@@ -82,7 +104,7 @@ export const AdminOwnerAdvancesScreen: React.FC<{ navigation: any }> = ({ naviga
     } finally {
       setIsLoading(false);
     }
-  }, [search]);
+  }, [search, recipientFilter, fromDate, toDate]);
 
   useEffect(() => {
     loadLookups();
@@ -94,7 +116,7 @@ export const AdminOwnerAdvancesScreen: React.FC<{ navigation: any }> = ({ naviga
 
   const formatCurrency = (val: number | string) => {
     const num = parseFloat(String(val)) || 0;
-    return `₹${num.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    return `₹${Math.round(num).toLocaleString('en-IN')}`;
   };
 
   const getTodayISO = () => {
@@ -105,7 +127,10 @@ export const AdminOwnerAdvancesScreen: React.FC<{ navigation: any }> = ({ naviga
   const openAddModal = () => {
     setEditingAdvance(null);
     setSelectedOwnerId(owners.length > 0 ? owners[0].id : null);
+    setRecipientType('MANAGER');
     setSelectedManagerId(managers.length > 0 ? managers[0].id : null);
+    setSelectedDriverId(drivers.length > 0 ? drivers[0].id : null);
+    setSelectedVehicleId(null);
     setAmount('');
     setAdvanceDate(getTodayISO());
     setPaymentMode('CASH');
@@ -116,7 +141,11 @@ export const AdminOwnerAdvancesScreen: React.FC<{ navigation: any }> = ({ naviga
   const openEditModal = (adv: OwnerAdvance) => {
     setEditingAdvance(adv);
     setSelectedOwnerId(adv.owner_id);
-    setSelectedManagerId(adv.manager_id);
+    const isDriverAdv = adv.recipient_type === 'DRIVER' || Boolean(!adv.manager_id && adv.driver_id);
+    setRecipientType(isDriverAdv ? 'DRIVER' : 'MANAGER');
+    setSelectedManagerId(adv.manager_id || null);
+    setSelectedDriverId(adv.driver_id || null);
+    setSelectedVehicleId(adv.vehicle_id || null);
     setAmount(String(adv.amount));
     setAdvanceDate(adv.advance_date ? adv.advance_date.split('T')[0] : getTodayISO());
     setPaymentMode((adv.payment_mode as any) || 'CASH');
@@ -146,8 +175,12 @@ export const AdminOwnerAdvancesScreen: React.FC<{ navigation: any }> = ({ naviga
       Alert.alert('Required', 'Please select a vehicle owner.');
       return;
     }
-    if (!selectedManagerId) {
+    if (recipientType === 'MANAGER' && !selectedManagerId) {
       Alert.alert('Required', 'Please select a manager.');
+      return;
+    }
+    if (recipientType === 'DRIVER' && !selectedDriverId) {
+      Alert.alert('Required', 'Please select a driver.');
       return;
     }
     const numAmount = parseFloat(amount);
@@ -160,7 +193,10 @@ export const AdminOwnerAdvancesScreen: React.FC<{ navigation: any }> = ({ naviga
       setIsSubmitting(true);
       const payload: any = {
         owner_id: selectedOwnerId,
-        manager_id: selectedManagerId,
+        recipient_type: recipientType,
+        manager_id: recipientType === 'MANAGER' ? selectedManagerId : null,
+        driver_id: recipientType === 'DRIVER' ? selectedDriverId : null,
+        vehicle_id: selectedVehicleId || null,
         amount: numAmount,
         advance_date: getFullAdvanceIsoTimestamp(advanceDate),
         payment_mode: paymentMode,
@@ -169,10 +205,10 @@ export const AdminOwnerAdvancesScreen: React.FC<{ navigation: any }> = ({ naviga
 
       if (editingAdvance) {
         await adminOwnerAdvanceService.updateOwnerAdvance(editingAdvance.id, payload);
-        Alert.alert('Updated', 'Advance given to manager updated successfully.');
+        Alert.alert('Updated', `Advance to ${recipientType === 'DRIVER' ? 'driver' : 'manager'} updated successfully.`);
       } else {
         await adminOwnerAdvanceService.createOwnerAdvance(payload);
-        Alert.alert('Saved', 'Advance given to manager recorded successfully.');
+        Alert.alert('Saved', `Advance to ${recipientType === 'DRIVER' ? 'driver' : 'manager'} recorded successfully.`);
       }
 
       setIsModalOpen(false);
@@ -207,6 +243,41 @@ export const AdminOwnerAdvancesScreen: React.FC<{ navigation: any }> = ({ naviga
     );
   };
 
+  const handlePrintPdf = async () => {
+    try {
+      setPdfLoading('print');
+      await printMastersPdf({
+        tab: 'ADVANCES',
+        tabLabel: 'Owner Advances Ledger',
+        advances,
+      });
+    } catch (err: any) {
+      console.error('Print advances PDF failed', err);
+      Alert.alert('Print Error', err.message || 'Failed to print advances ledger.');
+    } finally {
+      setPdfLoading(null);
+    }
+  };
+
+  const handleDownloadPdf = async () => {
+    try {
+      setPdfLoading('download');
+      const result = await downloadMastersPdf({
+        tab: 'ADVANCES',
+        tabLabel: 'Owner Advances Ledger',
+        advances,
+      });
+      if (result.success && result.savedDirectly) {
+        Alert.alert('PDF Saved', `Owner advances ledger saved:\n${result.filename}`);
+      }
+    } catch (err: any) {
+      console.error('Download advances PDF failed', err);
+      Alert.alert('Download Error', err.message || 'Failed to download PDF.');
+    } finally {
+      setPdfLoading(null);
+    }
+  };
+
   return (
     <View style={styles.container}>
       {/* Search & Top Action Header */}
@@ -216,7 +287,7 @@ export const AdminOwnerAdvancesScreen: React.FC<{ navigation: any }> = ({ naviga
             <Search size={16} color={COLORS.textMuted} />
             <TextInput
               style={styles.searchInput}
-              placeholder="Search owner, manager, notes..."
+              placeholder="Search owner, manager, driver, notes..."
               value={search}
               onChangeText={setSearch}
             />
@@ -226,16 +297,114 @@ export const AdminOwnerAdvancesScreen: React.FC<{ navigation: any }> = ({ naviga
               </TouchableOpacity>
             ) : null}
           </View>
+
+          <TouchableOpacity
+            style={[styles.pdfBtn, styles.printBtn, pdfLoading === 'print' && { opacity: 0.7 }]}
+            onPress={handlePrintPdf}
+            disabled={pdfLoading !== null || isLoading}
+            activeOpacity={0.8}
+          >
+            {pdfLoading === 'print' ? (
+              <ActivityIndicator size="small" color={COLORS.white} />
+            ) : (
+              <>
+                <Printer size={13} color={COLORS.white} />
+                <Text style={styles.pdfBtnText}>Print</Text>
+              </>
+            )}
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[styles.pdfBtn, styles.downloadBtn, pdfLoading === 'download' && { opacity: 0.7 }]}
+            onPress={handleDownloadPdf}
+            disabled={pdfLoading !== null || isLoading}
+            activeOpacity={0.8}
+          >
+            {pdfLoading === 'download' ? (
+              <ActivityIndicator size="small" color={COLORS.white} />
+            ) : (
+              <>
+                <Download size={13} color={COLORS.white} />
+                <Text style={styles.pdfBtnText}>PDF</Text>
+              </>
+            )}
+          </TouchableOpacity>
+
           <TouchableOpacity style={styles.addBtn} onPress={openAddModal}>
             <Plus size={16} color={COLORS.white} />
             <Text style={styles.addBtnText}>Give Advance</Text>
           </TouchableOpacity>
         </View>
 
+        {/* Recipient Filter Pills */}
+        <View style={styles.filterChipRow}>
+          {(['ALL', 'MANAGER', 'DRIVER'] as const).map((type) => (
+            <TouchableOpacity
+              key={type}
+              style={[
+                styles.filterPill,
+                recipientFilter === type && (type === 'DRIVER' ? styles.filterPillActiveDriver : styles.filterPillActive),
+              ]}
+              onPress={() => setRecipientFilter(type)}
+            >
+              <Text
+                style={[
+                  styles.filterPillText,
+                  recipientFilter === type && styles.filterPillTextActive,
+                ]}
+              >
+                {type === 'ALL' ? 'All Recipient Types' : type === 'MANAGER' ? 'Managers' : 'Drivers Directly'}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+
+        {/* Date Range Filter + Clear */}
+        <View style={{ paddingHorizontal: SPACING.sm, paddingBottom: 6, flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 6 }}>
+          <View style={styles.dateRangeRow}>
+            <TouchableOpacity
+              style={[styles.datePickerBtn, fromDate ? styles.datePickerBtnActive : null]}
+              onPress={() => setDatePickerTarget('from')}
+              activeOpacity={0.7}
+            >
+              <Calendar size={12} color={fromDate ? COLORS.primary : COLORS.textMuted} />
+              <Text style={[styles.datePickerBtnText, fromDate ? styles.datePickerBtnTextActive : null]}>
+                {fromDate ? toDisplayDate(fromDate) : 'From (DD-MM-YYYY)'}
+              </Text>
+            </TouchableOpacity>
+            <Text style={{ fontSize: 11, color: COLORS.textMuted, fontWeight: '700' }}>–</Text>
+            <TouchableOpacity
+              style={[styles.datePickerBtn, toDate ? styles.datePickerBtnActive : null]}
+              onPress={() => setDatePickerTarget('to')}
+              activeOpacity={0.7}
+            >
+              <Calendar size={12} color={toDate ? COLORS.primary : COLORS.textMuted} />
+              <Text style={[styles.datePickerBtnText, toDate ? styles.datePickerBtnTextActive : null]}>
+                {toDate ? toDisplayDate(toDate) : 'To (DD-MM-YYYY)'}
+              </Text>
+            </TouchableOpacity>
+            {(fromDate || toDate) && (
+              <TouchableOpacity onPress={() => { setFromDate(''); setToDate(''); }} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                <X size={12} color={COLORS.textMuted} />
+              </TouchableOpacity>
+            )}
+          </View>
+          {(search || fromDate || toDate || recipientFilter !== 'ALL') && (
+            <TouchableOpacity
+              style={styles.clearFiltersBtn}
+              onPress={() => { setSearch(''); setFromDate(''); setToDate(''); setRecipientFilter('ALL'); }}
+              activeOpacity={0.7}
+            >
+              <RefreshCw size={11} color="#dc2626" />
+              <Text style={styles.clearFiltersBtnText}>Clear</Text>
+            </TouchableOpacity>
+          )}
+        </View>
+
         {/* Total Summary Banner */}
         <View style={styles.summaryCard}>
           <View>
-            <Text style={styles.summaryLabel}>TOTAL ADVANCE GIVEN TO MANAGERS</Text>
+            <Text style={styles.summaryLabel}>TOTAL OWNER ADVANCES GIVEN</Text>
             <Text style={styles.summaryValue}>{formatCurrency(totalAmount)}</Text>
           </View>
           <View style={{ alignItems: 'flex-end' }}>
@@ -260,63 +429,95 @@ export const AdminOwnerAdvancesScreen: React.FC<{ navigation: any }> = ({ naviga
         </View>
       ) : (
         <ScrollView contentContainerStyle={styles.listContainer}>
-          {advances.map((adv) => (
-            <View key={adv.id} style={styles.advanceCard}>
-              <View style={styles.cardHeader}>
-                <View style={styles.ownerTag}>
-                  <Briefcase size={16} color={COLORS.primary} />
-                  <Text style={styles.ownerName}>{adv.owner_name || `Owner #${adv.owner_id}`}</Text>
+          {advances.map((adv) => {
+            const isDriver = adv.recipient_type === 'DRIVER' || Boolean(!adv.manager_id && adv.driver_id);
+            return (
+              <View key={adv.id} style={styles.advanceCard}>
+                <View style={styles.cardHeader}>
+                  <View style={styles.ownerTag}>
+                    <Briefcase size={16} color={COLORS.primary} />
+                    <Text style={styles.ownerName}>{adv.owner_name || `Owner #${adv.owner_id}`}</Text>
+                  </View>
+                  <View style={styles.amountPill}>
+                    <Text style={styles.amountText}>{formatCurrency(adv.amount)}</Text>
+                  </View>
                 </View>
-                <View style={styles.amountPill}>
-                  <Text style={styles.amountText}>{formatCurrency(adv.amount)}</Text>
+
+                {/* Recipient Badge */}
+                <View style={{ flexDirection: 'row', alignItems: 'center', marginVertical: 4 }}>
+                  {isDriver ? (
+                    <View style={styles.driverDirectBadge}>
+                      <Truck size={10} color="#7c3aed" />
+                      <Text style={styles.driverDirectBadgeText}>DIRECT TO DRIVER</Text>
+                    </View>
+                  ) : (
+                    <View style={styles.managerBadge}>
+                      <UserCheck size={10} color="#0284c7" />
+                      <Text style={styles.managerBadgeText}>TO MANAGER</Text>
+                    </View>
+                  )}
+                </View>
+
+                <View style={styles.infoRow}>
+                  <View style={styles.infoItem}>
+                    {isDriver ? (
+                      <Truck size={13} color="#7c3aed" />
+                    ) : (
+                      <UserCheck size={13} color={COLORS.accentDark} />
+                    )}
+                    <Text style={styles.infoText}>
+                      {isDriver ? 'Driver: ' : 'Manager: '}
+                      <Text style={{ fontWeight: '700', color: COLORS.text }}>
+                        {isDriver
+                          ? (adv.driver_name || `Driver #${adv.driver_id}`)
+                          : (adv.manager_name || `Manager #${adv.manager_id}`)}
+                      </Text>
+                      {isDriver && adv.lorry_number ? (
+                        <Text style={{ color: COLORS.textMuted, fontSize: 11 }}>
+                          {` (${adv.lorry_number})`}
+                        </Text>
+                      ) : null}
+                    </Text>
+                  </View>
+                  <View style={styles.infoItem}>
+                    <Calendar size={13} color={COLORS.textMuted} />
+                    <Text style={styles.infoText}>{formatDateDMY(adv.advance_date)}</Text>
+                  </View>
+                </View>
+
+                <View style={styles.modeRow}>
+                  <View style={styles.modeBadge}>
+                    <CreditCard size={11} color="#047857" />
+                    <Text style={styles.modeBadgeText}>{adv.payment_mode || 'CASH'}</Text>
+                  </View>
+                  {adv.notes ? (
+                    <Text style={styles.notesText} numberOfLines={1}>
+                      Note: {adv.notes}
+                    </Text>
+                  ) : null}
+                </View>
+
+                {/* Action Buttons */}
+                <View style={styles.cardActions}>
+                  <TouchableOpacity
+                    style={[styles.actionBtn, { backgroundColor: '#eff6ff' }]}
+                    onPress={() => openEditModal(adv)}
+                  >
+                    <Edit2 size={13} color="#2563eb" />
+                    <Text style={[styles.actionBtnText, { color: '#2563eb' }]}>Edit</Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    style={[styles.actionBtn, { backgroundColor: '#fef2f2' }]}
+                    onPress={() => handleDeleteAdvance(adv)}
+                  >
+                    <Trash2 size={13} color="#dc2626" />
+                    <Text style={[styles.actionBtnText, { color: '#dc2626' }]}>Delete</Text>
+                  </TouchableOpacity>
                 </View>
               </View>
-
-              <View style={styles.infoRow}>
-                <View style={styles.infoItem}>
-                  <UserCheck size={13} color={COLORS.accentDark} />
-                  <Text style={styles.infoText}>
-                    Manager: <Text style={{ fontWeight: '700', color: COLORS.text }}>{adv.manager_name || `Manager #${adv.manager_id}`}</Text>
-                  </Text>
-                </View>
-                <View style={styles.infoItem}>
-                  <Calendar size={13} color={COLORS.textMuted} />
-                  <Text style={styles.infoText}>{formatDateDMY(adv.advance_date)}</Text>
-                </View>
-              </View>
-
-              <View style={styles.modeRow}>
-                <View style={styles.modeBadge}>
-                  <CreditCard size={11} color="#047857" />
-                  <Text style={styles.modeBadgeText}>{adv.payment_mode || 'CASH'}</Text>
-                </View>
-                {adv.notes ? (
-                  <Text style={styles.notesText} numberOfLines={1}>
-                    Note: {adv.notes}
-                  </Text>
-                ) : null}
-              </View>
-
-              {/* Action Buttons */}
-              <View style={styles.cardActions}>
-                <TouchableOpacity
-                  style={[styles.actionBtn, { backgroundColor: '#eff6ff' }]}
-                  onPress={() => openEditModal(adv)}
-                >
-                  <Edit2 size={13} color="#2563eb" />
-                  <Text style={[styles.actionBtnText, { color: '#2563eb' }]}>Edit</Text>
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                  style={[styles.actionBtn, { backgroundColor: '#fef2f2' }]}
-                  onPress={() => handleDeleteAdvance(adv)}
-                >
-                  <Trash2 size={13} color="#dc2626" />
-                  <Text style={[styles.actionBtnText, { color: '#dc2626' }]}>Delete</Text>
-                </TouchableOpacity>
-              </View>
-            </View>
-          ))}
+            );
+          })}
         </ScrollView>
       )}
 
@@ -331,7 +532,7 @@ export const AdminOwnerAdvancesScreen: React.FC<{ navigation: any }> = ({ naviga
           <ScrollView contentContainerStyle={styles.modalContent}>
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>
-                {editingAdvance ? `Edit Advance Entry #${editingAdvance.id}` : 'Give Advance to Manager'}
+                {editingAdvance ? `Edit Advance Entry #${editingAdvance.id}` : 'Give Advance to Manager / Driver'}
               </Text>
               <TouchableOpacity onPress={() => setIsModalOpen(false)}>
                 <X size={20} color={COLORS.text} />
@@ -354,21 +555,108 @@ export const AdminOwnerAdvancesScreen: React.FC<{ navigation: any }> = ({ naviga
               ))}
             </ScrollView>
 
-            {/* Select Manager */}
-            <Text style={styles.label}>Select Receiving Manager *</Text>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flexDirection: 'row', marginBottom: 8 }}>
-              {managers.map((m) => (
-                <TouchableOpacity
-                  key={m.id}
-                  style={[styles.chip, selectedManagerId === m.id && styles.chipActive]}
-                  onPress={() => setSelectedManagerId(m.id)}
+            {/* Recipient Segmented Selector */}
+            <Text style={styles.label}>Advance Recipient *</Text>
+            <View style={styles.recipientToggleRow}>
+              <TouchableOpacity
+                style={[
+                  styles.recipientToggleBtn,
+                  recipientType === 'MANAGER' && styles.recipientToggleBtnActive,
+                ]}
+                onPress={() => setRecipientType('MANAGER')}
+              >
+                <UserCheck size={14} color={recipientType === 'MANAGER' ? COLORS.white : COLORS.textMuted} />
+                <Text
+                  style={[
+                    styles.recipientToggleText,
+                    recipientType === 'MANAGER' && styles.recipientToggleTextActive,
+                  ]}
                 >
-                  <Text style={[styles.chipText, selectedManagerId === m.id && styles.chipTextActive]}>
-                    {m.name} ({m.username})
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
+                  To Manager
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[
+                  styles.recipientToggleBtn,
+                  recipientType === 'DRIVER' && styles.recipientToggleBtnActiveDriver,
+                ]}
+                onPress={() => setRecipientType('DRIVER')}
+              >
+                <Truck size={14} color={recipientType === 'DRIVER' ? COLORS.white : COLORS.textMuted} />
+                <Text
+                  style={[
+                    styles.recipientToggleText,
+                    recipientType === 'DRIVER' && styles.recipientToggleTextActive,
+                  ]}
+                >
+                  Directly to Driver
+                </Text>
+              </TouchableOpacity>
+            </View>
+
+            {/* Recipient Selection Dropdown / Chips */}
+            {recipientType === 'MANAGER' ? (
+              <>
+                <Text style={styles.label}>Select Receiving Manager *</Text>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flexDirection: 'row', marginBottom: 8 }}>
+                  {managers.length === 0 ? (
+                    <Text style={{ fontSize: 12, color: COLORS.textMuted, paddingVertical: 8 }}>No managers found</Text>
+                  ) : managers.map((m) => (
+                    <TouchableOpacity
+                      key={m.id}
+                      style={[styles.chip, selectedManagerId === m.id && styles.chipActive]}
+                      onPress={() => setSelectedManagerId(m.id)}
+                    >
+                      <Text style={[styles.chipText, selectedManagerId === m.id && styles.chipTextActive]}>
+                        {m.name} ({m.username})
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
+              </>
+            ) : (
+              <>
+                <Text style={styles.label}>Select Receiving Driver *</Text>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flexDirection: 'row', marginBottom: 8 }}>
+                  {drivers.length === 0 ? (
+                    <Text style={{ fontSize: 12, color: COLORS.textMuted, paddingVertical: 8 }}>No drivers found</Text>
+                  ) : drivers.map((d) => (
+                    <TouchableOpacity
+                      key={d.id}
+                      style={[styles.chip, selectedDriverId === d.id && styles.chipActiveDriver]}
+                      onPress={() => setSelectedDriverId(d.id)}
+                    >
+                      <Text style={[styles.chipText, selectedDriverId === d.id && styles.chipTextActive]}>
+                        {d.name} {d.mobile_number ? `(${d.mobile_number})` : ''}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
+
+                <Text style={styles.label}>Associated Vehicle / Truck (Optional)</Text>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flexDirection: 'row', marginBottom: 8 }}>
+                  <TouchableOpacity
+                    style={[styles.chip, selectedVehicleId === null && styles.chipActive]}
+                    onPress={() => setSelectedVehicleId(null)}
+                  >
+                    <Text style={[styles.chipText, selectedVehicleId === null && styles.chipTextActive]}>
+                      None / Unassigned
+                    </Text>
+                  </TouchableOpacity>
+                  {vehicles.map((v) => (
+                    <TouchableOpacity
+                      key={v.id}
+                      style={[styles.chip, selectedVehicleId === v.id && styles.chipActive]}
+                      onPress={() => setSelectedVehicleId(v.id)}
+                    >
+                      <Text style={[styles.chipText, selectedVehicleId === v.id && styles.chipTextActive]}>
+                        {v.lorry_number}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
+              </>
+            )}
 
             {/* Amount */}
             <Text style={styles.label}>Advance Amount (₹) *</Text>
@@ -381,13 +669,16 @@ export const AdminOwnerAdvancesScreen: React.FC<{ navigation: any }> = ({ naviga
             />
 
             {/* Date */}
-            <Text style={styles.label}>Advance Date (YYYY-MM-DD) *</Text>
-            <TextInput
-              style={styles.input}
-              value={advanceDate}
-              onChangeText={setAdvanceDate}
-              placeholder="YYYY-MM-DD"
-            />
+            <Text style={styles.label}>Advance Date (DD-MM-YYYY) *</Text>
+            <TouchableOpacity
+              style={[styles.input, { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }]}
+              onPress={() => setDatePickerTarget('form')}
+            >
+              <Text style={{ fontSize: 13, color: advanceDate ? COLORS.text : COLORS.textMuted, fontWeight: advanceDate ? '600' : '400' }}>
+                {advanceDate ? toDisplayDate(advanceDate) : 'Select Date (DD-MM-YYYY)'}
+              </Text>
+              <Calendar size={15} color={COLORS.textMuted} />
+            </TouchableOpacity>
 
             {/* Payment Mode */}
             <Text style={styles.label}>Payment Mode</Text>
@@ -433,6 +724,28 @@ export const AdminOwnerAdvancesScreen: React.FC<{ navigation: any }> = ({ naviga
           </ScrollView>
         </View>
       </Modal>
+
+      {/* Calendar Date Picker Modal */}
+      <DatePickerModal
+        visible={datePickerTarget !== null}
+        value={
+          datePickerTarget === 'from' ? fromDate :
+          datePickerTarget === 'to' ? toDate :
+          datePickerTarget === 'form' ? advanceDate : ''
+        }
+        title={
+          datePickerTarget === 'from' ? 'Filter: From Date' :
+          datePickerTarget === 'to' ? 'Filter: To Date' :
+          'Select Advance Date'
+        }
+        onConfirm={(isoDate) => {
+          if (datePickerTarget === 'from') setFromDate(isoDate);
+          else if (datePickerTarget === 'to') setToDate(isoDate);
+          else if (datePickerTarget === 'form') setAdvanceDate(isoDate);
+          setDatePickerTarget(null);
+        }}
+        onClose={() => setDatePickerTarget(null)}
+      />
     </View>
   );
 };
@@ -517,7 +830,7 @@ const styles = StyleSheet.create({
   },
   listContainer: {
     padding: SPACING.md,
-    gap: 10,
+    gap: 8,
     paddingBottom: 40,
   },
   centerBox: {
@@ -749,5 +1062,180 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '800',
     color: COLORS.white,
+  },
+  pdfBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 9,
+    paddingVertical: 7,
+    borderRadius: RADIUS.md,
+  },
+  printBtn: {
+    backgroundColor: '#0284c7',
+  },
+  downloadBtn: {
+    backgroundColor: '#059669',
+  },
+  pdfBtnText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: COLORS.white,
+  },
+  clearFiltersBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: '#fef2f2',
+    borderWidth: 1,
+    borderColor: '#fca5a5',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 20,
+  },
+  clearFiltersBtnText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#dc2626',
+  },
+  dateRangeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: '#f8fafc',
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    borderRadius: 20,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+  },
+  datePickerBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 12,
+  },
+  datePickerBtnActive: {
+    backgroundColor: '#eff6ff',
+  },
+  datePickerBtnText: {
+    fontSize: 11,
+    color: COLORS.textMuted,
+    fontWeight: '500',
+  },
+  datePickerBtnTextActive: {
+    color: COLORS.primary,
+    fontWeight: '700',
+  },
+  dateInput: {
+    fontSize: 11,
+    color: COLORS.text,
+    padding: 0,
+    minWidth: 90,
+    maxWidth: 110,
+  },
+  filterChipRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: SPACING.sm,
+    marginBottom: 6,
+  },
+  filterPill: {
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 16,
+    backgroundColor: '#f1f5f9',
+    borderWidth: 1,
+    borderColor: COLORS.border,
+  },
+  filterPillActive: {
+    backgroundColor: COLORS.primary,
+    borderColor: COLORS.primary,
+  },
+  filterPillActiveDriver: {
+    backgroundColor: '#7c3aed',
+    borderColor: '#7c3aed',
+  },
+  filterPillText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: COLORS.textMuted,
+  },
+  filterPillTextActive: {
+    color: COLORS.white,
+  },
+  recipientToggleRow: {
+    flexDirection: 'row',
+    gap: 8,
+    marginBottom: 8,
+  },
+  recipientToggleBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 8,
+    borderRadius: RADIUS.md,
+    backgroundColor: '#f1f5f9',
+    borderWidth: 1,
+    borderColor: COLORS.border,
+  },
+  recipientToggleBtnActive: {
+    backgroundColor: COLORS.primary,
+    borderColor: COLORS.primary,
+  },
+  recipientToggleBtnActiveDriver: {
+    backgroundColor: '#7c3aed',
+    borderColor: '#7c3aed',
+  },
+  recipientToggleText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: COLORS.textMuted,
+  },
+  recipientToggleTextActive: {
+    color: COLORS.white,
+  },
+  chipActiveDriver: {
+    backgroundColor: '#7c3aed',
+    borderColor: '#7c3aed',
+  },
+  driverDirectBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: '#f5f3ff',
+    borderWidth: 1,
+    borderColor: '#ddd6fe',
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+    borderRadius: 4,
+  },
+  driverDirectBadgeText: {
+    fontSize: 9.5,
+    fontWeight: '800',
+    color: '#7c3aed',
+    letterSpacing: 0.3,
+  },
+  managerBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: '#f0f9ff',
+    borderWidth: 1,
+    borderColor: '#bae6fd',
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+    borderRadius: 4,
+  },
+  managerBadgeText: {
+    fontSize: 9.5,
+    fontWeight: '800',
+    color: '#0284c7',
+    letterSpacing: 0.3,
   },
 });

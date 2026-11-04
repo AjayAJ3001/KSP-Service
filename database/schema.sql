@@ -137,7 +137,13 @@ CREATE TABLE trips (
     CHECK (status IN ('NEW', 'DRAFT', 'PAYMENT_PENDING', 'PARTIALLY_PAID', 'SETTLED', 'CANCELLED')),
   created_by INTEGER NOT NULL REFERENCES users(id),
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-  updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  weigh_bill_hash VARCHAR(64),
+  weigh_bill_slip_no VARCHAR(80),
+  weigh_bill_vehicle_no VARCHAR(30),
+  weigh_bill_net_weight DECIMAL(12,3),
+  weigh_bill_accepted_weight DECIMAL(12,3),
+  weigh_bill_image TEXT
 );
 
 -- TRIP PAYMENTS
@@ -213,3 +219,7 @@ CREATE INDEX idx_audit_logs_user ON audit_logs(user_id);
 CREATE INDEX idx_audit_logs_module ON audit_logs(module);
 CREATE INDEX idx_audit_logs_created_at ON audit_logs(created_at);
 CREATE INDEX idx_freight_rates_route ON freight_rates(route_id);
+CREATE INDEX IF NOT EXISTS idx_trips_created_at ON trips(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_trips_status_date ON trips(status, trip_date DESC);
+CREATE INDEX IF NOT EXISTS idx_settlements_status ON settlements(settlement_status);
+CREATE INDEX IF NOT EXISTS idx_trip_payments_payment_date ON trip_payments(payment_date);

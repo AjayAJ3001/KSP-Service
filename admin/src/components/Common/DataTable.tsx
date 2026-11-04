@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { ChevronLeft, ChevronRight, Search } from 'lucide-react';
 
 export interface Column<T> {
@@ -6,6 +6,7 @@ export interface Column<T> {
   accessor?: keyof T | ((row: T, index: number) => React.ReactNode);
   render?: (row: T, index: number) => React.ReactNode;
   width?: string;
+  className?: string;
 }
 
 interface DataTableProps<T> {
@@ -43,6 +44,18 @@ export function DataTable<T extends { id?: string | number }>({
 }: DataTableProps<T>) {
   const totalPages = Math.ceil(total / limit) || 1;
   const colSpanCount = columns.length + (showSerialNumber ? 1 : 0);
+  const [localSearch, setLocalSearch] = useState(searchValue || '');
+
+  useEffect(() => {
+    setLocalSearch(searchValue || '');
+  }, [searchValue]);
+
+  useEffect(() => {
+    if (onSearchChange === undefined) return;
+    if ((searchValue || '') === localSearch) return;
+    const timer = setTimeout(() => onSearchChange(localSearch), 400);
+    return () => clearTimeout(timer);
+  }, [localSearch, onSearchChange, searchValue]);
 
   return (
     <div>
@@ -55,12 +68,12 @@ export function DataTable<T extends { id?: string | number }>({
                 type="text"
                 className="form-control"
                 placeholder={searchPlaceholder}
-                value={searchValue || ''}
-                onChange={(e) => onSearchChange(e.target.value)}
+                value={localSearch}
+                onChange={(e) => setLocalSearch(e.target.value)}
               />
             </div>
           ) : <div />}
-          {actions && <div style={{ display: 'flex', gap: '10px' }}>{actions}</div>}
+          {actions && <div className="table-toolbar-actions">{actions}</div>}
         </div>
       )}
 
@@ -68,9 +81,9 @@ export function DataTable<T extends { id?: string | number }>({
         <table className="table">
           <thead>
             <tr>
-              {showSerialNumber && <th style={{ width: '65px', textAlign: 'center' }}>S.No</th>}
+              {showSerialNumber && <th style={{ width: '44px', textAlign: 'center' }}>#</th>}
               {columns.map((col, idx) => (
-                <th key={idx} style={{ width: col.width }}>
+                <th key={idx} className={col.className} style={{ width: col.width }}>
                   {col.header}
                 </th>
               ))}
@@ -79,13 +92,13 @@ export function DataTable<T extends { id?: string | number }>({
           <tbody>
             {isLoading ? (
               <tr>
-                <td colSpan={colSpanCount} style={{ textAlign: 'center', padding: '40px' }}>
+                <td colSpan={colSpanCount} style={{ textAlign: 'center', padding: '20px' }}>
                   <div style={{ color: 'var(--text-muted)' }}>Loading records...</div>
                 </td>
               </tr>
             ) : data.length === 0 ? (
               <tr>
-                <td colSpan={colSpanCount} style={{ textAlign: 'center', padding: '40px' }}>
+                <td colSpan={colSpanCount} style={{ textAlign: 'center', padding: '20px' }}>
                   <div style={{ color: 'var(--text-muted)' }}>{emptyMessage}</div>
                 </td>
               </tr>
@@ -95,12 +108,12 @@ export function DataTable<T extends { id?: string | number }>({
                 return (
                   <tr key={row.id !== undefined ? String(row.id) : rowIdx}>
                     {showSerialNumber && (
-                      <td style={{ textAlign: 'center', width: '65px' }}>
+                      <td style={{ textAlign: 'center', width: '44px' }}>
                         <span className="sno-badge">{serialNumber}</span>
                       </td>
                     )}
                     {columns.map((col, colIdx) => (
-                      <td key={colIdx}>
+                      <td key={colIdx} className={col.className}>
                         {col.render
                           ? col.render(row, rowIdx)
                           : typeof col.accessor === 'function'

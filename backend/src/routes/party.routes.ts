@@ -7,9 +7,9 @@ router.use(authenticate);
 
 router.get('/', getParties);
 router.get('/:id', getPartyById);
-router.post('/', authorize('ADMIN'), createParty);
-router.put('/:id', authorize('ADMIN'), updateParty);
-router.patch('/:id/status', authorize('ADMIN'), updatePartyStatus);
-router.delete('/:id', authorize('ADMIN'), deleteParty);
+router.post('/', authorize('ADMIN', 'OWNER'), createParty);
+router.put('/:id', authorize('ADMIN', 'OWNER'), updateParty);
+router.patch('/:id/status', authorize('ADMIN', 'OWNER'), updatePartyStatus);
+router.delete('/:id', authorize('ADMIN', 'OWNER'), deleteParty);
 
 export default router;

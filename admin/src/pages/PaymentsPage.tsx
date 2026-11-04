@@ -1,14 +1,15 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import { CreditCard, History, Trash2, Download, Printer, Calendar, RefreshCw, Clock, FileSpreadsheet, Loader2, FileText } from 'lucide-react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import { CreditCard, History, Trash2, Download, Printer, Calendar, RefreshCw, Clock, FileSpreadsheet, Loader2, Share2 } from 'lucide-react';
 import * as XLSX from 'xlsx';
-import { tripService, paymentService, partyService, vehicleService, routeService } from '../services/adminService';
-import { Trip, TripPayment, Party, Vehicle, Route } from '../types';
+import { tripService, paymentService, partyService, vehicleService, routeService, ownerService } from '../services/adminService';
+import { Trip, TripPayment, Party, Vehicle, Route, Owner } from '../types';
 import { DataTable, Column } from '../components/Common/DataTable';
 import { Modal } from '../components/Common/Modal';
 import { StatusBadge } from '../components/Common/StatusBadge';
 import { formatDateDMY } from '../utils/dateUtils';
 import { DateField } from '../components/Common/DateField';
 import { OverduePaymentAlertModal } from '../components/Common/OverduePaymentAlertModal';
+import { PRINT_BRAND_CSS, printBrandLockup } from '../utils/printBrand';
 
 function downloadCSV(filename: string, headers: string[], rows: (string | number)[][]) {
   const escape = (v: any) => `"${String(v ?? '').replace(/"/g, '""')}"`;
@@ -41,6 +42,7 @@ export const PaymentsPage: React.FC = () => {
   const [trips, setTrips] = useState<Trip[]>([]);
   const [parties, setParties] = useState<Party[]>([]);
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
+  const [owners, setOwners] = useState<Owner[]>([]);
   const [routes, setRoutes] = useState<Route[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
@@ -50,13 +52,14 @@ export const PaymentsPage: React.FC = () => {
   const [toDate, setToDate] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
   const [partyFilter, setPartyFilter] = useState('');
+  const [ownerFilter, setOwnerFilter] = useState('');
   const [vehicleFilter, setVehicleFilter] = useState('');
   const [routeFilter, setRouteFilter] = useState('');
 
   const [isLoading, setIsLoading] = useState(false);
   const [isExportingExcel, setIsExportingExcel] = useState(false);
   const [isPrinting, setIsPrinting] = useState(false);
-  const [downloadingPdfTripId, setDownloadingPdfTripId] = useState<number | null>(null);
+  const [rowExportBusy, setRowExportBusy] = useState<{ id: number; action: 'print' | 'share' | 'download' } | null>(null);
 
   // Overdue payment alert
   const [isOverdueAlertOpen, setIsOverdueAlertOpen] = useState(false);
@@ -77,16 +80,23 @@ export const PaymentsPage: React.FC = () => {
   const thisWeek = getThisWeekRange();
   const isThisWeekActive = fromDate === thisWeek.from && toDate === thisWeek.to;
 
+  const filteredVehicles = useMemo(() => {
+    if (!ownerFilter) return vehicles;
+    return vehicles.filter((v) => String(v.owner_id) === String(ownerFilter));
+  }, [vehicles, ownerFilter]);
+
   const loadLookups = async () => {
     try {
-      const [pRes, vRes, rRes] = await Promise.all([
+      const [pRes, vRes, rRes, oRes] = await Promise.all([
         partyService.getParties({ limit: 200, status: 'ACTIVE' }),
         vehicleService.getVehicles({ limit: 200, status: 'ACTIVE' }),
         routeService.getRoutes({ limit: 500, status: 'ACTIVE' }),
+        ownerService.getOwners({ limit: 500, status: 'ACTIVE' }),
       ]);
       setParties(pRes.data.items || (Array.isArray(pRes.data) ? pRes.data : []));
       setVehicles(vRes.data.items || (Array.isArray(vRes.data) ? vRes.data : []));
       setRoutes(rRes.data.items || []);
+      setOwners(oRes.data.items || (Array.isArray(oRes.data) ? oRes.data : []));
     } catch (err) {
       console.error('Failed to load lookups', err);
     }
@@ -104,6 +114,7 @@ export const PaymentsPage: React.FC = () => {
         limit: 10,
         status: statusFilter || undefined,
         party_id: partyFilter || undefined,
+        owner_id: ownerFilter || undefined,
         vehicle_id: vehicleFilter || undefined,
         route_id: routeFilter || undefined,
         from_date: fromDate || undefined,
@@ -116,7 +127,7 @@ export const PaymentsPage: React.FC = () => {
     } finally {
       setIsLoading(false);
     }
-  }, [page, statusFilter, partyFilter, vehicleFilter, routeFilter, fromDate, toDate]);
+  }, [page, statusFilter, partyFilter, ownerFilter, vehicleFilter, routeFilter, fromDate, toDate]);
 
   useEffect(() => {
     loadTrips();
@@ -137,6 +148,7 @@ export const PaymentsPage: React.FC = () => {
     setFromDate('');
     setToDate('');
     setPartyFilter('');
+    setOwnerFilter('');
     setVehicleFilter('');
     setRouteFilter('');
     setStatusFilter('');
@@ -237,6 +249,7 @@ export const PaymentsPage: React.FC = () => {
         limit: Math.max(total, 5000),
         status: statusFilter || undefined,
         party_id: partyFilter || undefined,
+        owner_id: ownerFilter || undefined,
         vehicle_id: vehicleFilter || undefined,
         route_id: routeFilter || undefined,
         from_date: fromDate || undefined,
@@ -260,6 +273,7 @@ export const PaymentsPage: React.FC = () => {
         'Party Name': t.party_name || '',
         'Unit / Destination': t.to_location || t.from_location || '',
         'Lorry Number': t.lorry_number || '',
+        'Truck Owner': t.owner_name || '—',
         'Total Freight (₹)': parseFloat(String(t.total_freight)) || 0,
         'Received Amount (₹)': parseFloat(String(t.total_received || 0)) || 0,
         'Balance Due (₹)': parseFloat(String(t.balance_due ?? t.total_freight)) || 0,
@@ -279,6 +293,7 @@ export const PaymentsPage: React.FC = () => {
         'Party Name': '',
         'Unit / Destination': '',
         'Lorry Number': '',
+        'Truck Owner': '',
         'Total Freight (₹)': '' as any,
         'Received Amount (₹)': '' as any,
         'Balance Due (₹)': '' as any,
@@ -294,6 +309,7 @@ export const PaymentsPage: React.FC = () => {
         'Party Name': '',
         'Unit / Destination': '',
         'Lorry Number': '',
+        'Truck Owner': '',
         'Total Freight (₹)': sumFreight,
         'Received Amount (₹)': sumReceived,
         'Balance Due (₹)': sumBalanceDue,
@@ -309,6 +325,7 @@ export const PaymentsPage: React.FC = () => {
         { wch: 28 }, // Party Name
         { wch: 22 }, // Unit / Destination
         { wch: 16 }, // Lorry Number
+        { wch: 20 }, // Truck Owner
         { wch: 18 }, // Total Freight
         { wch: 18 }, // Received Amount
         { wch: 18 }, // Balance Due
@@ -321,6 +338,7 @@ export const PaymentsPage: React.FC = () => {
 
       // Secondary Summary Sheet
       const selectedPartyName = partyFilter ? parties.find((p) => String(p.id) === String(partyFilter))?.name || 'Selected' : 'All Parties';
+      const selectedOwnerName = ownerFilter ? owners.find((o) => String(o.id) === String(ownerFilter))?.name || 'Selected' : 'All Owners';
       const selectedVehicleNo = vehicleFilter ? vehicles.find((v) => String(v.id) === String(vehicleFilter))?.lorry_number || 'Selected' : 'All Vehicles';
       const summaryRows = [
         { 'Summary Field': 'Report Name', 'Value': 'Party Payments Ledger Report' },
@@ -329,6 +347,7 @@ export const PaymentsPage: React.FC = () => {
         { 'Summary Field': 'Total Received Amount (₹)', 'Value': sumReceived },
         { 'Summary Field': 'Total Balance Due (₹)', 'Value': sumBalanceDue },
         { 'Summary Field': 'Party Filter', 'Value': selectedPartyName },
+        { 'Summary Field': 'Truck Owner Filter', 'Value': selectedOwnerName },
         { 'Summary Field': 'Vehicle Filter', 'Value': selectedVehicleNo },
         { 'Summary Field': 'Payment Status Filter', 'Value': statusFilter || 'All Statuses' },
         { 'Summary Field': 'Date Range', 'Value': fromDate || toDate ? `${fromDate || 'Start'} to ${toDate || 'End'}` : 'All Dates' },
@@ -361,6 +380,7 @@ export const PaymentsPage: React.FC = () => {
         limit: Math.max(total, 5000),
         status: statusFilter || undefined,
         party_id: partyFilter || undefined,
+        owner_id: ownerFilter || undefined,
         vehicle_id: vehicleFilter || undefined,
         route_id: routeFilter || undefined,
         from_date: fromDate || undefined,
@@ -376,6 +396,9 @@ export const PaymentsPage: React.FC = () => {
       const sumFreight = items.reduce((acc: number, t: Trip) => acc + (parseFloat(String(t.total_freight)) || 0), 0);
       const sumReceived = items.reduce((acc: number, t: Trip) => acc + (parseFloat(String(t.total_received || 0)) || 0), 0);
       const sumBalanceDue = items.reduce((acc: number, t: Trip) => acc + (parseFloat(String(t.balance_due ?? t.total_freight)) || 0), 0);
+      const selectedOwnerName = ownerFilter ? owners.find((o) => String(o.id) === String(ownerFilter))?.name || 'Selected' : 'All Owners';
+      const selectedPartyName = partyFilter ? parties.find((p) => String(p.id) === String(partyFilter))?.name || 'Selected' : 'All Parties';
+      const selectedVehicleNo = vehicleFilter ? vehicles.find((v) => String(v.id) === String(vehicleFilter))?.lorry_number || 'Selected' : 'All Vehicles';
 
       const printHtml = `
 <!DOCTYPE html>
@@ -384,10 +407,11 @@ export const PaymentsPage: React.FC = () => {
   <meta charset="utf-8" />
   <title>KSP Logistics - Party Payments Ledger</title>
   <style>
+    ${PRINT_BRAND_CSS}
     * { box-sizing: border-box; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
     body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif; margin: 0; padding: 20px; color: #1e293b; background: #fff; font-size: 11.5px; }
     @page { size: landscape; margin: 10mm; }
-    .header-bar { display: flex; justify-content: space-between; align-items: flex-start; padding-bottom: 12px; border-bottom: 2px solid #0f172a; margin-bottom: 14px; }
+    .header-bar { display: flex; justify-content: space-between; align-items: center; padding-bottom: 10px; border-bottom: 3px solid #0f172a; margin-bottom: 14px; }
     .company-title { font-size: 20px; font-weight: 800; color: #0f172a; letter-spacing: 0.5px; margin: 0 0 4px 0; }
     .report-subtitle { font-size: 13px; font-weight: 700; color: #2563eb; margin: 0; text-transform: uppercase; letter-spacing: 0.5px; }
     .meta-text { font-size: 11px; color: #64748b; margin: 0; }
@@ -420,8 +444,11 @@ export const PaymentsPage: React.FC = () => {
 
   <div class="header-bar">
     <div>
-      <h1 class="company-title">KSP TRANSPORT &amp; LOGISTICS</h1>
+      ${printBrandLockup()}
       <div class="report-subtitle">PARTY FREIGHT PAYMENTS &amp; BALANCE LEDGER REPORT</div>
+      <p class="meta-text" style="margin-top: 4px;">
+        <strong>Filters:</strong> Party: ${selectedPartyName} | Truck Owner: ${selectedOwnerName} | Vehicle: ${selectedVehicleNo} | Status: ${statusFilter || 'All'} | Date: ${fromDate || toDate ? `${fromDate || 'Start'} to ${toDate || 'End'}` : 'All Dates'}
+      </p>
     </div>
     <div style="text-align: right;">
       <div style="font-weight: 800; font-size: 13px; color: #0f172a;">Total Records: ${items.length}</div>
@@ -437,6 +464,7 @@ export const PaymentsPage: React.FC = () => {
         <th>Party Name</th>
         <th>Unit / Destination</th>
         <th style="width: 90px;">Lorry No</th>
+        <th style="width: 100px;">Truck Owner</th>
         <th class="num" style="width: 95px;">Freight (₹)</th>
         <th class="num" style="width: 95px;">Received (₹)</th>
         <th class="num" style="width: 95px;">Balance (₹)</th>
@@ -465,6 +493,7 @@ export const PaymentsPage: React.FC = () => {
           <td><strong>${t.party_name || '-'}</strong></td>
           <td>${t.to_location || t.from_location || '-'}</td>
           <td><strong>${t.lorry_number || '-'}</strong></td>
+          <td>${t.owner_name || '-'}</td>
           <td class="num">₹${(parseFloat(String(t.total_freight)) || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td>
           <td class="num" style="color:#15803d; font-weight:600;">₹${rec.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td>
           <td class="num" style="color:${bal > 0 ? '#b91c1c' : '#15803d'}; font-weight:700;">₹${bal.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td>
@@ -474,7 +503,7 @@ export const PaymentsPage: React.FC = () => {
       }).join('')}
       <tr class="footer-row">
         <td class="center">TOTAL</td>
-        <td colspan="5"><strong>Total Count: ${items.length} Trips</strong></td>
+        <td colspan="6"><strong>Total Count: ${items.length} Trips</strong></td>
         <td class="num"><strong>₹${sumFreight.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</strong></td>
         <td class="num" style="color:#15803d;"><strong>₹${sumReceived.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</strong></td>
         <td class="num" style="color:${sumBalanceDue > 0 ? '#b91c1c' : '#15803d'};"><strong>₹${sumBalanceDue.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</strong></td>
@@ -518,6 +547,7 @@ export const PaymentsPage: React.FC = () => {
         'Party Name',
         'Unit / Destination',
         'Lorry Number',
+        'Truck Owner',
         'Total Freight (INR)',
         'Received Amount (INR)',
         'Balance Due (INR)',
@@ -530,6 +560,7 @@ export const PaymentsPage: React.FC = () => {
         t.party_name || '',
         t.to_location || t.from_location || '',
         t.lorry_number || '',
+        t.owner_name || '',
         (parseFloat(String(t.total_freight)) || 0).toFixed(2),
         (parseFloat(String(t.total_received || 0)) || 0).toFixed(2),
         (parseFloat(String(t.balance_due ?? t.total_freight)) || 0).toFixed(2),
@@ -543,10 +574,10 @@ export const PaymentsPage: React.FC = () => {
     );
   };
 
-  // Single-row PDF Voucher Export
-  const handleDownloadPdfSingleTrip = async (t: Trip) => {
+  // Single-row PDF Voucher Export (print / share / download)
+  const handleTripVoucher = async (t: Trip, mode: 'print' | 'share' | 'download') => {
     try {
-      setDownloadingPdfTripId(t.id);
+      setRowExportBusy({ id: t.id, action: mode });
 
       // Fetch payment history for this specific trip
       let payments: TripPayment[] = [];
@@ -612,13 +643,9 @@ export const PaymentsPage: React.FC = () => {
             <table style="width: 100%; border-bottom: 2.5px solid #1e3a8a; padding-bottom: 12px; margin-bottom: 14px; border-collapse: collapse;">
               <tr>
                 <td style="width: 58%; vertical-align: top; text-align: left;">
-                  <div style="font-size: 24px; font-weight: 900; color: #1e3a8a; line-height: 1.1;">K.S.P. TRANSPORT</div>
-                  <div style="font-size: 10.5px; font-weight: 700; color: #b45309; text-transform: uppercase; margin-top: 3px;">
-                    Professional Heavy Freight &amp; Logistics Services
-                  </div>
+                  ${printBrandLockup('Professional Heavy Freight &amp; Logistics')}
                   <div style="font-size: 10px; color: #475569; margin-top: 4px; line-height: 1.45;">
-                    Head Office: Namakkal / Salem Highway, Tamil Nadu<br/>
-                    Registered Transport Carrier &bull; Phone: +91 98765 43210
+                    Head Office: Namakkal / Salem Highway, Tamil Nadu
                   </div>
                 </td>
                 <td style="width: 42%; vertical-align: top; text-align: right;">
@@ -789,6 +816,33 @@ export const PaymentsPage: React.FC = () => {
         </div>
       `;
 
+      if (mode === 'print') {
+        const win = window.open('', '_blank', 'width=900,height=1100');
+        if (!win) {
+          alert('Allow popups to print this voucher.');
+          return;
+        }
+        win.document.open();
+        win.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"/><title>KSP-PV-${t.id}</title>
+          <style>
+    ${PRINT_BRAND_CSS}
+            *{box-sizing:border-box}
+            body{margin:16px;background:#fff;font-family:Segoe UI,Arial,sans-serif}
+            .print-bar{display:flex;justify-content:flex-end;gap:8px;margin-bottom:12px}
+            .pbtn{background:#1d4ed8;color:#fff;border:none;padding:8px 14px;border-radius:6px;cursor:pointer;font-weight:700}
+            @media print{.print-bar{display:none!important}}
+          </style></head><body>
+          <div class="print-bar">
+            <button class="pbtn" onclick="window.print()">Print / Save PDF</button>
+            <button class="pbtn" style="background:#64748b" onclick="window.close()">Close</button>
+          </div>
+          ${voucherHtml}
+        </body></html>`);
+        win.document.close();
+        setTimeout(() => win.print(), 400);
+        return;
+      }
+
       const RENDER_WIDTH = 794;
       const container = document.createElement('div');
       container.style.cssText = `
@@ -839,16 +893,30 @@ export const PaymentsPage: React.FC = () => {
       }
 
       const partySlug = (t.party_name || 'party').replace(/[^a-zA-Z0-9]/g, '_');
-      pdf.save(`KSP_Payment_Voucher_Trip_${t.id}_${partySlug}.pdf`);
+      const filename = `KSP_Payment_Voucher_Trip_${t.id}_${partySlug}.pdf`;
+
+      if (mode === 'share') {
+        const blob = pdf.output('blob');
+        const file = new File([blob], filename, { type: 'application/pdf' });
+        if (navigator.share && (navigator as any).canShare?.({ files: [file] })) {
+          await navigator.share({ title: `KSP Payment Voucher Trip #${t.id}`, files: [file] });
+        } else {
+          pdf.save(filename);
+          alert('Sharing is not supported in this browser. PDF downloaded instead.');
+        }
+      } else {
+        pdf.save(filename);
+      }
 
       if (container.parentNode) {
         container.parentNode.removeChild(container);
       }
     } catch (err: any) {
+      if (err?.name === 'AbortError') return;
       console.error('Failed to generate trip PDF voucher', err);
       alert('Failed to generate PDF voucher. Please try again.');
     } finally {
-      setDownloadingPdfTripId(null);
+      setRowExportBusy(null);
     }
   };
 
@@ -862,6 +930,19 @@ export const PaymentsPage: React.FC = () => {
         <span style={{ fontWeight: 600, color: '#1e40af', background: '#eff6ff', padding: '2px 8px', borderRadius: '4px' }}>
           {t.to_location || t.from_location}
         </span>
+      ),
+    },
+    {
+      header: 'Truck & Owner',
+      render: (t) => (
+        <div>
+          <div style={{ fontWeight: 700, fontFamily: 'monospace', color: '#0f172a' }}>{t.lorry_number || '—'}</div>
+          {t.owner_name && (
+            <div style={{ fontSize: '11px', color: '#6b21a8', fontWeight: 600, marginTop: '2px' }}>
+              👤 {t.owner_name}
+            </div>
+          )}
+        </div>
       ),
     },
     { header: 'Total Freight', render: (t) => formatCurrency(t.total_freight) },
@@ -880,8 +961,10 @@ export const PaymentsPage: React.FC = () => {
     { header: 'Status', accessor: 'status', render: (t) => <StatusBadge status={t.status} /> },
     {
       header: 'Actions',
+      width: '280px',
+      className: 'actions-cell',
       render: (t) => (
-        <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+        <div className="table-actions">
           {(t.balance_due ?? t.total_freight) > 0 && t.status !== 'CANCELLED' && (
             <button onClick={() => openPaymentModal(t)} className="btn btn-primary btn-sm" title="Collect Payment">
               <CreditCard size={14} /> Collect
@@ -891,35 +974,37 @@ export const PaymentsPage: React.FC = () => {
             <History size={14} /> History
           </button>
           <button
-            onClick={() => handleDownloadSingleTrip(t)}
+            type="button"
+            onClick={() => handleTripVoucher(t, 'print')}
+            disabled={rowExportBusy?.id === t.id}
             className="btn btn-outline btn-sm"
-            style={{ padding: '5px 8px', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
-            title="Download this record (CSV)"
+            style={{ padding: '5px 8px', display: 'inline-flex', alignItems: 'center', gap: '4px', borderColor: '#93c5fd', color: '#1d4ed8', background: '#eff6ff' }}
+            title="Print this payment voucher"
           >
-            <Download size={13} />
-            <span style={{ fontSize: '11px', fontWeight: 600 }}>CSV</span>
+            {rowExportBusy?.id === t.id && rowExportBusy.action === 'print' ? <Loader2 size={13} className="animate-spin" /> : <Printer size={13} />}
+            <span style={{ fontSize: '11px', fontWeight: 700 }}>Print</span>
           </button>
           <button
-            onClick={() => handleDownloadPdfSingleTrip(t)}
-            disabled={downloadingPdfTripId === t.id}
+            type="button"
+            onClick={() => handleTripVoucher(t, 'share')}
+            disabled={rowExportBusy?.id === t.id}
             className="btn btn-outline btn-sm"
-            style={{
-              padding: '5px 8px',
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: '4px',
-              borderColor: '#ef4444',
-              color: '#dc2626',
-              background: '#fef2f2',
-            }}
-            title="Download Payment Voucher (PDF)"
+            style={{ padding: '5px 8px', display: 'inline-flex', alignItems: 'center', gap: '4px', borderColor: '#ddd6fe', color: '#7c3aed', background: '#f5f3ff' }}
+            title="Share this payment voucher"
           >
-            {downloadingPdfTripId === t.id ? (
-              <Loader2 size={13} className="animate-spin" />
-            ) : (
-              <FileText size={13} />
-            )}
-            <span style={{ fontSize: '11px', fontWeight: 700 }}>PDF</span>
+            {rowExportBusy?.id === t.id && rowExportBusy.action === 'share' ? <Loader2 size={13} className="animate-spin" /> : <Share2 size={13} />}
+            <span style={{ fontSize: '11px', fontWeight: 700 }}>Share</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => handleTripVoucher(t, 'download')}
+            disabled={rowExportBusy?.id === t.id}
+            className="btn btn-outline btn-sm"
+            style={{ padding: '5px 8px', display: 'inline-flex', alignItems: 'center', gap: '4px', borderColor: '#86efac', color: '#15803d', background: '#ecfdf5' }}
+            title="Download this payment voucher (PDF)"
+          >
+            {rowExportBusy?.id === t.id && rowExportBusy.action === 'download' ? <Loader2 size={13} className="animate-spin" /> : <Download size={13} />}
+            <span style={{ fontSize: '11px', fontWeight: 700 }}>Download</span>
           </button>
         </div>
       ),
@@ -1097,17 +1182,9 @@ export const PaymentsPage: React.FC = () => {
         </div>
 
         {/* Bottom Control Line: Entity Filters (Party, Truck, Unit, Payment Status, Reset) */}
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: '12px',
-            flexWrap: 'wrap',
-            paddingTop: '14px',
-          }}
-        >
+        <div className="filter-grid" style={{ paddingTop: '14px' }}>
           {/* Party Wise */}
-          <div style={{ width: '180px', flexShrink: 0 }}>
+          <div>
             <select
               className="form-control form-select"
               style={{ width: '100%', height: '38px' }}
@@ -1126,28 +1203,62 @@ export const PaymentsPage: React.FC = () => {
             </select>
           </div>
 
+          {/* Truck Owner Wise */}
+          <div>
+            <select
+              className="form-control form-select"
+              style={{ width: '100%', height: '38px' }}
+              value={ownerFilter}
+              onChange={(e) => {
+                const val = e.target.value;
+                setOwnerFilter(val);
+                if (val && vehicleFilter) {
+                  const currVehicle = vehicles.find((v) => String(v.id) === String(vehicleFilter));
+                  if (currVehicle && String(currVehicle.owner_id) !== String(val)) {
+                    setVehicleFilter('');
+                  }
+                }
+                setPage(1);
+              }}
+            >
+              <option value="">All Truck Owners</option>
+              {owners.map((o) => (
+                <option key={o.id} value={o.id}>
+                  {o.name} {o.mobile_number ? `(${o.mobile_number})` : ''}
+                </option>
+              ))}
+            </select>
+          </div>
+
           {/* Truck Wise */}
-          <div style={{ width: '180px', flexShrink: 0 }}>
+          <div>
             <select
               className="form-control form-select"
               style={{ width: '100%', height: '38px' }}
               value={vehicleFilter}
               onChange={(e) => {
-                setVehicleFilter(e.target.value);
+                const val = e.target.value;
+                setVehicleFilter(val);
+                if (val && !ownerFilter) {
+                  const cur = vehicles.find((v) => String(v.id) === String(val));
+                  if (cur?.owner_id) {
+                    setOwnerFilter(String(cur.owner_id));
+                  }
+                }
                 setPage(1);
               }}
             >
-              <option value="">All Vehicle Numbers</option>
-              {vehicles.map((v) => (
+              <option value="">{ownerFilter ? 'All Vehicles of Owner' : 'All Vehicle Numbers'}</option>
+              {filteredVehicles.map((v) => (
                 <option key={v.id} value={v.id}>
-                  {v.lorry_number}
+                  {v.lorry_number} {v.owner_name ? `• ${v.owner_name}` : ''}
                 </option>
               ))}
             </select>
           </div>
 
           {/* Party Delivery Unit (Route) Filter */}
-          <div style={{ width: '160px', flexShrink: 0 }}>
+          <div>
             <select
               className="form-control form-select"
               style={{ width: '100%', height: '38px' }}
@@ -1167,7 +1278,7 @@ export const PaymentsPage: React.FC = () => {
           </div>
 
           {/* Payment Status Filter */}
-          <div style={{ width: '190px', flexShrink: 0 }}>
+          <div>
             <select
               className="form-control form-select"
               style={{ width: '100%', height: '38px' }}
@@ -1257,6 +1368,16 @@ export const PaymentsPage: React.FC = () => {
                 <span>Unit / Destination:</span>
                 <strong>{selectedTrip.to_location || selectedTrip.from_location}</strong>
               </div>
+              <div className="slip-row" style={{ border: 'none' }}>
+                <span>Assigned Truck:</span>
+                <strong style={{ fontFamily: 'monospace' }}>{selectedTrip.lorry_number || '—'}</strong>
+              </div>
+              {selectedTrip.owner_name && (
+                <div className="slip-row" style={{ border: 'none' }}>
+                  <span>Truck Owner:</span>
+                  <strong style={{ color: '#6b21a8' }}>👤 {selectedTrip.owner_name}</strong>
+                </div>
+              )}
               <div className="slip-row" style={{ border: 'none' }}>
                 <span>Total Freight Billed:</span>
                 <strong>{formatCurrency(selectedTrip.total_freight)}</strong>
@@ -1367,6 +1488,15 @@ export const PaymentsPage: React.FC = () => {
         maxWidth="650px"
       >
         <div>
+          {selectedTrip && (
+            <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', padding: '12px 16px', borderRadius: '8px', marginBottom: '14px', display: 'flex', gap: '20px', flexWrap: 'wrap', alignItems: 'center', fontSize: '13px' }}>
+              <div><span style={{ color: '#64748b' }}>Party:</span> <strong>{selectedTrip.party_name}</strong></div>
+              <div><span style={{ color: '#64748b' }}>Truck:</span> <strong style={{ fontFamily: 'monospace' }}>{selectedTrip.lorry_number || '—'}</strong></div>
+              {selectedTrip.owner_name && (
+                <div><span style={{ color: '#64748b' }}>Owner:</span> <strong style={{ color: '#6b21a8' }}>👤 {selectedTrip.owner_name}</strong></div>
+              )}
+            </div>
+          )}
           {paymentsList.length === 0 ? (
             <p style={{ textAlign: 'center', padding: '24px', color: 'var(--text-muted)' }}>
               No payments recorded yet for this trip.

@@ -22,6 +22,8 @@ export const StatusBadge: React.FC<StatusBadgeProps> = ({ status }) => {
         return 'badge-danger';
       case 'NEW':
         return 'badge-info';
+      case 'NO_EXPENSE':
+        return 'badge-neutral';
       default:
         return 'badge-neutral';
     }

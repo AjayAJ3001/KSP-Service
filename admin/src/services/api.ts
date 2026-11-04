@@ -8,7 +8,7 @@ const api = axios.create({
     'Content-Type': 'application/json',
     'x-client-platform': 'ADMIN',
   },
-  timeout: 15000,
+  timeout: 30000,
 });
 
 // Request interceptor to attach JWT token
@@ -26,7 +26,19 @@ api.interceptors.request.use(
 // Response interceptor to handle errors
 api.interceptors.response.use(
   (response) => response,
-  (error) => {
+  async (error) => {
+    const originalRequest = error.config as typeof error.config & { _retriedOnce?: boolean };
+    const isNetworkError = !error.response && (
+      error.message === 'Network Error' ||
+      error.code === 'ERR_NETWORK' ||
+      error.code === 'ECONNABORTED' ||
+      error.code === 'ETIMEDOUT'
+    );
+    if (isNetworkError && originalRequest && !originalRequest._retriedOnce) {
+      originalRequest._retriedOnce = true;
+      await new Promise((r) => setTimeout(r, 600));
+      return api(originalRequest);
+    }
     if (error.response && error.response.status === 401) {
       localStorage.removeItem('ksp_admin_token');
       localStorage.removeItem('ksp_admin_user');

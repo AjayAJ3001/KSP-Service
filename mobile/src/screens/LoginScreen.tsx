@@ -13,11 +13,16 @@ import {
   Animated,
   Easing,
   Pressable,
+  ImageBackground,
 } from 'react-native';
-import { Truck, Eye, EyeOff, Lock, User as UserIcon, AlertCircle, Server, CheckCircle2, XCircle, Wifi, Shield, Briefcase } from 'lucide-react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { StatusBar } from 'expo-status-bar';
+import { Truck, Eye, EyeOff, Lock, User as UserIcon, AlertCircle, Server, Wifi } from 'lucide-react-native';
 import { useAuth } from '../context/AuthContext';
 import { COLORS, SPACING, RADIUS, SHADOWS } from '../constants/theme';
-import { getServerBaseUrl, setServerBaseUrl, checkServerHealth, CURRENT_WIFI_IP } from '../services/api';
+import { getServerBaseUrl, setServerBaseUrl, checkServerHealth, discoverWorkingBaseUrl, CURRENT_WIFI_IP } from '../services/api';
+
+const loginBg = require('../../assets/transport_bg_day.jpg');
 
 export const LoginScreen: React.FC<{ navigation: any }> = ({ navigation }) => {
   const [username, setUsername] = useState('');
@@ -29,7 +34,6 @@ export const LoginScreen: React.FC<{ navigation: any }> = ({ navigation }) => {
   const [isPassFocused, setIsPassFocused] = useState(false);
 
   // Server settings modal state
-  const [currentServerUrl, setCurrentServerUrl] = useState(getServerBaseUrl());
   const [showServerModal, setShowServerModal] = useState(false);
   const [customServerUrl, setCustomServerUrl] = useState(getServerBaseUrl());
   const [testResult, setTestResult] = useState<{ ok: boolean; message: string } | null>(null);
@@ -56,13 +60,13 @@ export const LoginScreen: React.FC<{ navigation: any }> = ({ navigation }) => {
   const btnTranslateY = useRef(new Animated.Value(20)).current;
   const btnOpacity = useRef(new Animated.Value(0)).current;
 
-  const footerOpacity = useRef(new Animated.Value(0)).current;
-
   const { login } = useAuth();
 
   useEffect(() => {
-    setCurrentServerUrl(getServerBaseUrl());
     setCustomServerUrl(getServerBaseUrl());
+    discoverWorkingBaseUrl().then((url) => {
+      if (url) setCustomServerUrl(url);
+    }).catch(() => {});
 
     // ── Initial Entry Sequence ──
     Animated.parallel([
@@ -112,7 +116,6 @@ export const LoginScreen: React.FC<{ navigation: any }> = ({ navigation }) => {
           Animated.timing(btnTranslateY, { toValue: 0, duration: 400, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
           Animated.timing(btnOpacity, { toValue: 1, duration: 350, useNativeDriver: true }),
         ]),
-        Animated.timing(footerOpacity, { toValue: 1, duration: 450, useNativeDriver: true }),
       ]).start();
     });
 
@@ -219,12 +222,7 @@ export const LoginScreen: React.FC<{ navigation: any }> = ({ navigation }) => {
       await login(username.trim(), password);
       navigation.replace('MainTabs');
     } catch (err: any) {
-      const msg = err.message || 'Invalid username or password.';
-      setError(
-        msg.includes('Network') || msg.includes('server')
-          ? `${msg}\nTap "API Settings" below if IP changed.`
-          : msg
-      );
+      setError(err.message || 'Invalid username or password.');
     } finally {
       setIsLoading(false);
     }
@@ -250,7 +248,6 @@ export const LoginScreen: React.FC<{ navigation: any }> = ({ navigation }) => {
   const handleSaveServerUrl = async (newUrl?: string) => {
     const url = newUrl || customServerUrl;
     const saved = await setServerBaseUrl(url);
-    setCurrentServerUrl(saved);
     setCustomServerUrl(saved);
     setShowServerModal(false);
     setTestResult(null);
@@ -258,88 +255,87 @@ export const LoginScreen: React.FC<{ navigation: any }> = ({ navigation }) => {
   };
 
   return (
-    <KeyboardAvoidingView
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-      style={styles.container}
-    >
-      <ScrollView contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled">
-        {/* Animated Brand Banner */}
-        <View style={styles.brandContainer}>
-          <View style={styles.logoAnchor}>
-            {/* Ambient Breathing Glow */}
+    <ImageBackground source={loginBg} style={styles.bg} resizeMode="cover">
+      <StatusBar style="light" />
+      <View style={styles.overlay} />
+      <SafeAreaView style={styles.safe}>
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          style={styles.container}
+        >
+          <ScrollView
+            contentContainerStyle={styles.scrollContent}
+            keyboardShouldPersistTaps="handled"
+            showsVerticalScrollIndicator={false}
+          >
             <Animated.View
               style={[
-                styles.logoGlowRing,
+                styles.card,
                 {
-                  transform: [{ scale: glowScale }],
-                  opacity: glowOpacity,
-                },
-              ]}
-            />
-            {/* Floating Logo Badge */}
-            <Animated.View
-              style={[
-                styles.logoBadge,
-                {
+                  opacity: cardOpacity,
                   transform: [
-                    { scale: logoScale },
-                    { translateY: logoFloat },
+                    { translateY: cardTranslateY },
+                    { translateX: shakeAnim },
                   ],
                 },
               ]}
             >
-              <Truck size={42} color={COLORS.white} />
-            </Animated.View>
-          </View>
+              <View style={styles.cardAccent} />
 
-          <Animated.View
-            style={{
-              alignItems: 'center',
-              transform: [{ translateY: brandTranslateY }],
-              opacity: brandOpacity,
-            }}
-          >
-            <Text style={styles.brandName}>KSP TRANSPORT</Text>
-            <Text style={styles.brandTagline}>Mobile Driver & Operator Portal</Text>
-          </Animated.View>
-        </View>
+              <View style={styles.brandContainer}>
+                <View style={styles.logoAnchor}>
+                  <Animated.View
+                    style={[
+                      styles.logoGlowRing,
+                      {
+                        transform: [{ scale: glowScale }],
+                        opacity: glowOpacity,
+                      },
+                    ]}
+                  />
+                  <Animated.View
+                    style={[
+                      styles.logoBadge,
+                      {
+                        transform: [
+                          { scale: logoScale },
+                          { translateY: logoFloat },
+                        ],
+                      },
+                    ]}
+                  >
+                    <Pressable
+                      onLongPress={() => {
+                        setCustomServerUrl(getServerBaseUrl());
+                        setTestResult(null);
+                        setShowServerModal(true);
+                      }}
+                    >
+                      <Truck size={30} color={COLORS.white} />
+                    </Pressable>
+                  </Animated.View>
+                </View>
 
-        {/* Animated Login Form Card */}
-        <Animated.View
-          style={[
-            styles.card,
-            {
-              opacity: cardOpacity,
-              transform: [
-                { translateY: cardTranslateY },
-                { translateX: shakeAnim },
-              ],
-            },
-          ]}
-        >
-          <View style={styles.cardHeaderRow}>
-            <View>
+                <Animated.View
+                  style={{
+                    alignItems: 'center',
+                    transform: [{ translateY: brandTranslateY }],
+                    opacity: brandOpacity,
+                  }}
+                >
+                  <Text style={styles.brandName}>KSP TRANSPORT</Text>
+                  <Text style={styles.brandTagline}>Fleet Operations Portal</Text>
+                </Animated.View>
+              </View>
+
               <Text style={styles.cardTitle}>Sign In</Text>
-              <Text style={styles.cardSubtitle}>Manager, Operator & Admin Portal</Text>
-            </View>
-            <View style={styles.roleBadgesRow}>
-              <View style={styles.roleBadge}>
-                <Briefcase size={11} color="#2563eb" />
-                <Text style={styles.roleBadgeText}>Manager</Text>
-              </View>
-              <View style={[styles.roleBadge, { backgroundColor: '#fef3c7', borderColor: '#fde68a' }]}>
-                <Shield size={11} color="#d97706" />
-                <Text style={[styles.roleBadgeText, { color: '#b45309' }]}>Admin</Text>
-              </View>
-            </View>
-          </View>
 
-          {error ? (
-            <View style={styles.errorBox}>
-              <AlertCircle size={18} color={COLORS.danger} />
-              <Text style={styles.errorText}>{error}</Text>
-            </View>
-          ) : null}
+              {error ? (
+                <View style={styles.errorBox}>
+                  <AlertCircle size={18} color={COLORS.danger} />
+                  <Text style={styles.errorText}>{error}</Text>
+                </View>
+              ) : null}
 
           {/* Username Input with Animation & Focus Glow */}
           <Animated.View
@@ -451,30 +447,8 @@ export const LoginScreen: React.FC<{ navigation: any }> = ({ navigation }) => {
               )}
             </Pressable>
           </Animated.View>
-        </Animated.View>
-
-        {/* Server Connection Badge with Fade In */}
-        <Animated.View style={{ opacity: footerOpacity }}>
-          <TouchableOpacity
-            style={styles.serverStatusBtn}
-            onPress={() => {
-              setCustomServerUrl(getServerBaseUrl());
-              setTestResult(null);
-              setShowServerModal(true);
-            }}
-          >
-            <View style={styles.statusDot} />
-            <Server size={13} color="#94a3b8" />
-            <Text style={styles.serverStatusText} numberOfLines={1}>
-              API: {currentServerUrl}
-            </Text>
-          </TouchableOpacity>
-
-          <Text style={styles.footerNote}>
-            KSP Transport Management System • Enterprise Security
-          </Text>
-        </Animated.View>
-      </ScrollView>
+            </Animated.View>
+          </ScrollView>
 
       {/* Server Configuration Modal */}
       <Modal visible={showServerModal} transparent animationType="slide">
@@ -597,42 +571,60 @@ export const LoginScreen: React.FC<{ navigation: any }> = ({ navigation }) => {
           </View>
         </View>
       </Modal>
-    </KeyboardAvoidingView>
+        </KeyboardAvoidingView>
+      </SafeAreaView>
+    </ImageBackground>
   );
 };
 
 const styles = StyleSheet.create({
+  bg: {
+    flex: 1,
+    width: '100%',
+    height: '100%',
+  },
+  overlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(15, 23, 42, 0.38)',
+  },
+  safe: {
+    flex: 1,
+  },
   container: {
     flex: 1,
-    backgroundColor: COLORS.primary,
+    backgroundColor: 'transparent',
   },
   scrollContent: {
     flexGrow: 1,
     justifyContent: 'center',
-    padding: SPACING.lg,
+    alignItems: 'center',
+    paddingHorizontal: SPACING.lg,
+    paddingVertical: SPACING.xl,
   },
   brandContainer: {
     alignItems: 'center',
-    marginBottom: SPACING.xl,
+    marginBottom: SPACING.md,
   },
   logoAnchor: {
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: SPACING.md,
+    marginBottom: SPACING.sm,
     position: 'relative',
+    height: 72,
+    width: 72,
   },
   logoGlowRing: {
     position: 'absolute',
-    width: 96,
-    height: 96,
-    borderRadius: 32,
-    backgroundColor: COLORS.accent,
+    width: 80,
+    height: 80,
+    borderRadius: 24,
+    backgroundColor: COLORS.indigo,
   },
   logoBadge: {
-    width: 76,
-    height: 76,
-    borderRadius: RADIUS.lg,
-    backgroundColor: COLORS.accent,
+    width: 60,
+    height: 60,
+    borderRadius: 18,
+    backgroundColor: COLORS.indigo,
     alignItems: 'center',
     justifyContent: 'center',
     shadowColor: COLORS.accent,
@@ -642,60 +634,44 @@ const styles = StyleSheet.create({
     elevation: 8,
   },
   brandName: {
-    fontSize: 24,
+    fontSize: 22,
     fontWeight: '800',
-    color: COLORS.white,
-    letterSpacing: 1.2,
+    color: COLORS.indigo,
+    letterSpacing: 1.1,
+    textAlign: 'center',
   },
   brandTagline: {
     fontSize: 12,
-    color: COLORS.accent,
+    color: COLORS.textMuted,
     fontWeight: '600',
-    textTransform: 'uppercase',
-    letterSpacing: 0.8,
-    marginTop: 2,
+    textAlign: 'center',
+    marginTop: 4,
   },
   card: {
-    backgroundColor: COLORS.card,
+    backgroundColor: 'rgba(255,255,255,0.97)',
     borderRadius: RADIUS.xl,
-    padding: SPACING.xl,
+    paddingHorizontal: SPACING.xl,
+    paddingTop: SPACING.xl,
+    paddingBottom: SPACING.lg,
+    width: '100%',
+    maxWidth: 400,
+    overflow: 'hidden',
     ...SHADOWS.lg,
   },
-  cardHeaderRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
-    marginBottom: SPACING.md,
-  },
-  roleBadgesRow: {
-    flexDirection: 'row',
-    gap: 6,
-  },
-  roleBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    backgroundColor: '#eff6ff',
-    borderWidth: 1,
-    borderColor: '#bfdbfe',
-    borderRadius: RADIUS.full,
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-  },
-  roleBadgeText: {
-    fontSize: 10.5,
-    fontWeight: '700',
-    color: '#1d4ed8',
+  cardAccent: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    height: 4,
+    backgroundColor: COLORS.accent,
   },
   cardTitle: {
-    fontSize: 22,
+    fontSize: 20,
     fontWeight: '800',
     color: COLORS.primary,
-  },
-  cardSubtitle: {
-    fontSize: 12.5,
-    color: COLORS.textMuted,
-    marginTop: 3,
+    textAlign: 'center',
+    marginBottom: SPACING.md,
   },
   errorBox: {
     flexDirection: 'row',
@@ -775,38 +751,6 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: '800',
     letterSpacing: 1,
-  },
-  serverStatusBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 6,
-    marginTop: SPACING.lg,
-    paddingVertical: 6,
-    paddingHorizontal: 14,
-    backgroundColor: 'rgba(255, 255, 255, 0.08)',
-    borderRadius: RADIUS.full,
-    alignSelf: 'center',
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.12)',
-  },
-  statusDot: {
-    width: 7,
-    height: 7,
-    borderRadius: 3.5,
-    backgroundColor: '#22c55e',
-    marginRight: 2,
-  },
-  serverStatusText: {
-    color: '#94a3b8',
-    fontSize: 11,
-    fontWeight: '600',
-  },
-  footerNote: {
-    textAlign: 'center',
-    color: '#64748b',
-    fontSize: 12,
-    marginTop: SPACING.sm,
   },
 
   /* Modal Styles */

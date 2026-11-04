@@ -13,8 +13,8 @@ router.use(authenticate);
 
 router.get('/', getCleaningExpenseRates);
 router.get('/:id', getCleaningExpenseRateById);
-router.post('/', authorize('ADMIN'), createCleaningExpenseRate);
-router.put('/:id', authorize('ADMIN'), updateCleaningExpenseRate);
-router.delete('/:id', authorize('ADMIN'), deleteCleaningExpenseRate);
+router.post('/', authorize('ADMIN', 'OWNER'), createCleaningExpenseRate);
+router.put('/:id', authorize('ADMIN', 'OWNER'), updateCleaningExpenseRate);
+router.delete('/:id', authorize('ADMIN', 'OWNER'), deleteCleaningExpenseRate);
 
 export default router;
