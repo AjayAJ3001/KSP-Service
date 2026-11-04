@@ -401,7 +401,7 @@ export interface AuditLog {
   action: string;
   module: string;
   record_id?: string;
-  source?: 'ADMIN' | 'MOBILE' | string;
+  source?: 'ADMIN' | 'MOBILE_ADMIN' | 'MOBILE' | string;
   details?: any;
   created_at: string;
 }

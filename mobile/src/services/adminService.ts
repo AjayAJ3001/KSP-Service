@@ -1,4 +1,4 @@
-import api from './api';
+import api from './adminApi';
 import {
   User, Driver, Vehicle, Party, Owner, OwnerAdvance, Unit, Route, FreightRate, ExpenseRate, CleaningExpenseRate, UnloadingRate, DriverBataRate, OtherExpenseLimit,
   Trip, TripPayment, DriverExpense, Settlement, AuditLog, DashboardData,
@@ -311,7 +311,7 @@ export const adminReportService = {
 
 // Audit Log Service
 export const adminAuditLogService = {
-  getAuditLogs: async (params?: { page?: number; limit?: number; module?: string; source?: string; from_date?: string; to_date?: string }): Promise<ApiResponse<PaginatedData<AuditLog> & { counts?: { total_all: number; total_admin: number; total_mobile: number } }>> => {
+  getAuditLogs: async (params?: { page?: number; limit?: number; module?: string; source?: string; from_date?: string; to_date?: string }): Promise<ApiResponse<PaginatedData<AuditLog> & { counts?: { total_all: number; total_admin: number; total_mobile_admin: number; total_mobile: number } }>> => {
     const res = await api.get('/audit-logs', { params });
     return res.data;
   },

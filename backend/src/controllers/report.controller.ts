@@ -4,6 +4,7 @@ import { asyncHandler } from '../middleware/errorHandler';
 import { AuthRequest } from '../middleware/auth';
 import { applyVehicleScope, isFleetScoped } from '../utils/ownerScope';
 import { attachAdvanceBreakdown } from './settlement.controller';
+import { enrichAuditLogRows } from '../utils/auditEnrich';
 
 export const getTripReport = asyncHandler(async (req: AuthRequest, res: Response): Promise<void> => {
   const { from_date, to_date, party_id, driver_id, vehicle_id, owner_id, unit_id, status } = req.query;
@@ -88,7 +89,8 @@ export const getTripReport = asyncHandler(async (req: AuthRequest, res: Response
        GROUP BY trip_id
      ) ta ON ta.trip_id = t.id
      LEFT JOIN (
-       SELECT settlement_id, SUM(amount) as driver_cash_paid
+       SELECT settlement_id,
+              SUM(CASE WHEN payment_mode IS NULL OR payment_mode <> 'ADJUSTED_ADVANCE' THEN amount ELSE 0 END) as driver_cash_paid
        FROM driver_settlement_payments
        GROUP BY settlement_id
      ) dsp ON dsp.settlement_id = s.id`;
@@ -137,15 +139,13 @@ export const getTripReport = asyncHandler(async (req: AuthRequest, res: Response
   const trips = withBreakdown.map((row: any) => {
     const expenses = parseFloat(String(row.total_expenses || 0)) || 0;
     const manager = parseFloat(String(row.manager_advance ?? row.advance_paid ?? 0)) || 0;
-    const priorDeficit = parseFloat(String(row.prior_deficit_deduction || 0)) || 0;
-    const effectiveManager = row.effective_manager_advance != null
-      ? (parseFloat(String(row.effective_manager_advance)) || 0)
-      : Math.max(0, manager - priorDeficit);
-    const ownerApplied = parseFloat(String(row.owner_applied || 0)) || 0;
-    const leftover = parseFloat(String(row.owner_leftover_used || 0)) || 0;
-    const cashPaid = parseFloat(String(row.driver_cash_paid || row.driver_paid_amount || 0)) || 0;
-    const inHand = parseFloat(String(row.owner_balance || 0)) || 0;
-    const needToPay = inHand > 0 ? 0 : Math.max(0, expenses - effectiveManager - ownerApplied - leftover - cashPaid);
+    const ownerGiven = parseFloat(String(row.owner_given || 0)) || 0;
+    const cashPaid = parseFloat(String(row.driver_cash_paid || 0)) || 0;
+    let inHand = Math.max(0, parseFloat(String(row.in_hand ?? row.owner_balance ?? 0)) || 0);
+    let needToPay = Math.max(0, parseFloat(String(row.need_to_pay ?? 0)) || 0);
+    if (cashPaid > 0.5) needToPay = Math.max(0, needToPay - cashPaid);
+    if (needToPay > 0.5) inHand = 0;
+    else if (inHand < 0.5) inHand = Math.max(0, parseFloat(String(row.owner_balance || 0)) || 0);
     let expenseItems = row.expense_items;
     if (typeof expenseItems === 'string') {
       try { expenseItems = JSON.parse(expenseItems); } catch { expenseItems = []; }
@@ -154,13 +154,20 @@ export const getTripReport = asyncHandler(async (req: AuthRequest, res: Response
     if (typeof paymentItems === 'string') {
       try { paymentItems = JSON.parse(paymentItems); } catch { paymentItems = []; }
     }
+    const advanceGiven = Math.max(
+      parseFloat(String(row.advance_given_total || 0)) || 0,
+      manager + ownerGiven,
+      parseFloat(String(row.advance_paid || 0)) || 0
+    );
     return {
       ...row,
       expense_items: Array.isArray(expenseItems) ? expenseItems : [],
       payment_items: Array.isArray(paymentItems) ? paymentItems : [],
+      advance_given_total: advanceGiven,
       need_to_pay: needToPay,
       in_hand: inHand,
       driver_cash_paid: cashPaid,
+      expenses,
     };
   });
 
@@ -303,10 +310,11 @@ export const getAuditLogs = asyncHandler(async (req: AuthRequest, res: Response)
     `SELECT 
        COUNT(*) as total_all,
        COUNT(*) FILTER (WHERE source = 'ADMIN') as total_admin,
+       COUNT(*) FILTER (WHERE source = 'MOBILE_ADMIN') as total_mobile_admin,
        COUNT(*) FILTER (WHERE source = 'MOBILE') as total_mobile
      FROM audit_logs`
   );
-  const counts = countsResult.rows[0] || { total_all: 0, total_admin: 0, total_mobile: 0 };
+  const counts = countsResult.rows[0] || { total_all: 0, total_admin: 0, total_mobile_admin: 0, total_mobile: 0 };
 
   const result = await query(
     `SELECT al.*, u.username, u.name as user_name, u.role as user_role
@@ -317,9 +325,11 @@ export const getAuditLogs = asyncHandler(async (req: AuthRequest, res: Response)
     [...params, limit, offset]
   );
 
+  const items = await enrichAuditLogRows(result.rows);
+
   res.json({
     success: true,
     message: 'Audit logs retrieved.',
-    data: { items: result.rows, total, page, limit, totalPages: Math.ceil(total / limit), counts },
+    data: { items, total, page, limit, totalPages: Math.ceil(total / limit), counts },
   });
 });

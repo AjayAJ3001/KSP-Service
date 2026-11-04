@@ -18,6 +18,7 @@ import {
   Smartphone,
   Laptop,
   Globe,
+  Tablet,
   Download,
   Search,
   Eye,
@@ -28,8 +29,16 @@ import { adminAuditLogService } from '../../services/adminService';
 import { AuditLog } from '../../types';
 import { COLORS, SPACING, RADIUS, SHADOWS } from '../../constants/theme';
 import { exportCSV } from '../../utils/exportUtils';
+import { formatReadableSummary, getAuditListLabel, getAuditStory, getReadableDetailRows, parseMaybeJson } from '../../utils/readableDetails';
 
-type SourceTab = 'ALL' | 'ADMIN' | 'MOBILE';
+type SourceTab = 'ALL' | 'ADMIN' | 'MOBILE_ADMIN' | 'MOBILE';
+
+const platformMeta = (source?: string) => {
+  const s = String(source || 'ADMIN').toUpperCase();
+  if (s === 'MOBILE_ADMIN') return { key: 'MOBILE_ADMIN', label: 'Mobile Admin', color: '#6d28d9', bg: '#f5f3ff', border: '#ddd6fe' };
+  if (s === 'MOBILE') return { key: 'MOBILE', label: 'Mobile App', color: '#047857', bg: '#ecfdf5', border: '#a7f3d0' };
+  return { key: 'ADMIN', label: 'Admin Panel', color: '#1d4ed8', bg: '#eff6ff', border: '#bfdbfe' };
+};
 
 const formatIST = (dtStr: string) => {
   try {
@@ -78,7 +87,8 @@ const AnimatedLogCard: React.FC<AnimatedLogCardProps> = ({ log, index, onPress }
     return () => pLoop.stop();
   }, []);
 
-  const isMobile = log.source === 'MOBILE';
+  const plat = platformMeta(log.source);
+  const SourceIcon = plat.key === 'MOBILE' ? Smartphone : plat.key === 'MOBILE_ADMIN' ? Tablet : Laptop;
 
   return (
     <Animated.View style={{ opacity: fadeAnim, transform: [{ translateY: slideAnim }] }}>
@@ -86,7 +96,7 @@ const AnimatedLogCard: React.FC<AnimatedLogCardProps> = ({ log, index, onPress }
         style={styles.logCard}
         onPressIn={() => Animated.spring(scaleAnim, { toValue: 0.975, speed: 60, useNativeDriver: true }).start()}
         onPressOut={() => Animated.spring(scaleAnim, { toValue: 1, speed: 30, bounciness: 6, useNativeDriver: true }).start()}
-        onPress={() => { if (log.old_values || log.new_values) onPress(log); }}
+        onPress={() => onPress(log)}
       >
         <Animated.View style={{ transform: [{ scale: scaleAnim }] }}>
           <View style={styles.logCardTop}>
@@ -98,9 +108,9 @@ const AnimatedLogCard: React.FC<AnimatedLogCardProps> = ({ log, index, onPress }
                 <Text style={styles.moduleBadgeText}>{log.module}</Text>
               </View>
             </View>
-            <Animated.View style={[styles.sourceBadge, isMobile ? styles.sourceMobile : styles.sourceAdmin, { transform: [{ scale: sourcePulse }] }]}>
-              {isMobile ? <Smartphone size={12} color="#047857" /> : <Laptop size={12} color="#1d4ed8" />}
-              <Text style={[styles.sourceText, { color: isMobile ? '#047857' : '#1d4ed8' }]}>{log.source || 'ADMIN'}</Text>
+            <Animated.View style={[styles.sourceBadge, { backgroundColor: plat.bg, borderColor: plat.border, transform: [{ scale: sourcePulse }] }]}>
+              <SourceIcon size={12} color={plat.color} />
+              <Text style={[styles.sourceText, { color: plat.color }]}>{plat.label}</Text>
             </Animated.View>
           </View>
           <View style={styles.logUserInfo}>
@@ -110,12 +120,10 @@ const AnimatedLogCard: React.FC<AnimatedLogCardProps> = ({ log, index, onPress }
           </View>
           <View style={styles.logFooter}>
             <Text style={styles.logTime}>{formatIST(log.created_at)}</Text>
-            {(log.old_values || log.new_values) && (
-              <View style={styles.detailsBtn}>
-                <Eye size={13} color="#2563eb" />
-                <Text style={styles.detailsBtnText}>View Payload</Text>
-              </View>
-            )}
+            <View style={styles.detailsBtn}>
+              <Eye size={13} color="#2563eb" />
+              <Text style={styles.detailsBtnText}>{getAuditListLabel(log.details, log.action)}</Text>
+            </View>
           </View>
         </Animated.View>
       </Pressable>
@@ -130,9 +138,10 @@ export const AdminAuditLogsScreen: React.FC<{ navigation: any }> = ({ navigation
   const [activeTab, setActiveTab] = useState<SourceTab>('ALL');
   const [moduleFilter, setModuleFilter] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
-  const [counts, setCounts] = useState<{ total_all: number; total_admin: number; total_mobile: number }>({
+  const [counts, setCounts] = useState<{ total_all: number; total_admin: number; total_mobile_admin: number; total_mobile: number }>({
     total_all: 0,
     total_admin: 0,
+    total_mobile_admin: 0,
     total_mobile: 0,
   });
   const [isLoading, setIsLoading] = useState(false);
@@ -145,8 +154,6 @@ export const AdminAuditLogsScreen: React.FC<{ navigation: any }> = ({ navigation
   const listKey = useRef(0);
   const listFade = useRef(new Animated.Value(1)).current;
   const searchFocusBorder = useRef(new Animated.Value(0)).current;
-  const modalScale = useRef(new Animated.Value(0.88)).current;
-  const modalOpacity = useRef(new Animated.Value(0)).current;
   const exportBtnScale = useRef(new Animated.Value(1)).current;
 
   useEffect(() => {
@@ -172,6 +179,7 @@ export const AdminAuditLogsScreen: React.FC<{ navigation: any }> = ({ navigation
         setCounts({
           total_all: Number(res.data.counts.total_all) || 0,
           total_admin: Number(res.data.counts.total_admin) || 0,
+          total_mobile_admin: Number(res.data.counts.total_mobile_admin) || 0,
           total_mobile: Number(res.data.counts.total_mobile) || 0,
         });
       }
@@ -186,23 +194,6 @@ export const AdminAuditLogsScreen: React.FC<{ navigation: any }> = ({ navigation
 
   useEffect(() => { loadLogs(); }, [loadLogs]);
 
-  const openModal = (log: AuditLog) => {
-    setSelectedLog(log);
-    modalScale.setValue(0.88);
-    modalOpacity.setValue(0);
-    Animated.parallel([
-      Animated.spring(modalScale, { toValue: 1, friction: 6, tension: 50, useNativeDriver: true }),
-      Animated.timing(modalOpacity, { toValue: 1, duration: 220, useNativeDriver: true }),
-    ]).start();
-  };
-
-  const closeModal = () => {
-    Animated.parallel([
-      Animated.timing(modalScale, { toValue: 0.88, duration: 180, useNativeDriver: true }),
-      Animated.timing(modalOpacity, { toValue: 0, duration: 180, useNativeDriver: true }),
-    ]).start(() => setSelectedLog(null));
-  };
-
   const handleExportCSV = async () => {
     Animated.sequence([
       Animated.spring(exportBtnScale, { toValue: 0.92, speed: 60, useNativeDriver: true }),
@@ -210,12 +201,16 @@ export const AdminAuditLogsScreen: React.FC<{ navigation: any }> = ({ navigation
     ]).start();
     try {
       setIsExporting(true);
-      const headers = ['ID', 'Date Time', 'User', 'Action', 'Module', 'Record ID', 'Platform Source', 'IP Address'];
+      const headers = ['ID', 'Date Time', 'User', 'Action', 'Module', 'Record ID', 'Platform', 'Details'];
       const rows = logs.map((l) => [
         l.id,
         new Date(l.created_at).toLocaleString('en-IN'),
         `${l.name || l.username || 'System'} (#${l.user_id || 'N/A'})`,
-        l.action, l.module, l.record_id || '', l.source || 'ADMIN', l.ip_address || '',
+        String(l.action || '').replace(/_/g, ' '),
+        l.module,
+        l.record_id || '',
+        platformMeta(l.source).label,
+        formatReadableSummary(l.details || l.new_values || l.old_values, 8),
       ]);
       await exportCSV(`KSP_Audit_Logs_${activeTab}_${Date.now()}`, headers, rows);
     } catch (e: any) {
@@ -243,11 +238,11 @@ export const AdminAuditLogsScreen: React.FC<{ navigation: any }> = ({ navigation
     <View style={styles.container}>
       {/* ── Animated Tab Bar ── */}
       <Animated.View style={[styles.tabBar, { opacity: headerFade, transform: [{ translateY: headerSlide }] }]}>
-        {(['ALL', 'ADMIN', 'MOBILE'] as SourceTab[]).map((tab) => {
+        {(['ALL', 'ADMIN', 'MOBILE_ADMIN', 'MOBILE'] as SourceTab[]).map((tab) => {
           const isActive = activeTab === tab;
-          const Icon = tab === 'ALL' ? Globe : tab === 'ADMIN' ? Laptop : Smartphone;
-          const count = tab === 'ALL' ? counts.total_all : tab === 'ADMIN' ? counts.total_admin : counts.total_mobile;
-          const label = tab === 'ALL' ? 'All' : tab === 'ADMIN' ? 'Admin' : 'Mobile';
+          const Icon = tab === 'ALL' ? Globe : tab === 'ADMIN' ? Laptop : tab === 'MOBILE_ADMIN' ? Tablet : Smartphone;
+          const count = tab === 'ALL' ? counts.total_all : tab === 'ADMIN' ? counts.total_admin : tab === 'MOBILE_ADMIN' ? counts.total_mobile_admin : counts.total_mobile;
+          const label = tab === 'ALL' ? 'All' : tab === 'ADMIN' ? 'Panel' : tab === 'MOBILE_ADMIN' ? 'Mobile Admin' : 'Mobile';
           return (
             <TouchableOpacity
               key={tab}
@@ -321,48 +316,68 @@ export const AdminAuditLogsScreen: React.FC<{ navigation: any }> = ({ navigation
       ) : (
         <Animated.ScrollView style={{ opacity: listFade }} contentContainerStyle={styles.listContainer}>
           {filteredLogs.map((log, i) => (
-            <AnimatedLogCard key={log.id} log={log} index={i} onPress={openModal} />
+            <AnimatedLogCard
+              key={log.id}
+              log={log}
+              index={i}
+              onPress={setSelectedLog}
+            />
           ))}
         </Animated.ScrollView>
       )}
 
-      {/* ── Spring-animated Payload Modal ── */}
-      <Modal
-        visible={selectedLog !== null}
-        animationType="none"
-        transparent={true}
-        onRequestClose={closeModal}
-      >
+      <Modal visible={selectedLog !== null} animationType="slide" transparent onRequestClose={() => setSelectedLog(null)}>
         <View style={styles.modalOverlay}>
-          <Animated.View style={[styles.modalContent, { opacity: modalOpacity, transform: [{ scale: modalScale }] }]}>
+          <View style={styles.modalContent}>
             <View style={styles.modalHeader}>
-              <View>
-                <Text style={styles.modalTitle}>Audit Event Details</Text>
-                <Text style={styles.modalSub}>{selectedLog?.action} on {selectedLog?.module}</Text>
+              <View style={{ flex: 1, paddingRight: 8 }}>
+                <Text style={styles.modalTitle}>{selectedLog ? getAuditListLabel(selectedLog.details, selectedLog.action) : 'Details'}</Text>
+                <Text style={styles.modalSub}>{(selectedLog?.action || '').replace(/_/g, ' ')} • {selectedLog?.module}</Text>
               </View>
-              <TouchableOpacity onPress={closeModal} style={{ padding: 4 }} activeOpacity={0.7}>
+              <TouchableOpacity onPress={() => setSelectedLog(null)} style={{ padding: 4 }} activeOpacity={0.7}>
                 <X size={20} color={COLORS.text} />
               </TouchableOpacity>
             </View>
-            <ScrollView style={{ maxHeight: 400 }} showsVerticalScrollIndicator={false}>
-              {selectedLog?.old_values ? (
-                <View style={styles.jsonBox}>
-                  <Text style={styles.jsonHeader}>Previous State (Old Values):</Text>
-                  <Text style={styles.jsonCode}>
-                    {typeof selectedLog.old_values === 'string' ? selectedLog.old_values : JSON.stringify(selectedLog.old_values, null, 2)}
-                  </Text>
-                </View>
-              ) : null}
-              {selectedLog?.new_values ? (
-                <View style={[styles.jsonBox, { marginTop: 10 }]}>
-                  <Text style={[styles.jsonHeader, { color: '#4ade80' }]}>New State (Payload):</Text>
-                  <Text style={styles.jsonCode}>
-                    {typeof selectedLog.new_values === 'string' ? selectedLog.new_values : JSON.stringify(selectedLog.new_values, null, 2)}
-                  </Text>
-                </View>
-              ) : null}
+            <ScrollView style={{ maxHeight: 420 }} showsVerticalScrollIndicator={false}>
+              {(() => {
+                if (!selectedLog) return null;
+                const details = selectedLog.details || selectedLog.new_values || selectedLog.old_values;
+                const parsed: any = parseMaybeJson(details) || {};
+                const story = getAuditStory(details) || formatReadableSummary(details, 8);
+                const rows = getReadableDetailRows(details);
+                return (
+                  <>
+                    <View style={styles.storyBox}>
+                      <Text style={styles.storyBoxLabel}>What happened</Text>
+                      <Text style={styles.storyBoxText}>{story === '—' ? 'No extra details were recorded for this action.' : story}</Text>
+                    </View>
+                    {(parsed.driver_name || parsed.owner_name || parsed.lorry_number) ? (
+                      <View style={styles.peopleGrid}>
+                        <View style={[styles.peopleCard, { backgroundColor: '#fff7ed' }]}>
+                          <Text style={styles.peopleCardLabel}>Driver</Text>
+                          <Text style={styles.peopleCardValue}>{parsed.driver_name || '—'}</Text>
+                        </View>
+                        <View style={[styles.peopleCard, { backgroundColor: '#f5f3ff' }]}>
+                          <Text style={styles.peopleCardLabel}>Owner</Text>
+                          <Text style={styles.peopleCardValue}>{parsed.owner_name || '—'}</Text>
+                        </View>
+                        <View style={[styles.peopleCard, { backgroundColor: '#ecfdf5' }]}>
+                          <Text style={styles.peopleCardLabel}>Lorry</Text>
+                          <Text style={styles.peopleCardValue}>{parsed.lorry_number || '—'}</Text>
+                        </View>
+                      </View>
+                    ) : null}
+                    {rows.map((row, idx) => (
+                      <View key={`${row.label}-${idx}`} style={[styles.detailRow, idx % 2 === 1 && styles.detailRowAlt]}>
+                        <Text style={styles.detailLabel}>{row.label}</Text>
+                        <Text style={styles.detailValue}>{row.value}</Text>
+                      </View>
+                    ))}
+                  </>
+                );
+              })()}
             </ScrollView>
-          </Animated.View>
+          </View>
         </View>
       </Modal>
     </View>
@@ -400,17 +415,20 @@ const styles = StyleSheet.create({
   },
   tabBar: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     backgroundColor: COLORS.white,
     borderBottomWidth: 1,
     borderBottomColor: COLORS.border,
   },
   tabBtn: {
-    flex: 1,
+    flexGrow: 1,
+    minWidth: '25%',
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 6,
-    paddingVertical: 12,
+    gap: 4,
+    paddingVertical: 10,
+    paddingHorizontal: 4,
     borderBottomWidth: 3,
     borderBottomColor: 'transparent',
   },
@@ -589,9 +607,65 @@ const styles = StyleSheet.create({
     borderTopColor: '#f8fafc',
     paddingTop: 6,
   },
+  peopleLine: {
+    fontSize: 12,
+    fontWeight: '800',
+    color: '#1d4ed8',
+    marginBottom: 4,
+  },
+  storyLine: {
+    fontSize: 12.5,
+    fontWeight: '600',
+    color: COLORS.text,
+    lineHeight: 18,
+    marginBottom: 8,
+  },
+  inlineDetailRow: {
+    marginTop: 6,
+  },
   logTime: {
     fontSize: 11,
     color: COLORS.textLight,
+  },
+  storyBox: {
+    backgroundColor: '#eff6ff',
+    borderRadius: RADIUS.md,
+    padding: 12,
+    marginBottom: 10,
+  },
+  storyBoxLabel: {
+    fontSize: 11,
+    fontWeight: '800',
+    color: '#1d4ed8',
+    marginBottom: 4,
+    textTransform: 'uppercase',
+  },
+  storyBoxText: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: COLORS.text,
+    lineHeight: 20,
+  },
+  peopleGrid: {
+    flexDirection: 'row',
+    gap: 6,
+    marginBottom: 10,
+  },
+  peopleCard: {
+    flex: 1,
+    borderRadius: RADIUS.md,
+    padding: 8,
+  },
+  peopleCardLabel: {
+    fontSize: 10,
+    fontWeight: '800',
+    color: COLORS.textMuted,
+    marginBottom: 2,
+  },
+  peopleCardValue: {
+    fontSize: 12,
+    fontWeight: '800',
+    color: COLORS.text,
   },
   detailsBtn: {
     flexDirection: 'row',
@@ -606,6 +680,7 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: '700',
     color: '#2563eb',
+    maxWidth: 180,
   },
   centerBox: {
     flex: 1,
@@ -655,20 +730,24 @@ const styles = StyleSheet.create({
     color: COLORS.textMuted,
     marginTop: 2,
   },
-  jsonBox: {
-    backgroundColor: '#0f172a',
-    borderRadius: RADIUS.md,
-    padding: 10,
+  detailRow: {
+    paddingVertical: 10,
+    paddingHorizontal: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: '#eef2f7',
   },
-  jsonHeader: {
+  detailRowAlt: {
+    backgroundColor: '#f8fafc',
+  },
+  detailLabel: {
     fontSize: 11,
     fontWeight: '800',
-    color: '#f59e0b',
-    marginBottom: 4,
+    color: COLORS.textMuted,
+    marginBottom: 3,
   },
-  jsonCode: {
-    fontFamily: 'monospace',
-    fontSize: 11,
-    color: '#e2e8f0',
+  detailValue: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: COLORS.text,
   },
 });

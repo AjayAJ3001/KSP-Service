@@ -321,7 +321,8 @@ export interface AuditLog {
   record_id?: number;
   old_values?: any;
   new_values?: any;
-  source?: 'ADMIN' | 'MOBILE' | string;
+  details?: any;
+  source?: 'ADMIN' | 'MOBILE_ADMIN' | 'MOBILE' | string;
   ip_address?: string;
   created_at: string;
   username?: string;

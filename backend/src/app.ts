@@ -30,6 +30,7 @@ import otherExpenseLimitRoutes from './routes/otherExpenseLimit.routes';
 import driverAdvanceRoutes from './routes/driverAdvance.routes';
 
 import { errorHandler, notFound } from './middleware/errorHandler';
+import { auditRequestContext, normalizeAuditPlatform } from './utils/auditLog';
 import os from 'os';
 
 export function getLanIpv4Addresses(): string[] {
@@ -67,6 +68,11 @@ app.use(express.urlencoded({ extended: true }));
 if (process.env.NODE_ENV !== 'test') {
   app.use(morgan('dev'));
 }
+
+app.use((req, res, next) => {
+  const platform = normalizeAuditPlatform(String(req.headers['x-client-platform'] || ''));
+  auditRequestContext.run({ platform: platform || undefined }, () => next());
+});
 
 // Health check
 app.get('/health', (req, res) => {

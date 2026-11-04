@@ -1,4 +1,18 @@
+import { AsyncLocalStorage } from 'async_hooks';
 import { query } from '../config/database';
+
+export const auditRequestContext = new AsyncLocalStorage<{ platform?: string }>();
+
+export const normalizeAuditPlatform = (raw?: string | null): 'ADMIN' | 'MOBILE_ADMIN' | 'MOBILE' | '' => {
+  const v = String(raw || '').trim().toUpperCase().replace(/[-\s]/g, '_');
+  if (!v) return '';
+  if (v === 'MOBILE_ADMIN' || v === 'ADMIN_MOBILE' || v === 'MOBILEADMIN') return 'MOBILE_ADMIN';
+  if (v.includes('MOBILE') && v.includes('ADMIN')) return 'MOBILE_ADMIN';
+  if (v === 'MOBILE' || v === 'APP' || v === 'DRIVER') return 'MOBILE';
+  if (v.includes('MOBILE')) return 'MOBILE';
+  if (v === 'ADMIN' || v === 'WEB' || v === 'ADMIN_PANEL') return 'ADMIN';
+  return 'ADMIN';
+};
 
 export const createAuditLog = async (
   userId: number | undefined,
@@ -10,7 +24,10 @@ export const createAuditLog = async (
 ): Promise<void> => {
   try {
     const recId = recordId !== undefined && recordId !== null ? String(recordId) : null;
-    let platform = source;
+    let platform =
+      normalizeAuditPlatform(source)
+      || normalizeAuditPlatform(auditRequestContext.getStore()?.platform)
+      || '';
     if (!platform && userId) {
       const uRes = await query('SELECT role FROM users WHERE id = $1', [userId]);
       if (uRes.rows.length > 0) {

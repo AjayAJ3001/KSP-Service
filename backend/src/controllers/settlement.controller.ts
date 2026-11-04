@@ -195,7 +195,10 @@ export const attachAdvanceBreakdown = async (rows: any[]): Promise<any[]> => {
 
   const tripsRes = await query(
     `SELECT t.id, t.driver_id, t.trip_date, t.created_at,
-            COALESCE(t.advance_paid, 0) as trip_advance,
+            GREATEST(
+              COALESCE((SELECT SUM(ta.amount) FROM truck_advances ta WHERE ta.trip_id = t.id), 0),
+              COALESCE(t.advance_paid, 0)
+            ) as trip_advance,
             COALESCE(s.total_expenses, (SELECT COALESCE(SUM(de.amount), 0) FROM driver_expenses de WHERE de.trip_id = t.id), 0) as expenses
      FROM trips t
      LEFT JOIN settlements s ON s.trip_id = t.id
@@ -222,6 +225,10 @@ export const attachAdvanceBreakdown = async (rows: any[]): Promise<any[]> => {
     owner_leftover_used: number;
     owner_given: number;
     expenses: number;
+    applied_to_prior: number;
+    received_from_later: number;
+    need_to_pay: number;
+    in_hand: number;
     ownerNames: string[];
   };
   const byTrip = new Map<number, Rec>();
@@ -239,6 +246,10 @@ export const attachAdvanceBreakdown = async (rows: any[]): Promise<any[]> => {
         owner_leftover_used: 0,
         owner_given: 0,
         expenses: 0,
+        applied_to_prior: 0,
+        received_from_later: 0,
+        need_to_pay: 0,
+        in_hand: 0,
         ownerNames: [],
       });
     }
@@ -304,31 +315,60 @@ export const attachAdvanceBreakdown = async (rows: any[]): Promise<any[]> => {
       }
     }
 
-    // Signed running cash: positive = in hand, negative = office still owes from earlier trips.
-    // A new trip advance first clears that prior deficit, then only leftover cash covers this trip.
+    // Same sequential cash as Driver Balance Master: new advance first pays oldest dues, leftover vs this trip.
+    const dues: Array<{ id: number; remaining: number }> = [];
     let carry = 0;
     for (const t of trips) {
       const rec = ensure(Number(t.id));
-      const manager = rec.manager_advance;
-      const ownerAmt = rec.owner_given;
-      const expenses = rec.expenses;
-      const priorSurplus = Math.max(0, carry);
-      const priorDeficit = Math.max(0, -carry);
-      const appliedToPrior = Math.min(manager, priorDeficit);
-      const effectiveManager = Math.max(0, manager - appliedToPrior);
-      const available = priorSurplus + effectiveManager + ownerAmt;
-      const remaining = available - expenses;
-      rec.effective_manager_advance = effectiveManager;
-      rec.owner_applied = Math.min(ownerAmt, Math.max(0, expenses - priorSurplus - effectiveManager));
-      rec.owner_leftover_used = Math.min(priorSurplus, expenses);
-      rec.owner_balance = Math.max(0, remaining);
-      rec.owner_given = ownerAmt;
-      carry = remaining;
+      const ownAdv = Math.round(rec.manager_advance + rec.owner_given);
+      const expenses = Math.round(rec.expenses);
+      let remainingNew = ownAdv;
+      let remainingCarry = Math.round(Math.max(0, carry));
+      let appliedToPrior = 0;
+
+      for (const due of dues) {
+        if (due.remaining <= 0) continue;
+        if (remainingNew > 0) {
+          const take = Math.min(remainingNew, due.remaining);
+          remainingNew -= take;
+          due.remaining -= take;
+          appliedToPrior += take;
+          const dueRec = ensure(due.id);
+          dueRec.received_from_later += take;
+          dueRec.need_to_pay = due.remaining;
+          dueRec.in_hand = due.remaining > 0 ? 0 : dueRec.in_hand;
+          dueRec.owner_balance = dueRec.in_hand;
+        }
+        if (due.remaining > 0 && remainingCarry > 0) {
+          const take = Math.min(remainingCarry, due.remaining);
+          remainingCarry -= take;
+          due.remaining -= take;
+          const dueRec = ensure(due.id);
+          dueRec.received_from_later += take;
+          dueRec.need_to_pay = due.remaining;
+          dueRec.in_hand = due.remaining > 0 ? 0 : dueRec.in_hand;
+          dueRec.owner_balance = dueRec.in_hand;
+        }
+      }
+
+      const pool = remainingNew + remainingCarry;
+      const cover = Math.min(pool, expenses);
+      const need = Math.round(expenses - cover);
+      const left = Math.round(pool - cover);
+      rec.applied_to_prior = appliedToPrior;
+      rec.effective_manager_advance = Math.max(0, rec.manager_advance - appliedToPrior);
+      rec.owner_applied = Math.min(rec.owner_given, Math.max(0, expenses - remainingCarry - rec.effective_manager_advance));
+      rec.owner_leftover_used = Math.min(remainingCarry, expenses);
+      rec.need_to_pay = need;
+      rec.in_hand = need > 0 ? 0 : left;
+      rec.owner_balance = rec.in_hand;
+      if (need > 0) dues.push({ id: Number(t.id), remaining: need });
+      carry = need > 0 ? 0 : left;
     }
   }
 
   return rows.map((row) => {
-    const rec = byTrip.get(Number(row.trip_id)) || {
+    const rec = byTrip.get(Number(row.trip_id || row.id)) || {
       manager_advance: numAmt(row.initial_trip_advance),
       effective_manager_advance: numAmt(row.initial_trip_advance),
       owner_applied: 0,
@@ -336,6 +376,10 @@ export const attachAdvanceBreakdown = async (rows: any[]): Promise<any[]> => {
       owner_leftover_used: 0,
       owner_given: 0,
       expenses: 0,
+      applied_to_prior: 0,
+      received_from_later: 0,
+      need_to_pay: 0,
+      in_hand: 0,
       ownerNames: [] as string[],
     };
     const { ownerNames, expenses: _expenses, ...rest } = rec;
@@ -343,6 +387,7 @@ export const attachAdvanceBreakdown = async (rows: any[]): Promise<any[]> => {
       ...row,
       ...rest,
       owner_given: rec.owner_given,
+      advance_given_total: Math.round(rec.manager_advance + rec.owner_given),
       advance_owner_name: ownerNames.filter(Boolean).join(' + '),
     };
   });

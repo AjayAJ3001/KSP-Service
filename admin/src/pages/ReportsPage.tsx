@@ -32,6 +32,38 @@ function formatCurrency(val: number | string) {
   return `${String.fromCharCode(8377)}${num.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
+function humanizeCode(val: any): string {
+  return String(val || '')
+    .replace(/_/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/\b\w/g, (c) => c.toUpperCase()) || '—';
+}
+
+function expenseParticulars(t: any): string {
+  const items = parseJsonList(t.expense_items);
+  if (!items.length) return '';
+  return items
+    .map((item: any) => {
+      const type = humanizeCode(item.expense_type || 'OTHER');
+      const desc = item.description ? ` (${item.description})` : '';
+      return `${type}${desc}: ₹${printInr(item.amount)}`;
+    })
+    .join('; ');
+}
+
+function paymentParticulars(t: any): string {
+  const items = parseJsonList(t.payment_items);
+  if (!items.length) return '';
+  return items
+    .map((item: any) => {
+      const date = item.payment_date ? formatDateDMY(item.payment_date) : 'Payment';
+      const note = item.notes ? ` ${item.notes}` : '';
+      return `${date}${note}: received ₹${printInr(item.received_amount)}, balance ₹${printInr(item.balance_due)}`;
+    })
+    .join('; ');
+}
+
 function parseJsonList(val: any): any[] {
   if (Array.isArray(val)) return val;
   if (typeof val === 'string') {
@@ -47,6 +79,16 @@ function parseJsonList(val: any): any[] {
 
 function printInr(val: any) {
   return (parseFloat(String(val)) || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+function tripAdvanceGiven(t: any) {
+  const manager = parseFloat(String(t.manager_advance ?? 0)) || 0;
+  const owner = parseFloat(String(t.owner_given ?? 0)) || 0;
+  return Math.max(
+    parseFloat(String(t.advance_given_total || 0)) || 0,
+    manager + owner,
+    parseFloat(String(t.advance_paid || 0)) || 0
+  );
 }
 
 function driverExpenseBalance(t: any) {
@@ -121,8 +163,8 @@ function driverExpensePrintRows(trips: any[]) {
           <td>${idx === 0 ? formatDateDMY(t.trip_date) : ''}</td>
           <td>${idx === 0 ? `<strong>${t.lorry_number || '-'}</strong>` : ''}</td>
           <td>${idx === 0 ? (t.driver_name || '-') : ''}</td>
-          <td>${item.expense_type || 'OTHER'}</td>
-          <td>${item.description || '—'}</td>
+              <td>${humanizeCode(item.expense_type || 'OTHER')}</td>
+              <td>${item.description || '—'}</td>
           <td class="num" style="color:#7c3aed">${printInr(amt)}</td>
           ${idx === 0 ? settledCell : '<td></td>'}
           ${idx === 0 ? toPayCell : '<td></td>'}
@@ -185,7 +227,7 @@ function partyPaymentPrintRows(trips: any[]) {
           <td class="num">${idx === 0 ? printInr(t.total_freight) : ''}</td>
           <td class="num" style="color:#15803d">${printInr(amt)}</td>
           <td class="num" style="color:${itemDue > 0 ? '#b91c1c' : '#15803d'}">${printInr(itemDue)}</td>
-          <td>${item.notes || item.payment_status || '—'}</td>
+          <td>${item.notes || humanizeCode(item.payment_status) || '—'}</td>
         </tr>`);
     });
     if (items.length > 1) {
@@ -313,7 +355,8 @@ export const ReportsPage: React.FC = () => {
     'Route', 'Unit', 'Weight', 'Total Freight (INR)',
     'Driver Advance (INR)', 'Driver Expenses (INR)', 'Expense Settled (INR)', 'Expense To Pay (INR)', 'Driver Expense Status',
     'Need to Pay Driver (INR)', 'Balance in Hand (INR)', 'Driver Cash Paid (INR)',
-    'Party Received (INR)', 'Party Balance Due (INR)', 'Status'
+    'Party Received (INR)', 'Party Balance Due (INR)', 'Status',
+    'Expense Particulars', 'Party Payment Particulars'
   ];
   const tripRow = (t: any) => [
     String(t.id),
@@ -326,7 +369,7 @@ export const ReportsPage: React.FC = () => {
     t.unit_name || '',
     String(t.goods_weight || 0),
     fmtCur(t.total_freight),
-    fmtCur(t.manager_advance ?? t.advance_paid),
+    fmtCur(tripAdvanceGiven(t)),
     fmtCur(t.total_expenses),
     fmtCur(driverExpenseBalance(t).settled),
     fmtCur(driverExpenseBalance(t).toPay),
@@ -336,7 +379,9 @@ export const ReportsPage: React.FC = () => {
     fmtCur(t.driver_cash_paid),
     fmtCur(t.total_received),
     fmtCur(t.balance_due),
-    t.status
+    humanizeCode(t.status),
+    expenseParticulars(t),
+    paymentParticulars(t),
   ];
 
   const totalTripsCount = tripData.trips.length;
@@ -346,7 +391,7 @@ export const ReportsPage: React.FC = () => {
   const totalReceivedAmount = tripData.trips.reduce((sum, t) => sum + (Number(t.total_received) || 0), 0);
   const totalBalanceDueAmount = tripData.trips.reduce((sum, t) => sum + (Number(t.balance_due) || 0), 0);
   const totalDriverExpenses = tripData.trips.reduce((sum, t) => sum + (Number(t.total_expenses) || 0), 0);
-  const totalDriverAdvance = tripData.trips.reduce((sum, t) => sum + (Number(t.manager_advance ?? t.advance_paid) || 0), 0);
+  const totalDriverAdvance = tripData.trips.reduce((sum, t) => sum + tripAdvanceGiven(t), 0);
   const totalNeedToPay = tripData.trips.reduce((sum, t) => sum + (Number(t.need_to_pay) || 0), 0);
   const totalInHand = tripData.trips.reduce((sum, t) => sum + (Number(t.in_hand) || 0), 0);
 
@@ -371,7 +416,7 @@ export const ReportsPage: React.FC = () => {
         'Unit': t.unit_name || 'Tons',
         'Freight Rate (Rs)': Number(t.freight_rate || 0),
         'Total Freight (Rs)': Number(t.total_freight || 0),
-        'Driver Advance (Rs)': Number(t.manager_advance ?? t.advance_paid) || 0,
+        'Driver Advance (Rs)': tripAdvanceGiven(t),
         'Driver Expenses (Rs)': Number(t.total_expenses || 0),
         'Expense Settled (Rs)': driverExpenseBalance(t).settled,
         'Expense To Pay (Rs)': driverExpenseBalance(t).toPay,
@@ -381,7 +426,9 @@ export const ReportsPage: React.FC = () => {
         'Driver Cash Paid (Rs)': Number(t.driver_cash_paid || 0),
         'Party Received (Rs)': Number(t.total_received || 0),
         'Party Balance Due (Rs)': Number(t.balance_due || 0),
-        'Status': t.status,
+        'Status': humanizeCode(t.status),
+        'Expense Particulars': expenseParticulars(t),
+        'Party Payment Particulars': paymentParticulars(t),
       }));
 
       // Add a blank separator row
@@ -743,7 +790,10 @@ export const ReportsPage: React.FC = () => {
 
     <div class="totals-box">
       <div class="totals-row"><span>Total Freight Billed:</span><strong>₹${parseFloat(String(trip.total_freight || 0)).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</strong></div>
-      <div class="totals-row"><span>Driver Advance:</span><strong>₹${(parseFloat(String(trip.manager_advance ?? trip.advance_paid)) || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</strong></div>
+      <div class="totals-row"><span>Driver Advance Given:</span><strong>₹${tripAdvanceGiven(trip).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</strong></div>
+      ${Number(trip.owner_given) > 0.5 ? `<div class="totals-row"><span>Owner Advance:</span><strong>₹${(parseFloat(String(trip.owner_given)) || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</strong></div>` : ''}
+      ${Number(trip.applied_to_prior) > 0.5 ? `<div class="totals-row" style="color:#c2410c"><span>Less: previous trip dues:</span><strong>(-) ₹${(parseFloat(String(trip.applied_to_prior)) || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</strong></div>` : ''}
+      ${Number(trip.received_from_later) > 0.5 ? `<div class="totals-row" style="color:#166534"><span>Advance adjusted from next trip:</span><strong>₹${(parseFloat(String(trip.received_from_later)) || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</strong></div>` : ''}
       <div class="totals-row"><span>Need to Pay Driver:</span><strong style="color:#b91c1c">₹${parseFloat(String(trip.need_to_pay || 0)).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</strong></div>
       <div class="totals-row"><span>Balance in Hand:</span><strong style="color:#15803d">₹${parseFloat(String(trip.in_hand || 0)).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</strong></div>
     </div>
@@ -774,7 +824,7 @@ export const ReportsPage: React.FC = () => {
           return items.map((item: any, idx: number) => `
             <tr>
               <td>${idx + 1}</td>
-              <td>${item.expense_type || 'OTHER'}</td>
+              <td>${humanizeCode(item.expense_type || 'OTHER')}</td>
               <td>${item.description || '—'}</td>
               <td class="num" style="color:#7c3aed">₹${printInr(item.amount)}</td>
               <td class="num">${idx === 0 ? `₹${printInr(bal.settled)}` : ''}</td>
@@ -819,7 +869,7 @@ export const ReportsPage: React.FC = () => {
             <tr>
               <td>${idx + 1}</td>
               <td>${item.payment_date ? formatDateDMY(item.payment_date) : '—'}</td>
-              <td>${item.notes || item.payment_status || '—'}</td>
+              <td>${item.notes || humanizeCode(item.payment_status) || '—'}</td>
               <td class="num" style="color:#15803d">₹${printInr(item.received_amount)}</td>
               <td class="num">₹${printInr(item.balance_due)}</td>
             </tr>`).join('');
@@ -1177,6 +1227,12 @@ export const ReportsPage: React.FC = () => {
                         return (
                           <div style={{ fontSize: 11.5, display: 'flex', flexDirection: 'column', gap: 3, minWidth: 132, textAlign: 'right' }}>
                             <span>Expenses: <strong style={{ color: '#6d28d9' }}>{formatCurrency(bal.total)}</strong></span>
+                            {parseJsonList(t.expense_items).map((item: any, idx: number) => (
+                              <span key={`${t.id}-exp-${idx}`} style={{ color: '#475569', fontWeight: 600 }}>
+                                {humanizeCode(item.expense_type || 'OTHER')}
+                                {item.description ? ` — ${item.description}` : ''}: {formatCurrency(item.amount)}
+                              </span>
+                            ))}
                             <span style={{ color: '#15803d' }}>Settled: <strong>{formatCurrency(bal.settled)}</strong></span>
                             <span style={{ color: bal.toPay > 0 ? '#b91c1c' : '#15803d' }}>To Pay: <strong>{formatCurrency(bal.toPay)}</strong></span>
                             <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 2 }}>
@@ -1187,15 +1243,23 @@ export const ReportsPage: React.FC = () => {
                       })()}
                     </td>
                     <td>
-                      <div style={{ fontSize: 11.5, display: 'flex', flexDirection: 'column', gap: 3, minWidth: 140 }}>
-                        <span>Advance: <strong>{formatCurrency(t.manager_advance ?? t.advance_paid)}</strong></span>
-                        {Number(t.need_to_pay) > 0 && (
-                          <span style={{ color: '#b91c1c' }}>Need to Pay: <strong>{formatCurrency(t.need_to_pay)}</strong></span>
+                      <div style={{ fontSize: 11.5, display: 'flex', flexDirection: 'column', gap: 3, minWidth: 168 }}>
+                        <span>Advance given: <strong>{formatCurrency(tripAdvanceGiven(t))}</strong></span>
+                        {Number(t.manager_advance) > 0.5 && Number(t.owner_given) > 0.5 && (
+                          <span style={{ color: '#1d4ed8' }}>Manager: <strong>{formatCurrency(t.manager_advance)}</strong></span>
                         )}
-                        {Number(t.in_hand) > 0 && (
-                          <span style={{ color: '#047857' }}>In Hand: <strong>{formatCurrency(t.in_hand)}</strong></span>
+                        {Number(t.owner_given) > 0.5 && (
+                          <span style={{ color: '#6d28d9' }}>Owner{t.advance_owner_name ? ` (${t.advance_owner_name})` : ''}: <strong>{formatCurrency(t.owner_given)}</strong></span>
                         )}
-                        {Number(t.driver_cash_paid) > 0 && (
+                        {Number(t.applied_to_prior) > 0.5 && (
+                          <span style={{ color: '#c2410c' }}>Less previous trip: <strong>(-) {formatCurrency(t.applied_to_prior)}</strong></span>
+                        )}
+                        {Number(t.received_from_later) > 0.5 && (
+                          <span style={{ color: '#166534' }}>From next trip: <strong>{formatCurrency(t.received_from_later)}</strong></span>
+                        )}
+                        <span style={{ color: '#b91c1c' }}>Need to Pay: <strong>{formatCurrency(t.need_to_pay || 0)}</strong></span>
+                        <span style={{ color: '#047857' }}>In Hand: <strong>{formatCurrency(t.in_hand || 0)}</strong></span>
+                        {Number(t.driver_cash_paid) > 0.5 && (
                           <span>Driver paid: <strong>{formatCurrency(t.driver_cash_paid)}</strong></span>
                         )}
                       </div>

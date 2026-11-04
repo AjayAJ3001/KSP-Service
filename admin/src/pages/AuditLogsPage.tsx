@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { History, Eye, Smartphone, Laptop, Globe, Calendar, RefreshCw, Printer, Download, Search, Loader2 } from 'lucide-react';
+import { History, Eye, Smartphone, Laptop, Globe, Calendar, RefreshCw, Printer, Download, Search, Loader2, Tablet } from 'lucide-react';
 import { auditLogService } from '../services/adminService';
 import { AuditLog } from '../types';
 import { DataTable, Column } from '../components/Common/DataTable';
@@ -7,8 +7,20 @@ import { Modal } from '../components/Common/Modal';
 import { formatIST } from '../utils/dateUtils';
 import { DateField } from '../components/Common/DateField';
 import { PRINT_BRAND_CSS, printBrandLockup } from '../utils/printBrand';
+import { formatReadableSummary, getAuditListLabel, getAuditStory, getReadableDetailRows, parseMaybeJson } from '../utils/readableDetails';
 
-type SourceTab = 'ADMIN' | 'MOBILE' | 'ALL';
+type SourceTab = 'ADMIN' | 'MOBILE_ADMIN' | 'MOBILE' | 'ALL';
+
+function platformMeta(source?: string) {
+  const s = String(source || 'ADMIN').toUpperCase();
+  if (s === 'MOBILE_ADMIN') {
+    return { key: 'MOBILE_ADMIN', label: 'Mobile Admin', color: '#6d28d9', bg: '#f5f3ff', border: '#ddd6fe' };
+  }
+  if (s === 'MOBILE') {
+    return { key: 'MOBILE', label: 'Mobile App', color: '#065f46', bg: '#ecfdf5', border: '#a7f3d0' };
+  }
+  return { key: 'ADMIN', label: 'Admin Panel', color: '#1e40af', bg: '#eff6ff', border: '#bfdbfe' };
+}
 
 function downloadCSV(filename: string, headers: string[], rows: (string | number)[][]) {
   const escape = (v: any) => `"${String(v ?? '').replace(/"/g, '""')}"`;
@@ -50,9 +62,10 @@ export const AuditLogsPage: React.FC = () => {
   const [toDate, setToDate] = useState('');
 
   // Counts for tabs
-  const [counts, setCounts] = useState<{ total_all: number; total_admin: number; total_mobile: number }>({
+  const [counts, setCounts] = useState<{ total_all: number; total_admin: number; total_mobile_admin: number; total_mobile: number }>({
     total_all: 0,
     total_admin: 0,
+    total_mobile_admin: 0,
     total_mobile: 0,
   });
 
@@ -61,7 +74,6 @@ export const AuditLogsPage: React.FC = () => {
   const [isPrinting, setIsPrinting] = useState(false);
 
   const [selectedLog, setSelectedLog] = useState<AuditLog | null>(null);
-  const [isDetailsModalOpen, setIsDetailsModalOpen] = useState(false);
 
   const thisWeek = getThisWeekRange();
   const isThisWeekActive = fromDate === thisWeek.from && toDate === thisWeek.to;
@@ -83,6 +95,7 @@ export const AuditLogsPage: React.FC = () => {
         setCounts({
           total_all: Number(res.data.counts.total_all) || 0,
           total_admin: Number(res.data.counts.total_admin) || 0,
+          total_mobile_admin: Number(res.data.counts.total_mobile_admin) || 0,
           total_mobile: Number(res.data.counts.total_mobile) || 0,
         });
       }
@@ -116,136 +129,7 @@ export const AuditLogsPage: React.FC = () => {
     setPage(1);
   };
 
-  const openDetailsModal = (log: AuditLog) => {
-    setSelectedLog(log);
-    setIsDetailsModalOpen(true);
-  };
-
-  // Helper to format raw audit details into clean, concise human-readable summaries (preventing raw base64 or payload dumps)
-  const formatDetailSummary = (d: any): string => {
-    if (!d) return '—';
-
-    // Attempt JSON parsing if stringified JSON
-    let parsed = d;
-    if (typeof d === 'string') {
-      const trimmed = d.trim();
-      if ((trimmed.startsWith('{') && trimmed.endsWith('}')) || (trimmed.startsWith('[') && trimmed.endsWith(']'))) {
-        try {
-          parsed = JSON.parse(trimmed);
-        } catch {
-          parsed = d;
-        }
-      }
-    }
-
-    // If it is a string (or failed parsing)
-    if (typeof parsed === 'string') {
-      const trimmed = parsed.trim();
-      // Check if it's base64, data-uri, token, or raw binary payload
-      if (
-        trimmed.startsWith('data:') ||
-        (!/\s/.test(trimmed) && trimmed.length > 40) ||
-        /^[A-Za-z0-9+/=]{40,}$/.test(trimmed)
-      ) {
-        return '[Uploaded File / Attachment Data]';
-      }
-      return trimmed.length > 80 ? trimmed.slice(0, 77) + '...' : trimmed;
-    }
-
-    // If it is an Array
-    if (Array.isArray(parsed)) {
-      if (parsed.length === 0) return '—';
-      return `${parsed.length} record(s) processed`;
-    }
-
-    // If it is an Object
-    if (typeof parsed === 'object' && parsed !== null) {
-      const entries: string[] = [];
-      const secretKeys = ['password', 'token', 'secret', 'hash', 'auth', 'access_token', 'refresh_token'];
-      const mediaKeys = [
-        'image', 'photo', 'doc', 'file', 'attachment', 'receipt', 'proof', 'avatar',
-        'blob', 'pdf', 'rc_book', 'insurance', 'signature'
-      ];
-
-      for (const [k, v] of Object.entries(parsed)) {
-        const lk = k.toLowerCase();
-        if (secretKeys.some((s) => lk.includes(s))) continue;
-
-        if (mediaKeys.some((s) => lk.includes(s))) {
-          if (v) {
-            entries.push(`${k}: [File Attached]`);
-          }
-          continue;
-        }
-
-        if (v === null || v === undefined) continue;
-
-        if (typeof v === 'string') {
-          const vTrim = v.trim();
-          if (
-            vTrim.startsWith('data:') ||
-            (!/\s/.test(vTrim) && vTrim.length > 40) ||
-            /^[A-Za-z0-9+/=]{40,}$/.test(vTrim)
-          ) {
-            entries.push(`${k}: [Attached File]`);
-          } else {
-            const shortVal = vTrim.length > 35 ? vTrim.slice(0, 32) + '...' : vTrim;
-            entries.push(`${k}: ${shortVal}`);
-          }
-        } else if (typeof v === 'number' || typeof v === 'boolean') {
-          entries.push(`${k}: ${v}`);
-        } else if (Array.isArray(v)) {
-          entries.push(`${k}: [${v.length} items]`);
-        } else if (typeof v === 'object') {
-          entries.push(`${k}: [Details]`);
-        } else {
-          entries.push(`${k}: ${String(v)}`);
-        }
-
-        if (entries.length >= 4) break;
-      }
-
-      if (entries.length === 0) return 'Standard operation logged';
-      const summaryStr = entries.join(' • ');
-      return summaryStr.length > 120 ? summaryStr.slice(0, 117) + '...' : summaryStr;
-    }
-
-    return String(parsed);
-  };
-
-  // Helper to sanitize payload for JSON view modal (removes megabyte base64 strings that freeze browser)
-  const cleanDetailsForModal = (details: any): any => {
-    if (!details) return details;
-    if (typeof details === 'string') {
-      const trimmed = details.trim();
-      if (trimmed.startsWith('data:') || (!/\s/.test(trimmed) && trimmed.length > 50)) {
-        return `[Base64 Attachment / File Data - ${trimmed.length} characters omitted]`;
-      }
-      return details;
-    }
-    if (Array.isArray(details)) {
-      return details.map(cleanDetailsForModal);
-    }
-    if (typeof details === 'object') {
-      const copy: any = {};
-      for (const [k, v] of Object.entries(details)) {
-        if (typeof v === 'string') {
-          const vTrim = v.trim();
-          if (vTrim.startsWith('data:') || (!/\s/.test(vTrim) && vTrim.length > 50)) {
-            copy[k] = `[Base64 Attachment / File Data - ${vTrim.length} characters omitted]`;
-          } else {
-            copy[k] = v;
-          }
-        } else if (typeof v === 'object' && v !== null) {
-          copy[k] = cleanDetailsForModal(v);
-        } else {
-          copy[k] = v;
-        }
-      }
-      return copy;
-    }
-    return details;
-  };
+  const formatDetailSummary = (d: any): string => formatReadableSummary(d);
 
   const handleDownloadCSV = async () => {
     try {
@@ -266,7 +150,7 @@ export const AuditLogsPage: React.FC = () => {
         items.map((l, idx) => [
           idx + 1,
           formatIST(l.created_at),
-          l.source === 'MOBILE' ? 'Mobile App' : 'Admin Panel',
+          platformMeta(l.source).label,
           l.user_name || '',
           l.username || '',
           l.user_role || '',
@@ -320,8 +204,10 @@ export const AuditLogsPage: React.FC = () => {
       const scopeTitle =
         activeTab === 'ADMIN'
           ? 'Admin Panel Operations'
+          : activeTab === 'MOBILE_ADMIN'
+          ? 'Mobile Admin Page Operations'
           : activeTab === 'MOBILE'
-          ? 'Driver Mobile App Operations'
+          ? 'Mobile App Operations'
           : 'All Integrated System Operations';
 
       const dateRangeStr =
@@ -371,6 +257,7 @@ export const AuditLogsPage: React.FC = () => {
     .badge { display: inline-block; padding: 2px 6px; border-radius: 4px; font-size: 9px; font-weight: 700; text-align: center; }
     .badge-admin { background: #eff6ff; color: #1e40af; border: 1px solid #bfdbfe; }
     .badge-mobile { background: #ecfdf5; color: #065f46; border: 1px solid #a7f3d0; }
+    .badge-mobile-admin { background: #f5f3ff; color: #6d28d9; border: 1px solid #ddd6fe; }
     .badge-module { background: #f1f5f9; color: #334155; font-weight: 700; }
     .action-text { font-weight: 700; color: #0f172a; }
     .details-text { font-size: 9.5px; color: #334155; word-break: break-word; line-height: 1.35; max-width: 320px; }
@@ -399,7 +286,7 @@ export const AuditLogsPage: React.FC = () => {
   <div class="summary-cards">
     <div class="sum-card">
       <div class="sum-label">Platform Scope</div>
-      <div class="sum-val">${activeTab === 'ADMIN' ? 'Admin Panel' : activeTab === 'MOBILE' ? 'Mobile App' : 'All Platforms'}</div>
+      <div class="sum-val">${activeTab === 'ADMIN' ? 'Admin Panel' : activeTab === 'MOBILE_ADMIN' ? 'Mobile Admin' : activeTab === 'MOBILE' ? 'Mobile App' : 'All Platforms'}</div>
     </div>
     <div class="sum-card">
       <div class="sum-label">Module Filter</div>
@@ -431,14 +318,15 @@ export const AuditLogsPage: React.FC = () => {
     <tbody>
       ${items
         .map((l, idx) => {
-          const isMobile = (l.source || '').toUpperCase() === 'MOBILE';
+          const plat = platformMeta(l.source);
+          const badgeCls = plat.key === 'MOBILE' ? 'badge-mobile' : plat.key === 'MOBILE_ADMIN' ? 'badge-mobile-admin' : 'badge-admin';
           return `
         <tr>
           <td class="center">${idx + 1}</td>
           <td style="white-space: nowrap;">${formatIST(l.created_at)}</td>
           <td>
-            <span class="badge ${isMobile ? 'badge-mobile' : 'badge-admin'}">
-              ${isMobile ? 'Mobile App' : 'Admin Panel'}
+            <span class="badge ${badgeCls}">
+              ${plat.label}
             </span>
           </td>
           <td>
@@ -506,42 +394,25 @@ export const AuditLogsPage: React.FC = () => {
     {
       header: 'Platform',
       render: (l) => {
-        const isMobile = (l.source || '').toUpperCase() === 'MOBILE';
-        return isMobile ? (
+        const plat = platformMeta(l.source);
+        const Icon = plat.key === 'MOBILE' ? Smartphone : plat.key === 'MOBILE_ADMIN' ? Tablet : Laptop;
+        return (
           <span
             style={{
               display: 'inline-flex',
               alignItems: 'center',
               gap: '5px',
-              background: '#ecfdf5',
-              color: '#065f46',
-              border: '1px solid #a7f3d0',
+              background: plat.bg,
+              color: plat.color,
+              border: `1px solid ${plat.border}`,
               padding: '3px 10px',
               borderRadius: '12px',
               fontSize: '12px',
               fontWeight: 700,
             }}
           >
-            <Smartphone size={13} />
-            Mobile App
-          </span>
-        ) : (
-          <span
-            style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: '5px',
-              background: '#eff6ff',
-              color: '#1e40af',
-              border: '1px solid #bfdbfe',
-              padding: '3px 10px',
-              borderRadius: '12px',
-              fontSize: '12px',
-              fontWeight: 700,
-            }}
-          >
-            <Laptop size={13} />
-            Admin Panel
+            <Icon size={13} />
+            {plat.label}
           </span>
         );
       },
@@ -587,14 +458,17 @@ export const AuditLogsPage: React.FC = () => {
     },
     {
       header: 'Details',
-      render: (l) =>
-        l.details ? (
-          <button onClick={() => openDetailsModal(l)} className="btn btn-outline btn-sm" style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
-            <Eye size={13} /> View JSON
-          </button>
-        ) : (
-          <span style={{ color: 'var(--text-light)' }}>—</span>
-        ),
+      render: (l) => (
+        <button
+          type="button"
+          onClick={() => setSelectedLog(l)}
+          className="btn btn-outline btn-sm"
+          style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', fontWeight: 700 }}
+        >
+          <Eye size={13} />
+          {getAuditListLabel(l.details, l.action)}
+        </button>
+      ),
     },
   ];
 
@@ -664,7 +538,7 @@ export const AuditLogsPage: React.FC = () => {
         </p>
       </div>
 
-      {/* ── Separate Platform Tabs (Admin Panel vs Mobile App) ───────────── */}
+      {/* ── Separate Platform Tabs (Admin Panel / Mobile Admin / Mobile App) ─ */}
       <div
         className="audit-tabs-container no-print"
         style={{
@@ -705,6 +579,39 @@ export const AuditLogsPage: React.FC = () => {
             }}
           >
             {counts.total_admin}
+          </span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => {
+            setActiveTab('MOBILE_ADMIN');
+            setPage(1);
+          }}
+          className={`btn ${activeTab === 'MOBILE_ADMIN' ? 'btn-primary' : 'btn-outline'}`}
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '8px',
+            padding: '8px 16px',
+            borderRadius: '8px',
+            fontWeight: 600,
+            fontSize: '13.5px',
+          }}
+        >
+          <Tablet size={16} />
+          <span>Mobile Admin Logs</span>
+          <span
+            style={{
+              padding: '2px 8px',
+              borderRadius: '10px',
+              fontSize: '12px',
+              background: activeTab === 'MOBILE_ADMIN' ? 'rgba(255,255,255,0.25)' : '#e2e8f0',
+              color: activeTab === 'MOBILE_ADMIN' ? '#fff' : '#475569',
+              fontWeight: 700,
+            }}
+          >
+            {counts.total_mobile_admin}
           </span>
         </button>
 
@@ -913,45 +820,86 @@ export const AuditLogsPage: React.FC = () => {
         />
       </div>
 
-      {/* Details JSON Modal */}
       <Modal
-        isOpen={isDetailsModalOpen}
-        onClose={() => setIsDetailsModalOpen(false)}
-        title={`Audit Event Details: ${selectedLog?.action}`}
-        maxWidth="650px"
+        isOpen={!!selectedLog}
+        onClose={() => setSelectedLog(null)}
+        title={selectedLog ? getAuditListLabel(selectedLog.details, selectedLog.action) : 'Details'}
+        maxWidth="680px"
       >
-        {selectedLog && (
-          <div>
-            <div style={{ marginBottom: '16px', background: '#f8fafc', padding: '14px', borderRadius: '8px' }}>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', fontSize: '13.5px' }}>
-                <div>
-                  <strong>Platform:</strong>{' '}
-                  <span style={{ fontWeight: 700, color: selectedLog.source === 'MOBILE' ? '#047857' : '#1d4ed8' }}>
-                    {selectedLog.source === 'MOBILE' ? 'Mobile App' : 'Admin Panel'}
-                  </span>
+        {selectedLog && (() => {
+          const story = getAuditStory(selectedLog.details) || formatDetailSummary(selectedLog.details);
+          const parsed: any = parseMaybeJson(selectedLog.details) || {};
+          const rows = getReadableDetailRows(selectedLog.details);
+          return (
+            <div>
+              <div style={{ marginBottom: '14px', background: '#f8fafc', padding: '14px', borderRadius: '8px' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', fontSize: '13.5px' }}>
+                  <div>
+                    <strong>Platform:</strong>{' '}
+                    <span style={{ fontWeight: 700, color: platformMeta(selectedLog.source).color }}>
+                      {platformMeta(selectedLog.source).label}
+                    </span>
+                  </div>
+                  <div><strong>Module:</strong> <span className="badge badge-info">{selectedLog.module}</span></div>
+                  <div><strong>Performed By:</strong> {selectedLog.user_name || selectedLog.username || 'System'}</div>
+                  <div><strong>User Role:</strong> {selectedLog.user_role || '—'}</div>
+                  <div><strong>Timestamp:</strong> {formatIST(selectedLog.created_at)}</div>
+                  {selectedLog.record_id && <div><strong>Record ID:</strong> #{selectedLog.record_id}</div>}
                 </div>
-                <div><strong>Module:</strong> <span className="badge badge-info">{selectedLog.module}</span></div>
-                <div><strong>Performed By:</strong> {selectedLog.user_name || selectedLog.username || 'System'}</div>
-                <div><strong>User Role:</strong> {selectedLog.user_role || '—'}</div>
-                <div><strong>Timestamp:</strong> {formatIST(selectedLog.created_at)}</div>
-                {selectedLog.record_id && <div><strong>Record ID:</strong> #{selectedLog.record_id}</div>}
+              </div>
+
+              <div style={{ background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: '8px', padding: '12px 14px', marginBottom: '12px' }}>
+                <div style={{ fontSize: '11px', fontWeight: 800, color: '#1d4ed8', textTransform: 'uppercase', letterSpacing: '0.4px', marginBottom: '4px' }}>What happened</div>
+                <div style={{ fontSize: '14px', fontWeight: 700, color: '#0f172a', lineHeight: 1.45 }}>{story === '—' ? 'No extra details were recorded for this action.' : story}</div>
+              </div>
+
+              {(parsed.driver_name || parsed.owner_name || parsed.lorry_number) ? (
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '8px', marginBottom: '12px' }}>
+                  <div style={{ background: '#fff7ed', border: '1px solid #fed7aa', borderRadius: '8px', padding: '10px 12px' }}>
+                    <div style={{ fontSize: '11px', fontWeight: 800, color: '#c2410c' }}>Driver</div>
+                    <div style={{ fontSize: '14px', fontWeight: 800, color: '#9a3412' }}>{parsed.driver_name || '—'}</div>
+                  </div>
+                  <div style={{ background: '#f5f3ff', border: '1px solid #ddd6fe', borderRadius: '8px', padding: '10px 12px' }}>
+                    <div style={{ fontSize: '11px', fontWeight: 800, color: '#6d28d9' }}>Owner</div>
+                    <div style={{ fontSize: '14px', fontWeight: 800, color: '#5b21b6' }}>{parsed.owner_name || '—'}</div>
+                  </div>
+                  <div style={{ background: '#ecfdf5', border: '1px solid #a7f3d0', borderRadius: '8px', padding: '10px 12px' }}>
+                    <div style={{ fontSize: '11px', fontWeight: 800, color: '#047857' }}>Lorry</div>
+                    <div style={{ fontSize: '14px', fontWeight: 800, color: '#065f46' }}>{parsed.lorry_number || '—'}</div>
+                  </div>
+                </div>
+              ) : null}
+
+              {rows.length ? (
+                <div style={{ border: '1px solid #e2e8f0', borderRadius: '8px', overflow: 'hidden' }}>
+                  {rows.map((row, idx) => (
+                    <div
+                      key={`${row.label}-${idx}`}
+                      style={{
+                        display: 'grid',
+                        gridTemplateColumns: '160px 1fr',
+                        gap: '10px',
+                        padding: '10px 14px',
+                        background: idx % 2 === 0 ? '#fff' : '#f8fafc',
+                        borderBottom: idx === rows.length - 1 ? 'none' : '1px solid #eef2f7',
+                        fontSize: '13.5px',
+                      }}
+                    >
+                      <div style={{ color: '#64748b', fontWeight: 700 }}>{row.label}</div>
+                      <div style={{ color: '#0f172a', fontWeight: 600 }}>{row.value}</div>
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+
+              <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '20px' }}>
+                <button type="button" onClick={() => setSelectedLog(null)} className="btn btn-outline">
+                  Close
+                </button>
               </div>
             </div>
-
-            <div style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-muted)', marginBottom: '6px' }}>
-              Payload / Event Parameters (JSON):
-            </div>
-            <div style={{ background: '#0f172a', color: '#38bdf8', padding: '16px', borderRadius: '8px', overflowX: 'auto', fontSize: '13px', fontFamily: 'monospace' }}>
-              <pre style={{ margin: 0 }}>{JSON.stringify(cleanDetailsForModal(selectedLog.details), null, 2)}</pre>
-            </div>
-
-            <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '20px' }}>
-              <button type="button" onClick={() => setIsDetailsModalOpen(false)} className="btn btn-outline">
-                Close
-              </button>
-            </div>
-          </div>
-        )}
+          );
+        })()}
       </Modal>
     </div>
   );
