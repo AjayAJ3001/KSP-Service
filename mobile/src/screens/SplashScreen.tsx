@@ -17,6 +17,15 @@ export const SplashScreen: React.FC<{ navigation: any }> = ({ navigation }) => {
     }
   }, [isLoading, isAuthenticated, navigation]);
 
+  useEffect(() => {
+    const fallback = setTimeout(() => {
+      if (!isAuthenticated) {
+        navigation.replace('Login');
+      }
+    }, 8000);
+    return () => clearTimeout(fallback);
+  }, [isAuthenticated, navigation]);
+
   return (
     <View style={styles.container}>
       <View style={styles.logoBox}>

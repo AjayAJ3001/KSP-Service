@@ -2,6 +2,7 @@ import http from 'http';
 import { execSync } from 'child_process';
 import app, { getLanIpv4Addresses } from './app';
 import pool from './config/database';
+import { warmupWeighBillOcr } from './utils/weighBillOcr';
 
 const PORT = parseInt(process.env.PORT || '5000', 10);
 
@@ -72,7 +73,12 @@ const startServer = async () => {
         ADD COLUMN IF NOT EXISTS weigh_bill_vehicle_no VARCHAR(30),
         ADD COLUMN IF NOT EXISTS weigh_bill_net_weight DECIMAL(12,3),
         ADD COLUMN IF NOT EXISTS weigh_bill_accepted_weight DECIMAL(12,3),
-        ADD COLUMN IF NOT EXISTS weigh_bill_image TEXT;
+        ADD COLUMN IF NOT EXISTS weigh_bill_image TEXT,
+        ADD COLUMN IF NOT EXISTS weigh_bill_date DATE;
+      DROP INDEX IF EXISTS idx_trips_weigh_bill_slip_no;
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_trips_weigh_bill_slip_date
+        ON trips (weigh_bill_slip_no, weigh_bill_date)
+        WHERE weigh_bill_slip_no IS NOT NULL AND weigh_bill_slip_no <> '' AND status <> 'CANCELLED';
     `);
     client.release();
 
@@ -90,6 +96,7 @@ const startServer = async () => {
       console.log(`   Environment: ${process.env.NODE_ENV || 'development'}`);
       console.log(`   Health: http://localhost:${PORT}/health`);
       lanIps.forEach((ip) => console.log(`   LAN:     http://${ip}:${PORT}/health`));
+      warmupWeighBillOcr();
     });
 
     // Graceful shutdown handling for nodemon and terminal stops

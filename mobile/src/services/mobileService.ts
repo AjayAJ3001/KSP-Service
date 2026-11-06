@@ -93,7 +93,13 @@ export const mobileTripService = {
     const res = await api.get(`/trips/${id}`);
     return res.data;
   },
-  parseWeighBill: async (data: { image_base64: string; exclude_trip_id?: number }) => {
+  parseWeighBill: async (data: {
+    image_base64: string;
+    exclude_trip_id?: number;
+    expected_vehicle_no?: string;
+    expected_party_name?: string;
+    expected_unit_name?: string;
+  }) => {
     const res = await api.post('/trips/weigh-bill/parse', data, { timeout: 90000 });
     return res.data;
   },
@@ -115,6 +121,9 @@ export const mobileTripService = {
     weigh_bill_net_weight?: number | null;
     weigh_bill_accepted_weight?: number | null;
     weigh_bill_image?: string | null;
+    weigh_bill_party_name?: string | null;
+    weigh_bill_unit_name?: string | null;
+    weigh_bill_date?: string | null;
   }): Promise<ApiResponse<Trip>> => {
     const res = await api.post('/trips', data);
     return res.data;

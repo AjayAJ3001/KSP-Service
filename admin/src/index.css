@@ -818,7 +818,7 @@ textarea.form-control, textarea.input { resize: vertical; min-height: 84px; }
 }
 .settlements-page .adv-stack {
   min-width: 0;
-  max-width: 168px;
+  max-width: 210px;
   display: flex;
   flex-direction: column;
   gap: 3px;

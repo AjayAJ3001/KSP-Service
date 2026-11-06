@@ -70,7 +70,7 @@ export const RootNavigator: React.FC = () => {
       <Stack.Screen
         name="GiveTruckAdvance"
         component={GiveTruckAdvanceScreen}
-        options={{ title: 'Give Truck Advance' }}
+        options={{ title: 'Give Advance' }}
       />
       <Stack.Screen
         name="PartyPayment"

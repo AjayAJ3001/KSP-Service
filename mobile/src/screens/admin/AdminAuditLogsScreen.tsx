@@ -351,7 +351,7 @@ export const AdminAuditLogsScreen: React.FC<{ navigation: any }> = ({ navigation
                       <Text style={styles.storyBoxLabel}>What happened</Text>
                       <Text style={styles.storyBoxText}>{story === '—' ? 'No extra details were recorded for this action.' : story}</Text>
                     </View>
-                    {(parsed.driver_name || parsed.owner_name || parsed.lorry_number) ? (
+                    {(parsed.driver_name || parsed.owner_name || parsed.lorry_number || parsed.manager_name) ? (
                       <View style={styles.peopleGrid}>
                         <View style={[styles.peopleCard, { backgroundColor: '#fff7ed' }]}>
                           <Text style={styles.peopleCardLabel}>Driver</Text>
@@ -365,6 +365,14 @@ export const AdminAuditLogsScreen: React.FC<{ navigation: any }> = ({ navigation
                           <Text style={styles.peopleCardLabel}>Lorry</Text>
                           <Text style={styles.peopleCardValue}>{parsed.lorry_number || '—'}</Text>
                         </View>
+                        {parsed.manager_name ? (
+                          <View style={[styles.peopleCard, { backgroundColor: '#eff6ff' }]}>
+                            <Text style={[styles.peopleCardLabel, { color: '#1d4ed8' }]}>Given to</Text>
+                            <Text style={styles.peopleCardValue}>
+                              {parsed.manager_name}{parsed.manager_role ? ` (${parsed.manager_role})` : ' (Manager)'}
+                            </Text>
+                          </View>
+                        ) : null}
                       </View>
                     ) : null}
                     {rows.map((row, idx) => (

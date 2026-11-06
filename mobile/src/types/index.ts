@@ -281,6 +281,8 @@ export interface Settlement {
   prior_deficit_deduction?: number;
   reference_no?: string;
   settled_by_name?: string;
+  advance_given_by_name?: string;
+  advance_given_by_role?: string;
   created_at: string;
 }
 
@@ -495,7 +497,7 @@ export type RootStackParamList = {
   Login: undefined;
   MainTabs: undefined;
   NewTrip: { preselectedVehicleId?: number; preselectedDriverId?: number; advancePaid?: number; draftTripId?: number } | undefined;
-  GiveTruckAdvance: { availableBalance: number };
+  GiveTruckAdvance: { availableBalance?: number } | undefined;
   PartyPayment: { trip: Trip; draftTripId?: number };
   DriverExpenses: { trip: Trip };
   SettlementReceipt: { trip: Trip; settlement?: Settlement; fromGenerate?: boolean };

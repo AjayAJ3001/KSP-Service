@@ -42,10 +42,13 @@ import { mobileLookupService, mobileDriverAdvanceService, mobileDashboardService
 import { Vehicle, Driver, RootStackParamList } from '../types';
 import { COLORS, SPACING, RADIUS, SHADOWS } from '../constants/theme';
 import { ComplianceAlertModal, ComplianceDoc } from '../components/ComplianceAlertModal';
+import { useAuth } from '../context/AuthContext';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'GiveTruckAdvance'>;
 
 export const GiveTruckAdvanceScreen: React.FC<Props> = ({ navigation, route }) => {
+  const { user } = useAuth();
+  const isAdmin = String(user?.role || '').toUpperCase() === 'ADMIN';
   const initialBalance = route.params?.availableBalance ?? 0;
   const [availableBalance, setAvailableBalance] = useState<number>(initialBalance);
 
@@ -152,11 +155,11 @@ export const GiveTruckAdvanceScreen: React.FC<Props> = ({ navigation, route }) =
       const [vRes, dRes, dashRes] = await Promise.all([
         mobileLookupService.getVehicles(),
         mobileLookupService.getDrivers(),
-        mobileDashboardService.getDashboard().catch(() => null),
+        isAdmin ? Promise.resolve(null) : mobileDashboardService.getDashboard().catch(() => null),
       ]);
       setVehicles(vRes.data.items);
       setDrivers(dRes.data.items);
-      if (dashRes?.data?.manager_available_balance !== undefined) {
+      if (!isAdmin && dashRes?.data?.manager_available_balance !== undefined) {
         setAvailableBalance(dashRes.data.manager_available_balance);
       }
     } catch {
@@ -246,7 +249,7 @@ export const GiveTruckAdvanceScreen: React.FC<Props> = ({ navigation, route }) =
       setError('Please enter a valid advance amount.');
       return;
     }
-    if (numAmount > availableBalance) {
+    if (!isAdmin && numAmount > availableBalance) {
       setError(`Amount exceeds your available balance of ${formatCurrency(availableBalance)}.`);
       return;
     }
@@ -272,7 +275,7 @@ export const GiveTruckAdvanceScreen: React.FC<Props> = ({ navigation, route }) =
       setError('Please enter a valid advance amount.');
       return;
     }
-    if (numAmount > availableBalance) {
+    if (!isAdmin && numAmount > availableBalance) {
       setError(`Amount exceeds your available balance of ${formatCurrency(availableBalance)}.`);
       return;
     }
@@ -521,11 +524,15 @@ export const GiveTruckAdvanceScreen: React.FC<Props> = ({ navigation, route }) =
               <HandCoins size={22} color="#15803d" />
             </View>
             <View style={styles.balanceTextBlock}>
-              <Text style={styles.balanceLabel}>Manager Available Balance</Text>
-              <Text style={styles.balanceValue}>{formatCurrency(availableBalance)}</Text>
+              <Text style={styles.balanceLabel}>
+                {isAdmin ? 'Admin / Office Advance' : 'Manager Available Balance'}
+              </Text>
+              <Text style={styles.balanceValue}>
+                {isAdmin ? 'No wallet limit' : formatCurrency(availableBalance)}
+              </Text>
             </View>
           </View>
-          {numAmount > 0 && (
+          {!isAdmin && numAmount > 0 && (
             <View style={styles.balanceDivider}>
               <View style={styles.balanceAfterRow}>
                 <Text style={styles.balanceAfterLabel}>Balance after this advance</Text>
@@ -841,6 +848,14 @@ export const GiveTruckAdvanceScreen: React.FC<Props> = ({ navigation, route }) =
               >
                 <Text style={styles.switchModeText}>
                   Need to give advance without trip? Switch to Direct Advance ➔
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.switchModeBtn}
+                onPress={() => navigation.navigate('NewTrip')}
+              >
+                <Text style={styles.switchModeText}>
+                  Start trip without giving advance ➔
                 </Text>
               </TouchableOpacity>
             </>

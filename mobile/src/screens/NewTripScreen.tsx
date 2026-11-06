@@ -37,10 +37,15 @@ import { COLORS, SPACING, RADIUS, SHADOWS } from '../constants/theme';
 import { ComplianceAlertModal, ComplianceDoc } from '../components/ComplianceAlertModal';
 import { AppNoticeModal, AppNoticeModalProps, NoticeKind } from '../components/AppNoticeModal';
 import { formatDateDMY } from '../utils/dateUtils';
+import { billMatchesTrip } from '../utils/weighBillMatch';
+import { useAuth } from '../context/AuthContext';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'NewTrip'>;
 
 export const NewTripScreen: React.FC<Props> = ({ navigation, route }) => {
+  const { user } = useAuth();
+  const canManualEntry = String(user?.role || '').toUpperCase() === 'ADMIN';
+  const [weightEntryMode, setWeightEntryMode] = useState<'upload' | 'manual'>('upload');
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
   const [drivers, setDrivers] = useState<Driver[]>([]);
   const [parties, setParties] = useState<Party[]>([]);
@@ -77,6 +82,10 @@ export const NewTripScreen: React.FC<Props> = ({ navigation, route }) => {
     hash: string;
     slip_no: string | null;
     vehicle_no: string | null;
+    heading_name: string | null;
+    party_name: string | null;
+    unit_name: string | null;
+    bill_date: string | null;
     net_weight_mt: number | null;
     accepted_weight_mt: number | null;
     weight_source: 'ACCEPTED' | 'NET' | null;
@@ -420,20 +429,71 @@ export const NewTripScreen: React.FC<Props> = ({ navigation, route }) => {
     return Math.round(weight * rate);
   };
 
+  const tripSelectionForBill = () => {
+    const vehicle = vehicles.find((v) => v.id === selectedVehicleId);
+    const party = parties.find((p) => p.id === selectedPartyId);
+    const route = routes.find((r) => r.id === selectedRouteId);
+    return {
+      selectedTruck: vehicle?.lorry_number || null,
+      selectedParty: party?.name || null,
+      selectedUnit: route?.to_location || route?.from_location || null,
+    };
+  };
+
+  const rejectBill = (title: string, message: string) => {
+    setWeighBill(null);
+    setGoodsWeight('');
+    setError(message);
+    showNotice('error', title, message, {
+      actions: [
+        {
+          label: 'Upload Another Bill',
+          onPress: () => {
+            closeNotice();
+            promptBillUpload();
+          },
+        },
+        { label: 'Close', onPress: closeNotice, variant: 'ghost' },
+      ],
+    });
+  };
+
   const readBillFromUri = async (dataUri: string | null) => {
     if (!dataUri) return;
+    const selection = tripSelectionForBill();
+    if (!selection.selectedTruck || !selection.selectedParty || !selection.selectedUnit) {
+      rejectBill(
+        'Select Trip Details First',
+        'Select truck number, party, and unit first. Then upload the weighment bill so truck and unit can be checked.'
+      );
+      return;
+    }
     try {
       setIsReadingBill(true);
       setError('');
-      showNotice('loading', 'Reading Bill', 'Extracting Net / Nett Weight from the uploaded slip. Please wait.');
+      showNotice('loading', 'Reading Bill', 'Reading weight from bill...');
       const res = await mobileTripService.parseWeighBill({
         image_base64: dataUri,
         exclude_trip_id: draftTripId || undefined,
+        expected_vehicle_no: selection.selectedTruck || undefined,
+        expected_party_name: selection.selectedParty || undefined,
+        expected_unit_name: selection.selectedUnit || undefined,
       });
       const data = res.data;
       if (!data?.goods_weight) {
-        setError('Could not read Net / Nett Weight. Capture the weight section clearly.');
-        showBillError('Could not read Net / Nett Weight. Capture the weight section clearly.');
+        rejectBill('Bill Not Readable', 'Could not read weight. Capture Net Weight, Nett Weight, or Accepted Qty clearly.');
+        return;
+      }
+      const match = billMatchesTrip({
+        ...selection,
+        billTruck: data.vehicle_no,
+        billParty: data.party_name,
+        billUnit: data.unit_name,
+        billHeading: data.heading_name,
+        billOcr: data.ocr_preview,
+      });
+      if (!match.ok) {
+        rejectBill(match.title, match.message);
         return;
       }
       setWeighBill({
@@ -441,19 +501,28 @@ export const NewTripScreen: React.FC<Props> = ({ navigation, route }) => {
         hash: data.weigh_bill_hash,
         slip_no: data.slip_no,
         vehicle_no: data.vehicle_no,
+        heading_name: data.heading_name,
+        party_name: data.party_name,
+        unit_name: data.unit_name,
+        bill_date: data.bill_date,
         net_weight_mt: data.net_weight_mt,
         accepted_weight_mt: data.accepted_weight_mt,
         weight_source: data.weight_source,
       });
       setGoodsWeight(String(data.goods_weight));
-      const sourceLabel = data.weight_source === 'ACCEPTED' ? 'Accepted Qty' : 'Net Weight';
+      const weightLabel = data.weight_source === 'ACCEPTED' ? 'Accepted qty' : 'Net weight';
+      const extra = [
+        `${weightLabel} ${data.goods_weight} MT`,
+        data.bill_date ? `Bill date ${data.bill_date}` : '',
+        data.vehicle_no ? `Truck / Vehicle No ${data.vehicle_no}` : '',
+      ].filter(Boolean).join('  ·  ');
       showNotice(
         'success',
-        'Bill Uploaded',
-        `${sourceLabel} has been taken from the bill and filled as trip weight.`,
+        'Trip Entry Can Start',
+        'Truck, party and unit match the bill. Weight is filled for the trip.',
         {
-          detail: `${data.goods_weight} MT${data.slip_no ? `  ·  Slip ${data.slip_no}` : ''}`,
-          actions: [{ label: 'Continue', onPress: closeNotice }],
+          detail: extra,
+          actions: [{ label: 'Continue Trip Entry', onPress: closeNotice }],
         }
       );
     } catch (err: any) {
@@ -478,8 +547,9 @@ export const NewTripScreen: React.FC<Props> = ({ navigation, route }) => {
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ['images'],
       allowsEditing: false,
-      quality: 0.75,
+      quality: 0.42,
       base64: true,
+      exif: false,
     });
     if (result.canceled || !result.assets?.[0]?.base64) return null;
     return `data:image/jpeg;base64,${result.assets[0].base64}`;
@@ -495,18 +565,29 @@ export const NewTripScreen: React.FC<Props> = ({ navigation, route }) => {
     }
     const result = await ImagePicker.launchCameraAsync({
       allowsEditing: false,
-      quality: 0.75,
+      quality: 0.42,
       base64: true,
+      exif: false,
     });
     if (result.canceled || !result.assets?.[0]?.base64) return null;
     return `data:image/jpeg;base64,${result.assets[0].base64}`;
   };
 
   const promptBillUpload = () => {
+    const selection = tripSelectionForBill();
+    if (!selection.selectedTruck || !selection.selectedParty || !selection.selectedUnit) {
+      showNotice(
+        'warning',
+        'Select Trip Details First',
+        'Select truck number, party, and unit first. Then upload the weighment bill.',
+        { actions: [{ label: 'OK', onPress: closeNotice }] }
+      );
+      return;
+    }
     showNotice(
       'upload',
       'Upload Weighment Bill',
-      'Take or choose a clear photo of the slip. Trip weight is taken from Net, Nett Weight, or Net Weight.',
+      'Take or choose a clear photo of the slip. Weight is taken from Net Weight, Nett Weight, or Accepted Qty.',
       {
         actions: [
           {
@@ -530,6 +611,26 @@ export const NewTripScreen: React.FC<Props> = ({ navigation, route }) => {
     );
   };
 
+  useEffect(() => {
+    if (!weighBill) return;
+    const selection = tripSelectionForBill();
+    const match = billMatchesTrip({
+      ...selection,
+      billTruck: weighBill.vehicle_no,
+      billParty: weighBill.party_name,
+      billUnit: weighBill.unit_name,
+      billHeading: weighBill.heading_name,
+    });
+    if (!match.ok) {
+      setWeighBill(null);
+      setGoodsWeight('');
+      setError(match.message);
+      showNotice('error', match.title, match.message, {
+        actions: [{ label: 'OK', onPress: closeNotice }],
+      });
+    }
+  }, [selectedVehicleId, selectedPartyId, selectedRouteId]);
+
   const showBillError = (raw: string) => {
     const msg = raw || 'Unable to process the weighment bill.';
     const isDup = /duplicate|already used on trip/i.test(msg);
@@ -539,9 +640,9 @@ export const NewTripScreen: React.FC<Props> = ({ navigation, route }) => {
       isDup || isNet ? 'error' : 'warning',
       isDup ? 'Duplicate Bill' : isNet ? 'Connection Failed' : isRead ? 'Bill Not Readable' : 'Bill Upload Failed',
       isDup
-        ? 'This weighment bill was already used on another trip. Upload a different bill.'
+        ? msg
         : isRead
-        ? 'Net / Nett Weight could not be read clearly. Capture the weight section and try again.'
+        ? 'Weight could not be read. Capture Net Weight, Nett Weight, or Accepted Qty and try again.'
         : msg,
       {
         detail: isDup ? msg : undefined,
@@ -568,8 +669,9 @@ export const NewTripScreen: React.FC<Props> = ({ navigation, route }) => {
       });
       return;
     }
-    if (!weighBill?.hash) {
-      const msg = 'Upload the weighment bill. Trip weight is taken from Net / Nett Weight.';
+    const usingManualWeight = canManualEntry && (weightEntryMode === 'manual' || !weighBill?.hash);
+    if (!usingManualWeight && !weighBill?.hash) {
+      const msg = 'Upload the weighment bill. Weight is taken from Net Weight, Nett Weight, or Accepted Qty.';
       setError(msg);
       showNotice('warning', 'Bill Required', msg, {
         actions: [
@@ -579,11 +681,35 @@ export const NewTripScreen: React.FC<Props> = ({ navigation, route }) => {
       });
       return;
     }
+    if (weighBill?.hash) {
+      const billMatch = billMatchesTrip({
+        ...tripSelectionForBill(),
+        billTruck: weighBill.vehicle_no,
+        billParty: weighBill.party_name,
+        billUnit: weighBill.unit_name,
+        billHeading: weighBill.heading_name,
+      });
+      if (!billMatch.ok) {
+        setError(billMatch.message);
+        showNotice('error', billMatch.title, billMatch.message, {
+          actions: [{ label: 'OK', onPress: closeNotice }],
+        });
+        return;
+      }
+    }
     const weight = parseFloat(goodsWeight);
     if (isNaN(weight) || weight <= 0) {
-      const msg = 'Bill weight could not be read. Upload a clearer bill photo.';
+      const msg = usingManualWeight
+        ? 'Enter the trip weight.'
+        : 'Bill weight could not be read. Upload a clearer bill photo.';
       setError(msg);
-      showBillError(msg);
+      if (usingManualWeight) {
+        showNotice('warning', 'Weight Required', msg, {
+          actions: [{ label: 'OK', onPress: closeNotice }],
+        });
+      } else {
+        showBillError(msg);
+      }
       return;
     }
     const rate = parseFloat(freightRate);
@@ -616,12 +742,15 @@ export const NewTripScreen: React.FC<Props> = ({ navigation, route }) => {
         goods_weight: weight,
         advance_paid: parseFloat(advancePaid) || 0,
         cancel_draft_trip_id: draftTripId || undefined,
-        weigh_bill_hash: weighBill.hash,
-        weigh_bill_slip_no: weighBill.slip_no,
-        weigh_bill_vehicle_no: weighBill.vehicle_no,
-        weigh_bill_net_weight: weighBill.net_weight_mt,
-        weigh_bill_accepted_weight: weighBill.accepted_weight_mt,
-        weigh_bill_image: weighBill.preview,
+        weigh_bill_hash: weighBill?.hash,
+        weigh_bill_slip_no: weighBill?.slip_no,
+        weigh_bill_vehicle_no: weighBill?.vehicle_no,
+        weigh_bill_net_weight: weighBill?.net_weight_mt,
+        weigh_bill_accepted_weight: weighBill?.accepted_weight_mt,
+        weigh_bill_image: weighBill?.preview,
+        weigh_bill_party_name: weighBill?.party_name,
+        weigh_bill_unit_name: weighBill?.unit_name,
+        weigh_bill_date: weighBill?.bill_date,
       });
 
       setDraftTripId(res.data.id);
@@ -1033,27 +1162,50 @@ export const NewTripScreen: React.FC<Props> = ({ navigation, route }) => {
           </View>
 
           <View style={styles.formRow}>
-            <Text style={styles.fieldLabel}>Weighment / Acceptance Bill *</Text>
+            {canManualEntry ? (
+              <View style={styles.entryModeRow}>
+                <TouchableOpacity
+                  style={[styles.entryModeBtn, weightEntryMode === 'upload' && styles.entryModeBtnActive]}
+                  onPress={() => setWeightEntryMode('upload')}
+                >
+                  <Text style={[styles.entryModeText, weightEntryMode === 'upload' && styles.entryModeTextActive]}>
+                    Upload weight
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.entryModeBtn, weightEntryMode === 'manual' && styles.entryModeBtnActive]}
+                  onPress={() => setWeightEntryMode('manual')}
+                >
+                  <Text style={[styles.entryModeText, weightEntryMode === 'manual' && styles.entryModeTextActive]}>
+                    Manual entry
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            ) : null}
+            <Text style={styles.fieldLabel}>
+              {canManualEntry && weightEntryMode === 'manual'
+                ? 'Weighment / Acceptance Bill (optional)'
+                : 'Weighment / Acceptance Bill *'}
+            </Text>
             {isReadingBill ? (
               <View style={styles.billScanning}>
                 <ActivityIndicator size="small" color="#7c3aed" />
                 <ScanLine size={16} color="#7c3aed" />
-                <Text style={styles.billScanningText}>Reading net / accepted weight...</Text>
+                <Text style={styles.billScanningText}>Reading bill weight...</Text>
               </View>
             ) : weighBill ? (
               <View style={styles.billUploaded}>
                 <Image source={{ uri: weighBill.preview }} style={styles.billPreview} />
                 <View style={{ flex: 1 }}>
                   <Text style={styles.billOkTitle}>
-                    {weighBill.weight_source === 'ACCEPTED' ? 'Accepted qty used' : 'Net weight used'}
+                    {weighBill.weight_source === 'ACCEPTED' ? 'Accepted qty' : 'Net weight'}{' '}
+                    {weighBill.net_weight_mt ?? weighBill.accepted_weight_mt} MT
                   </Text>
-                  <Text style={styles.billOkMeta}>
-                    {weighBill.accepted_weight_mt != null ? `Accepted ${weighBill.accepted_weight_mt} MT` : null}
-                    {weighBill.accepted_weight_mt != null && weighBill.net_weight_mt != null ? ' · ' : ''}
-                    {weighBill.net_weight_mt != null ? `Net ${weighBill.net_weight_mt} MT` : ''}
-                  </Text>
-                  {weighBill.slip_no ? (
-                    <Text style={styles.billOkMeta}>Bill / Slip {weighBill.slip_no}</Text>
+                  {weighBill.bill_date ? (
+                    <Text style={styles.billOkMeta}>Bill date: {weighBill.bill_date}</Text>
+                  ) : null}
+                  {weighBill.vehicle_no ? (
+                    <Text style={styles.billOkMeta}>Truck / Vehicle No: {weighBill.vehicle_no}</Text>
                   ) : null}
                   <TouchableOpacity onPress={promptBillUpload}>
                     <Text style={styles.billChange}>Change bill</Text>
@@ -1081,11 +1233,12 @@ export const NewTripScreen: React.FC<Props> = ({ navigation, route }) => {
                 <Scale size={18} color={COLORS.accent} style={{ marginRight: 10 }} />
                 <TextInput
                   style={styles.innerInput}
-                  placeholder="From bill"
+                  placeholder={canManualEntry ? 'Enter weight' : 'From bill'}
                   placeholderTextColor={COLORS.textLight}
                   keyboardType="decimal-pad"
                   value={goodsWeight}
-                  editable={false}
+                  editable={canManualEntry}
+                  onChangeText={setGoodsWeight}
                 />
               </View>
             </View>
@@ -1586,5 +1739,31 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     color: '#1d4ed8',
     marginTop: 6,
+  },
+  entryModeRow: {
+    flexDirection: 'row',
+    gap: 8,
+    marginBottom: 10,
+  },
+  entryModeBtn: {
+    flex: 1,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    backgroundColor: COLORS.surface,
+    borderRadius: RADIUS.md,
+    paddingVertical: 10,
+    alignItems: 'center',
+  },
+  entryModeBtnActive: {
+    borderColor: '#1d4ed8',
+    backgroundColor: '#eff6ff',
+  },
+  entryModeText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: COLORS.textMuted,
+  },
+  entryModeTextActive: {
+    color: '#1d4ed8',
   },
 });

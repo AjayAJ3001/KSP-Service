@@ -41,6 +41,7 @@ import {
   Banknote,
   Wallet,
   BookOpen,
+  PlusCircle,
 } from 'lucide-react-native';
 import { adminDashboardService } from '../../services/adminService';
 import { useAuth } from '../../context/AuthContext';
@@ -298,6 +299,15 @@ export const AdminDashboardScreen: React.FC<{ navigation: any }> = ({ navigation
         <Text style={styles.sectionHeading}>Operations</Text>
       </View>
       <View style={styles.navGrid}>
+        {user?.role === 'ADMIN' ? (
+          <TouchableOpacity style={styles.navItem} onPress={() => navigation.navigate('GiveTruckAdvance')} activeOpacity={0.7}>
+            <View style={[styles.navIconBox, { backgroundColor: '#eef2ff' }]}>
+              <PlusCircle size={20} color="#4338ca" />
+            </View>
+            <Text style={styles.navItemTitle}>New Trip Entry</Text>
+            <Text style={styles.navItemSub}>Give advance, then start trip</Text>
+          </TouchableOpacity>
+        ) : null}
         <TouchableOpacity style={styles.navItem} onPress={() => navigation.navigate('AdminTrips')} activeOpacity={0.7}>
           <View style={[styles.navIconBox, { backgroundColor: '#eff6ff' }]}>
             <Navigation size={20} color="#1d4ed8" />
@@ -725,7 +735,7 @@ export const AdminDashboardScreen: React.FC<{ navigation: any }> = ({ navigation
                       onPress={() => {
                         const trip = selectedTrip;
                         setSelectedTrip(null);
-                        navigation.navigate('PartyPayment', { trip });
+                        navigation.navigate('PartyPayment', { trip, viewOnly: true });
                       }}
                     >
                       <CreditCard size={14} color="#1d4ed8" />
@@ -737,7 +747,7 @@ export const AdminDashboardScreen: React.FC<{ navigation: any }> = ({ navigation
                       onPress={() => {
                         const trip = selectedTrip;
                         setSelectedTrip(null);
-                        navigation.navigate('DriverExpenses', { trip });
+                        navigation.navigate('DriverExpenses', { trip, viewOnly: true });
                       }}
                     >
                       <TrendingUp size={14} color="#b45309" />

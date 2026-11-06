@@ -271,7 +271,7 @@ export const AdminTripsScreen: React.FC<{ navigation: any }> = ({ navigation }) 
           </View>
           <TouchableOpacity
             style={styles.addBtn}
-            onPress={() => navigation.navigate('NewTrip')}
+            onPress={() => navigation.navigate('GiveTruckAdvance')}
           >
             <Plus size={16} color={COLORS.white} />
             <Text style={styles.addBtnText}>New Trip</Text>
@@ -531,7 +531,7 @@ export const AdminTripsScreen: React.FC<{ navigation: any }> = ({ navigation }) 
 
                 <TouchableOpacity
                   style={[styles.actionBtn, { backgroundColor: '#eff6ff' }]}
-                  onPress={() => navigation.navigate('PartyPayment', { trip: t })}
+                  onPress={() => navigation.navigate('PartyPayment', { trip: t, viewOnly: true })}
                 >
                   <CreditCard size={12} color="#1d4ed8" />
                   <Text style={[styles.actionBtnText, { color: '#1d4ed8' }]}>Payment</Text>
@@ -539,7 +539,7 @@ export const AdminTripsScreen: React.FC<{ navigation: any }> = ({ navigation }) 
 
                 <TouchableOpacity
                   style={[styles.actionBtn, { backgroundColor: '#fef3c7' }]}
-                  onPress={() => navigation.navigate('DriverExpenses', { trip: t })}
+                  onPress={() => navigation.navigate('DriverExpenses', { trip: t, viewOnly: true })}
                 >
                   <TrendingUp size={12} color="#b45309" />
                   <Text style={[styles.actionBtnText, { color: '#b45309' }]}>Expenses</Text>

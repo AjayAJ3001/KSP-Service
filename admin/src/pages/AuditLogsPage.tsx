@@ -853,7 +853,7 @@ export const AuditLogsPage: React.FC = () => {
                 <div style={{ fontSize: '14px', fontWeight: 700, color: '#0f172a', lineHeight: 1.45 }}>{story === '—' ? 'No extra details were recorded for this action.' : story}</div>
               </div>
 
-              {(parsed.driver_name || parsed.owner_name || parsed.lorry_number) ? (
+              {(parsed.driver_name || parsed.owner_name || parsed.lorry_number || parsed.manager_name) ? (
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '8px', marginBottom: '12px' }}>
                   <div style={{ background: '#fff7ed', border: '1px solid #fed7aa', borderRadius: '8px', padding: '10px 12px' }}>
                     <div style={{ fontSize: '11px', fontWeight: 800, color: '#c2410c' }}>Driver</div>
@@ -867,6 +867,14 @@ export const AuditLogsPage: React.FC = () => {
                     <div style={{ fontSize: '11px', fontWeight: 800, color: '#047857' }}>Lorry</div>
                     <div style={{ fontSize: '14px', fontWeight: 800, color: '#065f46' }}>{parsed.lorry_number || '—'}</div>
                   </div>
+                  {parsed.manager_name ? (
+                    <div style={{ background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: '8px', padding: '10px 12px' }}>
+                      <div style={{ fontSize: '11px', fontWeight: 800, color: '#1d4ed8' }}>Given to</div>
+                      <div style={{ fontSize: '14px', fontWeight: 800, color: '#1e3a8a' }}>
+                        {parsed.manager_name}{parsed.manager_role ? ` (${parsed.manager_role})` : ' (Manager)'}
+                      </div>
+                    </div>
+                  ) : null}
                 </div>
               ) : null}
 

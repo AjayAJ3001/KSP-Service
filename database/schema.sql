@@ -143,7 +143,8 @@ CREATE TABLE trips (
   weigh_bill_vehicle_no VARCHAR(30),
   weigh_bill_net_weight DECIMAL(12,3),
   weigh_bill_accepted_weight DECIMAL(12,3),
-  weigh_bill_image TEXT
+  weigh_bill_image TEXT,
+  weigh_bill_date DATE
 );
 
 -- TRIP PAYMENTS

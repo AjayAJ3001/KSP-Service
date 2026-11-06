@@ -37,6 +37,9 @@ const FIELD_LABELS: Record<string, string> = {
   party_name: 'Party',
   driver_name: 'Driver',
   owner_name: 'Owner',
+  manager_name: 'Given to (Manager)',
+  manager_role: 'Manager role',
+  recipient_type: 'Given to',
 };
 
 const SECRET_KEYS = ['password', 'token', 'secret', 'hash', 'auth', 'access_token', 'refresh_token'];
@@ -47,7 +50,8 @@ const SKIP_KEYS = new Set([
   'driver_id', 'owner_id', 'vehicle_id', 'party_id', 'route_id', 'unit_id', 'manager_id', 'user_id', 'settlement_id',
 ]);
 const DETAIL_ORDER = [
-  'driver_name', 'owner_name', 'lorry_number', 'party_name', 'from_location', 'to_location',
+  'driver_name', 'owner_name', 'manager_name', 'manager_role', 'recipient_type',
+  'lorry_number', 'party_name', 'from_location', 'to_location',
   'trip_date', 'expense_type', 'description', 'amount', 'received_amount', 'balance_due',
   'total_freight', 'entered_advance', 'status', 'reason', 'notes',
 ];
@@ -194,6 +198,7 @@ export function getAuditPeopleLine(details: any): string {
   return [
     parsed.driver_name ? `Driver: ${parsed.driver_name}` : '',
     parsed.owner_name ? `Owner: ${parsed.owner_name}` : '',
+    parsed.manager_name ? `Given to: ${parsed.manager_name}${parsed.manager_role ? ` (${parsed.manager_role})` : ' (Manager)'}` : '',
     parsed.lorry_number ? `Lorry: ${parsed.lorry_number}` : '',
   ].filter(Boolean).join('  •  ');
 }

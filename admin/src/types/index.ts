@@ -356,6 +356,9 @@ export interface Settlement {
   owner_leftover_used?: number;
   owner_given?: number;
   advance_owner_name?: string;
+  advance_given_by?: { name: string; role?: string; amount?: number }[];
+  advance_given_by_name?: string;
+  advance_given_by_role?: string;
   driver_id?: number;
   balance_to_driver: number;
   previous_driver_balance?: number;

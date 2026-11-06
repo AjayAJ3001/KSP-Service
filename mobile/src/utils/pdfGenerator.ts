@@ -357,6 +357,14 @@ export const generateSettlementHtml = (trip: Trip, settlement: Settlement) => {
         <td class="info-label"></td>
         <td class="info-val"></td>
       </tr>
+      ${((settlement as any).advance_given_by_name || settlement.settled_by_name) ? `
+      <tr>
+        <td class="info-label">Advance Given By</td>
+        <td class="info-val">${(settlement as any).advance_given_by_name || '—'}</td>
+        <td class="info-label">Settlement Done By</td>
+        <td class="info-val">${settlement.settled_by_name || '—'}</td>
+      </tr>
+      ` : ''}
     </table>
 
     <div style="font-size: 11px; font-weight: 800; color: #0f172a; text-transform: uppercase; margin-bottom: 6px; letter-spacing: 0.3px;">
@@ -391,6 +399,8 @@ export const generateSettlementHtml = (trip: Trip, settlement: Settlement) => {
         const leftoverUsed = Math.round(Number((settlement as any).owner_leftover_used || 0));
         const ownerBal = Math.round(Number((settlement as any).owner_balance || 0));
         const ownerName = String((settlement as any).advance_owner_name || '').trim();
+        const givenBy = String((settlement as any).advance_given_by_name || '').trim();
+        const settledBy = String(settlement.settled_by_name || '').trim();
         const mode = String(settlement.payment_mode || '').toUpperCase();
         const isCash = ['CASH', 'UPI', 'BANK_TRANSFER'].includes(mode);
         const laterAdj = paidAmount > 0 && !isCash;
@@ -403,9 +413,9 @@ export const generateSettlementHtml = (trip: Trip, settlement: Settlement) => {
           `<div class="calc-row"${extra}><span>${label}</span><strong>${value}</strong></div>`;
         let html = row('Total Driver Expenses Incurred:', `<span style="color:#b45309">${formatCurrency(totalExpenses)}</span>`);
         if (tripAdvance > 0 && priorDeficitDeduction <= 0) {
-          html += row('Less: Trip Advance:', `<span style="color:#1d4ed8">(-) ${formatCurrency(tripAdvance)}</span>`);
+          html += row(`Less: Trip Advance${givenBy ? ` (given by ${givenBy})` : ''}:`, `<span style="color:#1d4ed8">(-) ${formatCurrency(tripAdvance)}</span>`);
         } else if (tripAdvance > 0) {
-          html += row('Trip Advance (given):', `<span style="color:#1d4ed8">${formatCurrency(tripAdvance)}</span>`);
+          html += row(`Trip Advance (given${givenBy ? ` by ${givenBy}` : ''}):`, `<span style="color:#1d4ed8">${formatCurrency(tripAdvance)}</span>`);
         }
         if (ownerAdvance > 0) {
           html += row(`Advance from Owner${ownerName ? ` (${ownerName})` : ''}:`, `<span style="color:#6d28d9">${formatCurrency(ownerAdvance)}</span>`, ' style="background:#f5f3ff"');
@@ -424,7 +434,7 @@ export const generateSettlementHtml = (trip: Trip, settlement: Settlement) => {
           html += row('Less: Adjusted from later trip advance:', `<span style="color:#c2410c">(-) ${formatCurrency(paidAmount)}</span>`, ' style="background:#fff7ed;color:#c2410c"');
         }
         if (isCash && paidAmount > 0) {
-          html += row(`Less: Paid to Driver (${mode}):`, `<span style="color:#16a34a">(-) ${formatCurrency(paidAmount)}</span>`, ' style="background:#f0fdf4;color:#15803d"');
+          html += row(`Less: Paid to Driver (${mode})${settledBy ? ` — settled by ${settledBy}` : ''}:`, `<span style="color:#16a34a">(-) ${formatCurrency(paidAmount)}</span>`, ' style="background:#f0fdf4;color:#15803d"');
         }
         if (needToPay > 0 || inHand === 0) {
           html += row('Need to Pay:', `<span style="color:#b91c1c">${formatCurrency(needToPay)}</span>`, ' style="background:#fef2f2;color:#b91c1c;font-weight:800;border-top:1.5px solid #fecaca"');
@@ -461,7 +471,8 @@ export const generateSettlementHtml = (trip: Trip, settlement: Settlement) => {
           Paid Amount: <strong>${formatCurrency(settlement.paid_amount || settlement.balance_to_driver)}</strong> via <strong>${settlement.payment_mode}</strong>
           ${settlement.payment_date ? ` · Paid on <strong>${formatDateDMY(settlement.payment_date)}</strong>` : ''}
           ${settlement.reference_no ? ` · Ref/UTR: <strong>${settlement.reference_no}</strong>` : ''}
-          ${settlement.settled_by_name ? ` · Authorized &amp; Disbursed by: <strong>${settlement.settled_by_name}</strong>` : ''}
+          ${(settlement as any).advance_given_by_name ? ` · Advance given by: <strong>${(settlement as any).advance_given_by_name}</strong>` : ''}
+          ${settlement.settled_by_name ? ` · Settlement done by: <strong>${settlement.settled_by_name}</strong>` : ''}
         </div>
       </div>
     ` : ''}

@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import * as XLSX from 'xlsx';
-import { Navigation, Plus, Eye, CheckCircle, Search, Filter, Trash2, AlertTriangle, Calendar, Truck, Printer, FileSpreadsheet, Loader2, RefreshCw } from 'lucide-react';
-import { tripService, vehicleService, driverService, partyService, routeService, unitService, freightRateService, ownerService } from '../services/adminService';
+import { Navigation, Plus, Eye, CheckCircle, Search, Filter, Trash2, AlertTriangle, Calendar, Truck, Printer, FileSpreadsheet, Loader2, RefreshCw, HandCoins, Zap } from 'lucide-react';
+import { tripService, vehicleService, driverService, partyService, routeService, unitService, freightRateService, ownerService, driverAdvanceService } from '../services/adminService';
 import { Trip, Vehicle, Driver, Party, Route, Unit, FreightRate, Owner } from '../types';
 import { DataTable, Column } from '../components/Common/DataTable';
 import { Modal } from '../components/Common/Modal';
@@ -52,6 +52,9 @@ export const TripsPage: React.FC = () => {
     goods_weight: '',
     advance_paid: '0',
   });
+  const [createStep, setCreateStep] = useState<'advance' | 'trip'>('advance');
+  const [advanceMode, setAdvanceMode] = useState<'WITH_TRIP' | 'WITHOUT_TRIP'>('WITH_TRIP');
+  const [advanceNotes, setAdvanceNotes] = useState('');
 
   const [formError, setFormError] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -152,6 +155,7 @@ export const TripsPage: React.FC = () => {
         vehicle_id: pVehicleId || prev.vehicle_id,
         advance_paid: pAdvance || prev.advance_paid,
       }));
+      setCreateStep('trip');
       setIsCreateModalOpen(true);
       const nextParams = new URLSearchParams(searchParams);
       nextParams.delete('create');
@@ -318,7 +322,54 @@ export const TripsPage: React.FC = () => {
       goods_weight: '',
       advance_paid: '0',
     });
+    setCreateStep('advance');
+    setAdvanceMode('WITH_TRIP');
+    setAdvanceNotes('');
     setFormError('');
+  };
+
+  const openCreateModal = () => {
+    resetForm();
+    setIsCreateModalOpen(true);
+  };
+
+  const handleAdvanceContinue = async () => {
+    const amt = parseFloat(formData.advance_paid) || 0;
+    if (!amt || amt <= 0) {
+      setFormError('Please enter a valid advance amount.');
+      return;
+    }
+    if (advanceMode === 'WITH_TRIP') {
+      if (!formData.vehicle_id) {
+        setFormError('Please select a truck / vehicle.');
+        return;
+      }
+      setFormError('');
+      setCreateStep('trip');
+      return;
+    }
+    if (!formData.driver_id) {
+      setFormError('Please select a driver.');
+      return;
+    }
+    try {
+      setIsSubmitting(true);
+      setFormError('');
+      await driverAdvanceService.createDriverAdvance({
+        driver_id: Number(formData.driver_id),
+        vehicle_id: formData.vehicle_id ? Number(formData.vehicle_id) : undefined,
+        amount: amt,
+        advance_date: formData.trip_date,
+        payment_mode: 'CASH',
+        notes: advanceNotes.trim() || undefined,
+      });
+      setIsCreateModalOpen(false);
+      resetForm();
+    } catch (err: any) {
+      setFormError(err.message || 'Failed to give advance.');
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   const handleDeleteTrip = async (trip: Trip) => {
@@ -861,6 +912,10 @@ export const TripsPage: React.FC = () => {
             Create and track freight dispatch trips, lorry allocations & delivery status
           </p>
         </div>
+        <button type="button" className="btn btn-primary" onClick={openCreateModal} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <Plus size={16} />
+          New Trip Entry
+        </button>
       </div>
 
       <div className="card">
@@ -1067,7 +1122,7 @@ export const TripsPage: React.FC = () => {
       <Modal
         isOpen={isCreateModalOpen}
         onClose={() => setIsCreateModalOpen(false)}
-        title="New Trip Entry"
+        title={createStep === 'advance' ? 'Give Advance' : 'New Trip Entry'}
         maxWidth="700px"
       >
         {formError && (
@@ -1075,6 +1130,147 @@ export const TripsPage: React.FC = () => {
             {formError}
           </div>
         )}
+        {createStep === 'advance' ? (
+          <div>
+            <div style={{ fontSize: 11, fontWeight: 800, color: '#64748b', letterSpacing: 0.5, marginBottom: 8 }}>
+              HOW WILL THIS ADVANCE BE DISBURSED?
+            </div>
+            <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
+              <button
+                type="button"
+                onClick={() => { setAdvanceMode('WITH_TRIP'); setFormError(''); }}
+                style={{
+                  flex: 1,
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 8,
+                  padding: '12px 14px',
+                  borderRadius: 10,
+                  border: advanceMode === 'WITH_TRIP' ? '2px solid #0284c7' : '1px solid #cbd5e1',
+                  background: advanceMode === 'WITH_TRIP' ? '#0284c7' : '#fff',
+                  color: advanceMode === 'WITH_TRIP' ? '#fff' : '#334155',
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                  textAlign: 'left',
+                }}
+              >
+                <Zap size={16} color={advanceMode === 'WITH_TRIP' ? '#fff' : '#0284c7'} />
+                <span>
+                  <div>Start Trip Now</div>
+                  <div style={{ fontSize: 11, fontWeight: 500, opacity: 0.85 }}>Advance with new trip</div>
+                </span>
+              </button>
+              <button
+                type="button"
+                onClick={() => { setAdvanceMode('WITHOUT_TRIP'); setFormError(''); }}
+                style={{
+                  flex: 1,
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 8,
+                  padding: '12px 14px',
+                  borderRadius: 10,
+                  border: advanceMode === 'WITHOUT_TRIP' ? '2px solid #059669' : '1px solid #cbd5e1',
+                  background: advanceMode === 'WITHOUT_TRIP' ? '#059669' : '#fff',
+                  color: advanceMode === 'WITHOUT_TRIP' ? '#fff' : '#334155',
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                  textAlign: 'left',
+                }}
+              >
+                <HandCoins size={16} color={advanceMode === 'WITHOUT_TRIP' ? '#fff' : '#059669'} />
+                <span>
+                  <div>Without Trip</div>
+                  <div style={{ fontSize: 11, fontWeight: 500, opacity: 0.85 }}>Direct advance (no trip)</div>
+                </span>
+              </button>
+            </div>
+
+            {advanceMode === 'WITH_TRIP' && (
+              <div className="form-group">
+                <label className="form-label">Lorry Number *</label>
+                <select
+                  className="form-control form-select"
+                  value={formData.vehicle_id}
+                  onChange={(e) => handleVehicleChange(e.target.value)}
+                >
+                  <option value="">Select Vehicle / Lorry</option>
+                  {vehicles.map((v) => (
+                    <option key={v.id} value={v.id}>
+                      {v.lorry_number} {v.owner_name ? `• ${v.owner_name}` : ''}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+
+            <div className="form-group">
+              <label className="form-label">Driver Name {advanceMode === 'WITHOUT_TRIP' ? '*' : ''}</label>
+              <select
+                className="form-control form-select"
+                value={formData.driver_id}
+                onChange={(e) => handleDriverChange(e.target.value)}
+              >
+                <option value="">Select Driver</option>
+                {drivers.map((d) => (
+                  <option key={d.id} value={d.id}>
+                    {d.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="form-group">
+              <label className="form-label">Advance Amount (₹) *</label>
+              <input
+                type="number"
+                step="0.01"
+                min="0"
+                className="form-control"
+                placeholder="e.g. 5000.00"
+                value={formData.advance_paid === '0' ? '' : formData.advance_paid}
+                onChange={(e) => setFormData({ ...formData, advance_paid: e.target.value })}
+              />
+            </div>
+
+            <div className="form-group">
+              <label className="form-label">Notes / Reason (Optional)</label>
+              <textarea
+                className="form-control"
+                rows={2}
+                placeholder="e.g., Highway diesel, toll advance, trip pre-payment..."
+                value={advanceNotes}
+                onChange={(e) => setAdvanceNotes(e.target.value)}
+              />
+            </div>
+
+            <div style={{ fontSize: 12, color: '#0284c7', marginBottom: 14 }}>
+              {advanceMode === 'WITH_TRIP'
+                ? 'Advance will be finalized when the trip slip is generated.'
+                : 'This will post a direct driver advance with no trip.'}
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
+              <button type="button" className="btn btn-outline" onClick={() => setIsCreateModalOpen(false)}>Cancel</button>
+              {advanceMode === 'WITH_TRIP' && (
+                <button
+                  type="button"
+                  className="btn btn-outline"
+                  onClick={() => { setFormError(''); setCreateStep('trip'); }}
+                >
+                  Skip advance, start trip
+                </button>
+              )}
+              <button type="button" className="btn btn-primary" disabled={isSubmitting} onClick={handleAdvanceContinue}>
+                {isSubmitting
+                  ? 'Saving...'
+                  : advanceMode === 'WITH_TRIP'
+                    ? 'Proceed to Trip Dispatch'
+                    : 'Disburse Advance (Without Trip)'}
+              </button>
+            </div>
+          </div>
+        ) : (
         <form onSubmit={handleCreate}>
           <div className="grid-cols-2">
             <div className="form-group">
@@ -1388,6 +1584,9 @@ export const TripsPage: React.FC = () => {
           </div>
 
           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '20px' }}>
+            <button type="button" onClick={() => { setFormError(''); setCreateStep('advance'); }} className="btn btn-outline">
+              Back to Advance
+            </button>
             <button type="button" onClick={() => setIsCreateModalOpen(false)} className="btn btn-outline">
               Cancel
             </button>
@@ -1396,6 +1595,7 @@ export const TripsPage: React.FC = () => {
             </button>
           </div>
         </form>
+        )}
       </Modal>
 
       {/* View Trip Details Modal */}

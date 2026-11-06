@@ -563,7 +563,8 @@ export const SettlementsPage: React.FC = () => {
             const ownBalLabel = ownName ? `Advance Balance in Hand (${ownName})` : 'Advance Balance in Hand';
             const lessAmt = Number(s.owner_applied || 0);
             const priorDeficit = Number(s.prior_deficit_deduction || 0);
-            return `<div style="font-size:9px;color:#1d4ed8">Advance: ₹${manager.toLocaleString('en-IN')}</div>${!leftoverOnly && ownerAdv > 0 ? `<div style="font-size:9px;color:#6d28d9">${ownAdvLabel}: ₹${ownerAdv.toLocaleString('en-IN')}</div>` : ''}${priorDeficit > 0 ? `<div style="font-size:9px;color:#c2410c">Less (prior dues): ₹${priorDeficit.toLocaleString('en-IN')}</div>` : ''}${!leftoverOnly && lessAmt > 0 ? `<div style="font-size:9px;color:#c2410c">Less: ₹${lessAmt.toLocaleString('en-IN')}</div>` : ''}${ownerBal > 0 ? `<div style="font-size:9px;color:#047857">${ownBalLabel}: ₹${ownerBal.toLocaleString('en-IN')}</div>` : ''}${leftoverOnly ? `<div style="font-size:9px;color:#047857">${ownBalLabel}: ₹${leftover.toLocaleString('en-IN')}</div>` : ''}`;
+            const giver = String(s.advance_given_by_name || '').trim();
+            return `<div style="font-size:9px;color:#1d4ed8">Advance: ₹${manager.toLocaleString('en-IN')}${giver ? ` · ${giver}` : ''}</div>${!leftoverOnly && ownerAdv > 0 ? `<div style="font-size:9px;color:#6d28d9">${ownAdvLabel}: ₹${ownerAdv.toLocaleString('en-IN')}</div>` : ''}${priorDeficit > 0 ? `<div style="font-size:9px;color:#c2410c">Less (prior dues): ₹${priorDeficit.toLocaleString('en-IN')}</div>` : ''}${!leftoverOnly && lessAmt > 0 ? `<div style="font-size:9px;color:#c2410c">Less: ₹${lessAmt.toLocaleString('en-IN')}</div>` : ''}${ownerBal > 0 ? `<div style="font-size:9px;color:#047857">${ownBalLabel}: ₹${ownerBal.toLocaleString('en-IN')}</div>` : ''}${leftoverOnly ? `<div style="font-size:9px;color:#047857">${ownBalLabel}: ₹${leftover.toLocaleString('en-IN')}</div>` : ''}${s.settled_by_name ? `<div style="font-size:9px;color:#15803d">Settled by: ${s.settled_by_name}</div>` : ''}`;
           })()}</td>
           <td class="num">${Number(s.total_expenses || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td>
           <td class="num" style="color:#b91c1c;font-weight:800">${(() => {
@@ -717,10 +718,15 @@ export const SettlementsPage: React.FC = () => {
     const laterAdvanceAdjusted = paidAmount > 0 && !isCashDisbursement;
     const { needToPay, inHand } = settlementOutcome(s);
     const ownerName = String(s.advance_owner_name || '').trim();
+    const givenRole = String(s.advance_given_by_role || '').toUpperCase();
+    const givenRoleLabel = givenRole === 'OWNER' ? 'Owner' : givenRole === 'ADMIN' ? 'Admin' : givenRole === 'MANAGER' ? 'Manager' : '';
+    const givenName = String(s.advance_given_by_name || '').trim();
+    const advanceGivenBy = givenName ? (givenRoleLabel ? `${givenName} (${givenRoleLabel})` : givenName) : '';
+    const settledBy = String(s.settled_by_name || '').trim();
     return {
       expenses, tripAdvance, ownerAdvance, ownerApplied, leftoverUsed, ownerBalance,
       priorDeficit, effectiveAdvance, paidAmount, isCashDisbursement, laterAdvanceAdjusted,
-      needToPay, inHand, ownerName, mode,
+      needToPay, inHand, ownerName, mode, advanceGivenBy, settledBy,
     };
   };
 
@@ -1194,6 +1200,14 @@ export const SettlementsPage: React.FC = () => {
         <td class="info-label">Settlement Mode</td>
         <td class="info-val">${s.payment_mode || (isSettled ? 'CASH' : 'PENDING')}</td>
       </tr>
+      ${getSlipCalc(s).advanceGivenBy || getSlipCalc(s).settledBy ? `
+      <tr>
+        <td class="info-label">Advance Given By</td>
+        <td class="info-val">${getSlipCalc(s).advanceGivenBy || '—'}</td>
+        <td class="info-label">Settlement Done By</td>
+        <td class="info-val">${getSlipCalc(s).settledBy || '—'}</td>
+      </tr>
+      ` : ''}
     </table>
 
     <div style="font-size: 11px; font-weight: 800; color: #0f172a; text-transform: uppercase; margin-bottom: 6px; letter-spacing: 0.3px;">
@@ -1227,9 +1241,9 @@ export const SettlementsPage: React.FC = () => {
           `<div class="calc-row"${extra}><span>${label}</span><strong>${valueHtml}</strong></div>`;
         let html = row('Total Driver Expenses Incurred:', `<span style="color:#b45309">${formatCurrency(c.expenses)}</span>`);
         if (c.tripAdvance > 0 && c.priorDeficit <= 0) {
-          html += row('Less: Trip Advance:', `<span style="color:#1d4ed8">(-) ${formatCurrency(c.tripAdvance)}</span>`);
+          html += row(`Less: Trip Advance${c.advanceGivenBy ? ` (given by ${c.advanceGivenBy})` : ''}:`, `<span style="color:#1d4ed8">(-) ${formatCurrency(c.tripAdvance)}</span>`);
         } else if (c.tripAdvance > 0) {
-          html += row('Trip Advance (given):', `<span style="color:#1d4ed8">${formatCurrency(c.tripAdvance)}</span>`);
+          html += row(`Trip Advance (given${c.advanceGivenBy ? ` by ${c.advanceGivenBy}` : ''}):`, `<span style="color:#1d4ed8">${formatCurrency(c.tripAdvance)}</span>`);
         }
         if (c.ownerAdvance > 0) {
           html += row(`Advance from Owner${c.ownerName ? ` (${c.ownerName})` : ''}:`, `<span style="color:#6d28d9">${formatCurrency(c.ownerAdvance)}</span>`, ' style="background:#f5f3ff"');
@@ -1248,7 +1262,7 @@ export const SettlementsPage: React.FC = () => {
           html += row('Less: Adjusted from later trip advance:', `<span style="color:#c2410c">(-) ${formatCurrency(c.paidAmount)}</span>`, ' style="background:#fff7ed;color:#c2410c"');
         }
         if (c.isCashDisbursement && c.paidAmount > 0) {
-          html += row(`Less: Paid to Driver (${c.mode}):`, `<span style="color:#16a34a">(-) ${formatCurrency(c.paidAmount)}</span>`, ' style="background:#f0fdf4;color:#15803d"');
+          html += row(`Less: Paid to Driver (${c.mode})${c.settledBy ? ` — settled by ${c.settledBy}` : ''}:`, `<span style="color:#16a34a">(-) ${formatCurrency(c.paidAmount)}</span>`, ' style="background:#f0fdf4;color:#15803d"');
         }
         if (c.needToPay > 0 || c.inHand === 0) {
           html += row('Need to Pay:', `<span style="color:#b91c1c">${formatCurrency(c.needToPay)}</span>`, ' style="background:#fef2f2;color:#b91c1c;font-weight:800;border-top:1.5px solid #fecaca"');
@@ -1273,7 +1287,7 @@ export const SettlementsPage: React.FC = () => {
     ` : ''}
     ${getSlipCalc(s).isCashDisbursement && paidAmount > 0 ? `
     <div style="background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 4px; padding: 8px 12px; margin-bottom: 14px; font-size: 11px; color: #166534; line-height: 1.45;">
-      <strong>✔ Payment Recorded:</strong> <strong>${formatCurrency(paidAmount)}</strong> paid to driver via ${s.payment_mode}. Remaining balance payable to driver: <strong>${formatCurrency(needToPay)}</strong>.
+      <strong>✔ Payment Recorded:</strong> <strong>${formatCurrency(paidAmount)}</strong> paid to driver via ${s.payment_mode}${s.settled_by_name ? ` by <strong>${s.settled_by_name}</strong>` : ''}. Remaining balance payable to driver: <strong>${formatCurrency(needToPay)}</strong>.
     </div>
     ` : ''}
 
@@ -1286,7 +1300,8 @@ export const SettlementsPage: React.FC = () => {
             : `Paid Amount: <strong>${formatCurrency(s.paid_amount || netPayable)}</strong> via <strong>${s.payment_mode}</strong>`}
           ${s.payment_date ? ` · Settled on <strong>${formatDateDMY(s.payment_date)}</strong>` : ''}
           ${s.reference_no ? ` · Ref/UTR: <strong>${s.reference_no}</strong>` : ''}
-          ${s.settled_by_name ? ` · Authorized &amp; Disbursed by: <strong>${s.settled_by_name}</strong>` : ''}
+          ${s.advance_given_by_name ? ` · Advance given by: <strong>${s.advance_given_by_name}</strong>` : ''}
+          ${s.settled_by_name ? ` · Settlement done by: <strong>${s.settled_by_name}</strong>` : ''}
         </div>
       </div>
     ` : ''}
@@ -1379,6 +1394,29 @@ export const SettlementsPage: React.FC = () => {
     return <IndianRupee size={13} style={{ verticalAlign: 'middle', marginRight: 4, color: '#1e40af' }} />;
   };
 
+  const personRoleLabel = (role?: string | null) => {
+    const r = String(role || '').toUpperCase();
+    if (r === 'OWNER') return 'Owner';
+    if (r === 'ADMIN') return 'Admin';
+    if (r === 'MANAGER') return 'Manager';
+    return '';
+  };
+
+  const advanceGiverText = (s: Settlement) => {
+    const named = String(s.advance_given_by_name || '').trim();
+    if (named) {
+      const tag = personRoleLabel(s.advance_given_by_role);
+      return tag ? `${tag}: ${named}` : named;
+    }
+    return '';
+  };
+
+  const settledByText = (s: Settlement) => {
+    const name = String(s.settled_by_name || '').trim();
+    if (!name) return '';
+    return `Settled by: ${name}`;
+  };
+
   const formatCurrency = (val: number | string) => {
     const num = parseFloat(String(val)) || 0;
     return `₹${num.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -1420,8 +1458,9 @@ export const SettlementsPage: React.FC = () => {
         const ownerAdvance = Math.round(Number(s.owner_given || 0));
         const ownerAdvanceBal = Math.round(parseFloat(String(s.owner_balance ?? 0)) || 0);
         const isOwnerLeftover = leftoverUsed > 0 && ownerAdvance <= 0 && manager <= 0;
-        const rows: { label: string; value: number; color: string; bg: string }[] = [
-          { label: 'Advance', value: manager, color: '#1d4ed8', bg: '#eff6ff' },
+        const giver = advanceGiverText(s);
+        const rows: { label: string; value: number; color: string; bg: string; sub?: string }[] = [
+          { label: 'Advance', value: manager, color: '#1d4ed8', bg: '#eff6ff', sub: giver || undefined },
         ];
         const ownName = String(s.advance_owner_name || '').trim();
         const ownAdvLabel = ownName ? `Owner` : 'Owner';
@@ -1429,7 +1468,7 @@ export const SettlementsPage: React.FC = () => {
         const lessAmt = Math.round(Number(s.owner_applied || 0));
         const priorDeficit = Math.round(Number(s.prior_deficit_deduction || 0));
         if (!isOwnerLeftover && ownerAdvance > 0) {
-          rows.push({ label: ownAdvLabel, value: ownerAdvance, color: '#6d28d9', bg: '#f5f3ff' });
+          rows.push({ label: ownAdvLabel, value: ownerAdvance, color: '#6d28d9', bg: '#f5f3ff', sub: ownName || undefined });
         }
         if (priorDeficit > 0) {
           rows.push({ label: 'Prior dues', value: priorDeficit, color: '#c2410c', bg: '#fff7ed' });
@@ -1446,9 +1485,19 @@ export const SettlementsPage: React.FC = () => {
         return (
           <div className="adv-stack">
             {rows.map((row) => (
-              <div key={row.label} className="adv-chip" style={{ background: row.bg }} title={ownName || row.label}>
-                <span style={{ fontSize: '10px', fontWeight: 700, color: row.color }}>{row.label}</span>
-                <span style={{ fontSize: '11px', fontWeight: 800, color: row.color, whiteSpace: 'nowrap' }}>{formatCurrency(row.value)}</span>
+              <div
+                key={row.label}
+                className="adv-chip"
+                style={{ background: row.bg, flexDirection: 'column', alignItems: 'flex-start', gap: 1 }}
+                title={row.sub || ownName || row.label}
+              >
+                <div style={{ display: 'flex', width: '100%', justifyContent: 'space-between', gap: 6, alignItems: 'center' }}>
+                  <span style={{ fontSize: '10px', fontWeight: 700, color: row.color }}>{row.label}</span>
+                  <span style={{ fontSize: '11px', fontWeight: 800, color: row.color, whiteSpace: 'nowrap' }}>{formatCurrency(row.value)}</span>
+                </div>
+                {row.sub ? (
+                  <span style={{ fontSize: '9px', fontWeight: 700, color: row.color, lineHeight: 1.25 }}>{row.sub}</span>
+                ) : null}
               </div>
             ))}
           </div>
@@ -1465,11 +1514,13 @@ export const SettlementsPage: React.FC = () => {
         const isCoveredByAdvance = !isSettled && netBal > 0 && driverCurrentBalance >= 0;
 
         if (isSettled) {
+          const by = settledByText(s);
           if (s.payment_mode === 'ADJUSTED_ADVANCE' && paidAmt > 0) {
             return (
               <div>
                 <strong style={{ color: '#059669', fontSize: '12.5px' }}>{formatCurrency(paidAmt)}</strong>
                 <div style={{ fontSize: '10px', color: '#059669', fontWeight: 700 }}>Settled</div>
+                {by ? <div style={{ fontSize: '9px', color: '#047857', fontWeight: 700 }}>{by}</div> : null}
               </div>
             );
           }
@@ -1478,6 +1529,7 @@ export const SettlementsPage: React.FC = () => {
               <div>
                 <strong style={{ color: '#15803d', fontSize: '12.5px' }}>{formatCurrency(paidAmt)}</strong>
                 <div style={{ fontSize: '10px', color: '#15803d', fontWeight: 700 }}>Paid</div>
+                {by ? <div style={{ fontSize: '9px', color: '#15803d', fontWeight: 700 }}>{by}</div> : null}
               </div>
             );
           }
@@ -1486,6 +1538,7 @@ export const SettlementsPage: React.FC = () => {
               <div>
                 <span style={{ color: '#1d4ed8', fontWeight: 800, fontSize: '12.5px' }}>{formatCurrency(Math.abs(netBal))}</span>
                 <div style={{ fontSize: '10px', color: '#1d4ed8', fontWeight: 700 }}>In hand</div>
+                {by ? <div style={{ fontSize: '9px', color: '#1d4ed8', fontWeight: 700 }}>{by}</div> : null}
               </div>
             );
           }
@@ -1493,6 +1546,7 @@ export const SettlementsPage: React.FC = () => {
             <div>
               <strong style={{ color: '#059669', fontSize: '12.5px' }}>{formatCurrency(0)}</strong>
               <div style={{ fontSize: '10px', color: '#059669', fontWeight: 700 }}>Settled</div>
+              {by ? <div style={{ fontSize: '9px', color: '#047857', fontWeight: 700 }}>{by}</div> : null}
             </div>
           );
         }
@@ -1532,6 +1586,9 @@ export const SettlementsPage: React.FC = () => {
             {payModeIcon(s.payment_mode)}
             <span style={{ fontWeight: 600 }}>{s.payment_mode === 'ADJUSTED_ADVANCE' ? 'ADVANCE ADJUSTED' : s.payment_mode}</span>
             {s.payment_date && <div style={{ color: 'var(--text-muted)', fontSize: '11px' }}>{formatDateDMY(s.payment_date)}</div>}
+            {settledByText(s) ? (
+              <div style={{ color: '#334155', fontSize: '10px', fontWeight: 700 }}>{settledByText(s)}</div>
+            ) : null}
           </span>
         ) : <span style={{ color: 'var(--text-muted)', fontSize: '12px' }}>—</span>
       ),
@@ -2275,6 +2332,22 @@ export const SettlementsPage: React.FC = () => {
                       {selectedSettlement.payment_mode || (selectedSettlement.settlement_status === 'SETTLED' ? 'CASH' : 'PENDING')}
                     </td>
                   </tr>
+                  {(getSlipCalc(selectedSettlement).advanceGivenBy || getSlipCalc(selectedSettlement).settledBy) && (
+                    <tr>
+                      <td style={{ padding: '6px 10px', fontSize: '10.5px', fontWeight: 700, background: '#f8fafc', color: '#475569', textTransform: 'uppercase', border: '1px solid #cbd5e1' }}>
+                        Advance Given By
+                      </td>
+                      <td style={{ padding: '6px 10px', fontSize: '11.5px', fontWeight: 700, color: '#1d4ed8', border: '1px solid #cbd5e1' }}>
+                        {getSlipCalc(selectedSettlement).advanceGivenBy || '—'}
+                      </td>
+                      <td style={{ padding: '6px 10px', fontSize: '10.5px', fontWeight: 700, background: '#f8fafc', color: '#475569', textTransform: 'uppercase', border: '1px solid #cbd5e1' }}>
+                        Settlement Done By
+                      </td>
+                      <td style={{ padding: '6px 10px', fontSize: '11.5px', fontWeight: 700, color: '#15803d', border: '1px solid #cbd5e1' }}>
+                        {getSlipCalc(selectedSettlement).settledBy || '—'}
+                      </td>
+                    </tr>
+                  )}
                 </tbody>
               </table>
 
@@ -2344,15 +2417,15 @@ export const SettlementsPage: React.FC = () => {
                   );
                   return (
                     <>
-                      {c.tripAdvance > 0 && c.priorDeficit <= 0 && row('Less: Trip Advance:', c.tripAdvance, { color: '#1d4ed8', minus: true })}
-                      {c.tripAdvance > 0 && c.priorDeficit > 0 && row('Trip Advance (given):', c.tripAdvance, { color: '#1d4ed8' })}
+                      {c.tripAdvance > 0 && c.priorDeficit <= 0 && row(`Less: Trip Advance${c.advanceGivenBy ? ` (given by ${c.advanceGivenBy})` : ''}:`, c.tripAdvance, { color: '#1d4ed8', minus: true })}
+                      {c.tripAdvance > 0 && c.priorDeficit > 0 && row(`Trip Advance (given${c.advanceGivenBy ? ` by ${c.advanceGivenBy}` : ''}):`, c.tripAdvance, { color: '#1d4ed8' })}
                       {c.ownerAdvance > 0 && row(`Advance from Owner${c.ownerName ? ` (${c.ownerName})` : ''}:`, c.ownerAdvance, { bg: '#f5f3ff', color: '#6d28d9' })}
                       {c.priorDeficit > 0 && row('Less: This trip advance adjusted to prior trip dues:', c.priorDeficit, { bg: '#fff7ed', color: '#c2410c', minus: true })}
                       {c.priorDeficit > 0 && row('Effective Advance Available for This Trip:', c.effectiveAdvance, { bg: '#f8fafc', color: '#0f172a', bold: true })}
                       {c.ownerApplied > 0 && row('Less: Owner advance used on this trip:', c.ownerApplied, { bg: '#fff7ed', color: '#c2410c', minus: true })}
                       {c.leftoverUsed > 0 && c.priorDeficit <= 0 && row('Less: Previous surplus used on this trip:', c.leftoverUsed, { bg: '#fff7ed', color: '#c2410c', minus: true })}
                       {c.laterAdvanceAdjusted && row('Less: Adjusted from later trip advance:', c.paidAmount, { bg: '#fff7ed', color: '#c2410c', minus: true })}
-                      {c.isCashDisbursement && c.paidAmount > 0 && row(`Less: Paid to Driver (${c.mode}):`, c.paidAmount, { bg: '#f0fdf4', color: '#15803d', minus: true })}
+                      {c.isCashDisbursement && c.paidAmount > 0 && row(`Less: Paid to Driver (${c.mode})${c.settledBy ? ` — settled by ${c.settledBy}` : ''}:`, c.paidAmount, { bg: '#f0fdf4', color: '#15803d', minus: true })}
                       {(c.needToPay > 0 || c.inHand === 0) && row('Need to Pay:', c.needToPay, { bg: '#fef2f2', color: '#b91c1c', bold: true })}
                       {c.inHand > 0 && row('Balance in Hand:', c.inHand, { bg: '#ecfdf5', color: '#047857', bold: true })}
                     </>
@@ -2401,7 +2474,7 @@ export const SettlementsPage: React.FC = () => {
                   color: '#166534',
                   lineHeight: 1.45,
                 }}>
-                  <strong>✔ Payment Recorded:</strong> <strong>{formatCurrency(selectedSettlement.paid_amount || 0)}</strong> paid to driver via {selectedSettlement.payment_mode}. Remaining balance payable to driver: <strong>{formatCurrency(settlementOutcome(selectedSettlement).needToPay)}</strong>.
+                  <strong>✔ Payment Recorded:</strong> <strong>{formatCurrency(selectedSettlement.paid_amount || 0)}</strong> paid to driver via {selectedSettlement.payment_mode}{selectedSettlement.settled_by_name ? <> by <strong>{selectedSettlement.settled_by_name}</strong></> : null}. Remaining balance payable to driver: <strong>{formatCurrency(settlementOutcome(selectedSettlement).needToPay)}</strong>.
                 </div>
               )}
 
@@ -2432,7 +2505,8 @@ export const SettlementsPage: React.FC = () => {
                       Paid Amount: <strong>{formatCurrency(selectedSettlement.paid_amount || selectedSettlement.balance_to_driver)}</strong> via <strong>{selectedSettlement.payment_mode}</strong>
                       {selectedSettlement.payment_date && ` · Paid on ${formatDateDMY(selectedSettlement.payment_date)}`}
                       {selectedSettlement.reference_no && ` · Ref/UTR: ${selectedSettlement.reference_no}`}
-                      {selectedSettlement.settled_by_name && ` · Authorized by: ${selectedSettlement.settled_by_name}`}
+                      {selectedSettlement.advance_given_by_name && ` · Advance given by: ${selectedSettlement.advance_given_by_name}`}
+                      {selectedSettlement.settled_by_name && ` · Settlement done by: ${selectedSettlement.settled_by_name}`}
                     </div>
                   </div>
                 </div>
@@ -2465,6 +2539,9 @@ export const SettlementsPage: React.FC = () => {
                     <td style={{ verticalAlign: 'bottom', width: '50%', textAlign: 'right' }}>
                       <div style={{ width: '200px', borderBottom: '1px solid #0f172a', marginBottom: '6px', marginLeft: 'auto' }} />
                       <div style={{ fontSize: '11px', fontWeight: 800, color: '#0f172a', textTransform: 'uppercase' }}>Authorized Signatory</div>
+                      {selectedSettlement.settled_by_name && (
+                        <div style={{ fontSize: '10px', color: '#64748b', marginTop: '2px' }}>Settled by: <strong>{selectedSettlement.settled_by_name}</strong></div>
+                      )}
                       <div style={{ fontSize: '10px', color: '#64748b', marginTop: '2px' }}>For <strong>KSP TRANSPORT</strong></div>
                       <div style={{ display: 'inline-block', border: '1px dashed #94a3b8', padding: '4px 10px', fontSize: '9.5px', color: '#94a3b8', borderRadius: '4px', marginTop: '4px' }}>
                         [ OFFICIAL SEAL &amp; STAMP ]

@@ -22,6 +22,7 @@ import {
   Share2,
   Check,
   ChevronDown,
+  ChevronUp,
   X,
   Printer,
   Sparkles,
@@ -91,6 +92,7 @@ export const AdminReportsScreen: React.FC<{ navigation: any }> = ({ navigation }
   const [isLoading, setIsLoading] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
   const [pdfGenerating, setPdfGenerating] = useState<string | null>(null);
+  const [expandedTripId, setExpandedTripId] = useState<number | null>(null);
   const hasActiveFilters = Boolean(
     selectedOwnerId ||
     selectedVehicleId ||
@@ -943,108 +945,128 @@ export const AdminReportsScreen: React.FC<{ navigation: any }> = ({ navigation }
                   <Text style={styles.centerText}>No trips found for selected filters</Text>
                 </View>
               ) : (
-                tripData.trips?.map((trip: any) => (
+                tripData.trips?.map((trip: any) => {
+                  const open = expandedTripId === trip.id;
+                  const expItems = Array.isArray(trip.expense_items)
+                    ? trip.expense_items
+                    : (typeof trip.expense_items === 'string'
+                      ? (() => { try { const p = JSON.parse(trip.expense_items); return Array.isArray(p) ? p : []; } catch { return []; } })()
+                      : []);
+                  return (
                   <View key={trip.id} style={styles.dataCard}>
-                    <View style={styles.cardTopRow}>
-                      <View style={styles.cardBadgeLorry}>
-                        <Truck size={14} color={COLORS.primary} />
-                        <Text style={styles.cardLorryText}>{trip.lorry_number}</Text>
-                        <Text style={{ fontSize: 11, color: COLORS.textMuted, fontWeight: '700' }}>#{trip.id}</Text>
-                      </View>
-                      <View style={styles.cardActions}>
-                        <View style={[styles.cardStatus, getStatusStyle(trip.status)]}>
-                          <Text style={[styles.cardStatusText, getStatusTextStyle(trip.status)]}>
-                            {trip.status}
-                          </Text>
+                    <TouchableOpacity
+                      activeOpacity={0.8}
+                      onPress={() => setExpandedTripId(open ? null : trip.id)}
+                    >
+                      <View style={styles.cardTopRow}>
+                        <View style={styles.cardBadgeLorry}>
+                          <Truck size={14} color={COLORS.primary} />
+                          <Text style={styles.cardLorryText}>{trip.lorry_number}</Text>
+                          <Text style={{ fontSize: 11, color: COLORS.textMuted, fontWeight: '700' }}>#{trip.id}</Text>
                         </View>
-                        {/* Single PDF Challan button */}
-                        <TouchableOpacity
-                          style={styles.cardActionIconBtnPdf}
-                          onPress={() => handleDownloadSingleTripPdf(trip)}
-                          disabled={pdfGenerating === `trip_${trip.id}`}
-                        >
-                          {pdfGenerating === `trip_${trip.id}` ? (
-                            <ActivityIndicator size="small" color="#b91c1c" />
-                          ) : (
-                            <FileText size={13} color="#b91c1c" />
-                          )}
-                          <Text style={styles.cardActionIconTextPdf}>PDF</Text>
-                        </TouchableOpacity>
-
-                        {/* Single CSV button */}
-                        <TouchableOpacity
-                          style={styles.cardActionIconBtnCsv}
-                          onPress={() => handleExportSingleTrip(trip)}
-                        >
-                          <Download size={13} color="#1d4ed8" />
-                          <Text style={styles.cardActionIconTextCsv}>CSV</Text>
-                        </TouchableOpacity>
+                        <View style={styles.cardActions}>
+                          <View style={[styles.cardStatus, getStatusStyle(trip.status)]}>
+                            <Text style={[styles.cardStatusText, getStatusTextStyle(trip.status)]}>
+                              {trip.status}
+                            </Text>
+                          </View>
+                          <TouchableOpacity
+                            style={styles.cardActionIconBtnPdf}
+                            onPress={() => handleDownloadSingleTripPdf(trip)}
+                            disabled={pdfGenerating === `trip_${trip.id}`}
+                          >
+                            {pdfGenerating === `trip_${trip.id}` ? (
+                              <ActivityIndicator size="small" color="#b91c1c" />
+                            ) : (
+                              <FileText size={13} color="#b91c1c" />
+                            )}
+                            <Text style={styles.cardActionIconTextPdf}>PDF</Text>
+                          </TouchableOpacity>
+                          <TouchableOpacity
+                            style={styles.cardActionIconBtnCsv}
+                            onPress={() => handleExportSingleTrip(trip)}
+                          >
+                            <Download size={13} color="#1d4ed8" />
+                            <Text style={styles.cardActionIconTextCsv}>CSV</Text>
+                          </TouchableOpacity>
+                          {open ? <ChevronUp size={16} color={COLORS.textMuted} /> : <ChevronDown size={16} color={COLORS.textMuted} />}
+                        </View>
                       </View>
-                    </View>
 
-                    <Text style={styles.cardPartyText}>{trip.party_name}</Text>
-                    <Text style={styles.cardRouteText}>
-                      {trip.from_location} → {trip.to_location} • {trip.goods_weight} {trip.unit_name || 'Ton'}
-                    </Text>
-
-                    {trip.owner_name ? (
-                      <View style={styles.ownerBadgeInCard}>
-                        <Text style={styles.ownerBadgeInCardText}>🏢 Owner: {trip.owner_name}</Text>
-                      </View>
-                    ) : null}
-
-                    <View style={styles.cardMetricsGrid}>
-                      <View style={styles.cardMetric}>
-                        <Text style={styles.metricLabel}>Freight</Text>
+                      <Text style={styles.cardPartyText}>{trip.party_name}</Text>
+                      <View style={styles.cardFooter}>
+                        <Text style={styles.cardDate}>📅 {formatDateDMY(trip.trip_date)}</Text>
                         <Text style={styles.metricVal}>{formatCurrency(trip.total_freight)}</Text>
                       </View>
-                      <View style={styles.cardMetric}>
-                        <Text style={styles.metricLabel}>Driver Exp</Text>
-                        <Text style={[styles.metricVal, { color: '#7c3aed' }]}>{formatCurrency(driverExpenseBalance(trip).total)}</Text>
-                        <Text style={{ fontSize: 11, fontWeight: '700', color: '#15803d', marginTop: 2 }}>
-                          Settled {formatCurrency(driverExpenseBalance(trip).settled)}
-                        </Text>
-                        <Text style={{ fontSize: 11, fontWeight: '700', color: driverExpenseBalance(trip).toPay > 0 ? '#b91c1c' : '#15803d', marginTop: 1 }}>
-                          To Pay {formatCurrency(driverExpenseBalance(trip).toPay)}
-                        </Text>
-                        <View style={[styles.cardStatus, getStatusStyle(driverExpenseStatusKey(trip)), { marginTop: 4, alignSelf: 'flex-start' }]}>
-                          <Text style={[styles.cardStatusText, getStatusTextStyle(driverExpenseStatusKey(trip))]}>
-                            {driverExpenseStatus(trip)}
-                          </Text>
-                        </View>
-                      </View>
-                      <View style={styles.cardMetric}>
-                        <Text style={styles.metricLabel}>Drv Advance</Text>
-                        <Text style={styles.metricVal}>{formatCurrency(trip.manager_advance ?? trip.advance_paid)}</Text>
-                      </View>
-                      <View style={styles.cardMetric}>
-                        <Text style={styles.metricLabel}>Need to Pay</Text>
-                        <Text style={[styles.metricVal, { color: '#ef4444' }]}>{formatCurrency(trip.need_to_pay)}</Text>
-                      </View>
-                      <View style={styles.cardMetric}>
-                        <Text style={styles.metricLabel}>In Hand</Text>
-                        <Text style={[styles.metricVal, { color: '#10b981' }]}>{formatCurrency(trip.in_hand)}</Text>
-                      </View>
-                      <View style={styles.cardMetric}>
-                        <Text style={styles.metricLabel}>Party Recd</Text>
-                        <Text style={[styles.metricVal, { color: '#10b981' }]}>
-                          {formatCurrency(trip.total_received)}
-                        </Text>
-                      </View>
-                      <View style={styles.cardMetric}>
-                        <Text style={styles.metricLabel}>Party Bal</Text>
-                        <Text style={[styles.metricVal, { color: '#ef4444' }]}>
-                          {formatCurrency(trip.balance_due)}
-                        </Text>
-                      </View>
-                    </View>
+                    </TouchableOpacity>
 
-                    <View style={styles.cardFooter}>
-                      <Text style={styles.cardDate}>📅 {formatDateDMY(trip.trip_date)}</Text>
-                      <Text style={styles.cardDriver}>👤 Driver: {trip.driver_name || 'N/A'}</Text>
-                    </View>
+                    {open ? (
+                      <>
+                        <Text style={styles.cardRouteText}>
+                          {trip.from_location} → {trip.to_location} • {trip.goods_weight} {trip.unit_name || 'Ton'}
+                        </Text>
+                        {trip.owner_name ? (
+                          <View style={styles.ownerBadgeInCard}>
+                            <Text style={styles.ownerBadgeInCardText}>🏢 Owner: {trip.owner_name}</Text>
+                          </View>
+                        ) : null}
+                        <Text style={[styles.cardDriver, { marginBottom: 8 }]}>👤 Driver: {trip.driver_name || 'N/A'}</Text>
+
+                        <View style={styles.cardMetricsGrid}>
+                          <View style={styles.cardMetric}>
+                            <Text style={styles.metricLabel}>Freight</Text>
+                            <Text style={styles.metricVal}>{formatCurrency(trip.total_freight)}</Text>
+                          </View>
+                          <View style={styles.cardMetric}>
+                            <Text style={styles.metricLabel}>Driver Exp</Text>
+                            <Text style={[styles.metricVal, { color: '#7c3aed' }]}>{formatCurrency(driverExpenseBalance(trip).total)}</Text>
+                            <Text style={{ fontSize: 11, fontWeight: '700', color: '#15803d', marginTop: 2 }}>
+                              Settled {formatCurrency(driverExpenseBalance(trip).settled)}
+                            </Text>
+                            <Text style={{ fontSize: 11, fontWeight: '700', color: driverExpenseBalance(trip).toPay > 0 ? '#b91c1c' : '#15803d', marginTop: 1 }}>
+                              To Pay {formatCurrency(driverExpenseBalance(trip).toPay)}
+                            </Text>
+                          </View>
+                          <View style={styles.cardMetric}>
+                            <Text style={styles.metricLabel}>Party Recd</Text>
+                            <Text style={[styles.metricVal, { color: '#10b981' }]}>{formatCurrency(trip.total_received)}</Text>
+                          </View>
+                          <View style={styles.cardMetric}>
+                            <Text style={styles.metricLabel}>Party Bal</Text>
+                            <Text style={[styles.metricVal, { color: '#ef4444' }]}>{formatCurrency(trip.balance_due)}</Text>
+                          </View>
+                        </View>
+
+                        {expItems.length > 0 ? (
+                          <View style={{ marginBottom: 8 }}>
+                            {expItems.map((item: any, idx: number) => (
+                              <Text key={`${trip.id}-exp-${idx}`} style={{ fontSize: 12, color: COLORS.textMuted, marginTop: 2 }}>
+                                {String(item.expense_type || 'OTHER').replace(/_/g, ' ')}
+                                {item.description ? ` — ${item.description}` : ''}: {formatCurrency(item.amount)}
+                              </Text>
+                            ))}
+                          </View>
+                        ) : null}
+
+                        <View style={styles.advanceStack}>
+                          <View style={[styles.advanceRow, { backgroundColor: '#eff6ff' }]}>
+                            <Text style={[styles.advanceLabel, { color: '#1d4ed8' }]}>Driver Advance</Text>
+                            <Text style={[styles.advanceValue, { color: '#1d4ed8' }]}>{formatCurrency(trip.manager_advance ?? trip.advance_paid)}</Text>
+                          </View>
+                          <View style={[styles.advanceRow, { backgroundColor: '#fef2f2' }]}>
+                            <Text style={[styles.advanceLabel, { color: '#b91c1c' }]}>Need to Pay</Text>
+                            <Text style={[styles.advanceValue, { color: '#b91c1c' }]}>{formatCurrency(trip.need_to_pay)}</Text>
+                          </View>
+                          <View style={[styles.advanceRow, { backgroundColor: '#ecfdf5' }]}>
+                            <Text style={[styles.advanceLabel, { color: '#047857' }]}>In Hand</Text>
+                            <Text style={[styles.advanceValue, { color: '#047857' }]}>{formatCurrency(trip.in_hand)}</Text>
+                          </View>
+                        </View>
+                      </>
+                    ) : null}
                   </View>
-                ))
+                  );
+                })
               )
             )}
 

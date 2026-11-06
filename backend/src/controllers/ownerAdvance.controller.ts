@@ -291,10 +291,20 @@ export const createOwnerAdvance = asyncHandler(async (req: AuthRequest, res: Res
     ]
   );
 
+  let managerName: string | null = null;
+  let managerRole: string | null = null;
+  if (finalRecipientType === 'MANAGER' && manager_id) {
+    const mgrRes = await query(`SELECT name, role FROM users WHERE id = $1`, [manager_id]);
+    managerName = mgrRes.rows[0]?.name || null;
+    managerRole = mgrRes.rows[0]?.role || 'MANAGER';
+  }
+
   await createAuditLog(req.user?.id, 'CREATE_OWNER_ADVANCE', 'OWNER_ADVANCES', result.rows[0].id, {
     owner_id,
     recipient_type: finalRecipientType,
     manager_id: finalRecipientType === 'MANAGER' ? manager_id : null,
+    manager_name: managerName,
+    manager_role: managerRole,
     driver_id: finalRecipientType === 'DRIVER' ? driver_id : null,
     vehicle_id: vehicle_id || null,
     amount: numAmount,

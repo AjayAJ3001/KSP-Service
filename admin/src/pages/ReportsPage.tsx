@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import * as XLSX from 'xlsx';
 import {
-  Printer, Download, RefreshCw, FileSpreadsheet, Loader2,
+  Printer, Download, RefreshCw, FileSpreadsheet, Loader2, ChevronDown, ChevronRight,
 } from 'lucide-react';
 import { reportService, partyService, driverService, vehicleService, ownerService, unitService } from '../services/adminService';
 import { Party, Driver, Vehicle, Owner, Unit } from '../types';
@@ -264,6 +264,7 @@ export const ReportsPage: React.FC = () => {
   const [units, setUnits] = useState<Unit[]>([]);
 
   const [tripData, setTripData] = useState<{ trips: any[]; summary: any }>({ trips: [], summary: {} });
+  const [expandedTripId, setExpandedTripId] = useState<number | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [isExportingExcel, setIsExportingExcel] = useState(false);
   const [isPrinting, setIsPrinting] = useState(false);
@@ -1172,17 +1173,11 @@ export const ReportsPage: React.FC = () => {
           <table className="table">
             <thead>
               <tr>
+                <th style={{ width: 28 }}></th>
                 <th>Date</th>
                 <th>Lorry</th>
-                <th>Driver</th>
                 <th>Party</th>
-                <th>Route / Destination</th>
-                <th>Unit &amp; Weight</th>
                 <th style={{ textAlign: 'right' }}>Freight</th>
-                <th>Driver Expenses</th>
-                <th>Driver Payment</th>
-                <th style={{ textAlign: 'right' }}>Party Received</th>
-                <th style={{ textAlign: 'right' }}>Party Balance</th>
                 <th style={{ textAlign: 'center' }}>Status</th>
                 <th style={{ textAlign: 'center' }}>Actions</th>
               </tr>
@@ -1190,153 +1185,142 @@ export const ReportsPage: React.FC = () => {
             <tbody>
               {isLoading ? (
                 <tr>
-                  <td colSpan={13} style={{ textAlign: 'center', padding: '36px', color: 'var(--text-muted)' }}>
+                  <td colSpan={7} style={{ textAlign: 'center', padding: '36px', color: 'var(--text-muted)' }}>
                     Loading trip report records...
                   </td>
                 </tr>
               ) : tripData.trips.length === 0 ? (
                 <tr>
-                  <td colSpan={13} style={{ textAlign: 'center', padding: '36px', color: 'var(--text-muted)' }}>
+                  <td colSpan={7} style={{ textAlign: 'center', padding: '36px', color: 'var(--text-muted)' }}>
                     No trip records match the selected report criteria.
                   </td>
                 </tr>
               ) : (
-                tripData.trips.map(t => (
-                  <tr key={t.id}>
-                    <td style={{ whiteSpace: 'nowrap' }}>{formatDateDMY(t.trip_date)}</td>
-                    <td>
-                      <strong>{t.lorry_number}</strong>
-                      {t.owner_name && (
-                        <div style={{ marginTop: '2px' }}>
-                          <span style={{ fontSize: '10.5px', fontWeight: 600, color: '#4338ca', background: '#e0e7ff', padding: '1px 5px', borderRadius: '3px', border: '1px solid #c7d2fe' }}>
-                            🏢 {t.owner_name}
-                          </span>
-                        </div>
-                      )}
-                    </td>
-                    <td>
-                      <strong>{t.driver_name || '—'}</strong>
-                    </td>
-                    <td>{t.party_name}</td>
-                    <td style={{ fontSize: '13px' }}>{t.from_location} &rarr; {t.to_location}</td>
-                    <td style={{ whiteSpace: 'nowrap' }}>{t.goods_weight} {t.unit_name || 'Tons'}</td>
-                    <td style={{ textAlign: 'right', fontWeight: 700 }}>{formatCurrency(t.total_freight)}</td>
-                    <td>
-                      {(() => {
-                        const bal = driverExpenseBalance(t);
-                        return (
-                          <div style={{ fontSize: 11.5, display: 'flex', flexDirection: 'column', gap: 3, minWidth: 132, textAlign: 'right' }}>
-                            <span>Expenses: <strong style={{ color: '#6d28d9' }}>{formatCurrency(bal.total)}</strong></span>
-                            {parseJsonList(t.expense_items).map((item: any, idx: number) => (
-                              <span key={`${t.id}-exp-${idx}`} style={{ color: '#475569', fontWeight: 600 }}>
-                                {humanizeCode(item.expense_type || 'OTHER')}
-                                {item.description ? ` — ${item.description}` : ''}: {formatCurrency(item.amount)}
-                              </span>
-                            ))}
-                            <span style={{ color: '#15803d' }}>Settled: <strong>{formatCurrency(bal.settled)}</strong></span>
-                            <span style={{ color: bal.toPay > 0 ? '#b91c1c' : '#15803d' }}>To Pay: <strong>{formatCurrency(bal.toPay)}</strong></span>
-                            <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 2 }}>
-                              <StatusBadge status={driverExpenseStatus(t)} />
-                            </div>
+                tripData.trips.map(t => {
+                  const open = expandedTripId === t.id;
+                  const bal = driverExpenseBalance(t);
+                  return (
+                    <React.Fragment key={t.id}>
+                      <tr
+                        onClick={() => setExpandedTripId(open ? null : t.id)}
+                        style={{ cursor: 'pointer', background: open ? '#f8fafc' : undefined }}
+                      >
+                        <td style={{ color: '#64748b' }}>
+                          {open ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+                        </td>
+                        <td style={{ whiteSpace: 'nowrap' }}>{formatDateDMY(t.trip_date)}</td>
+                        <td><strong>{t.lorry_number}</strong></td>
+                        <td>{t.party_name}</td>
+                        <td style={{ textAlign: 'right', fontWeight: 700 }}>{formatCurrency(t.total_freight)}</td>
+                        <td style={{ textAlign: 'center' }}><StatusBadge status={t.status} /></td>
+                        <td style={{ textAlign: 'center', whiteSpace: 'nowrap' }} onClick={(e) => e.stopPropagation()}>
+                          <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+                            <button
+                              type="button"
+                              onClick={() => handlePrintSingleTrip(t)}
+                              className="btn btn-outline btn-sm"
+                              style={{
+                                padding: '4px 8px',
+                                fontSize: '12px',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '4px',
+                                color: '#1d4ed8',
+                                borderColor: '#bfdbfe',
+                                background: '#eff6ff',
+                              }}
+                              title="Direct print trip voucher"
+                            >
+                              <Printer size={13} />
+                              <span>Print</span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => downloadSingleTripCSV(t)}
+                              className="btn btn-outline btn-sm"
+                              style={{ padding: '4px 8px', fontSize: '12px', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
+                              title="Download this trip (CSV)"
+                            >
+                              <Download size={13} />
+                              <span>CSV</span>
+                            </button>
                           </div>
-                        );
-                      })()}
-                    </td>
-                    <td>
-                      <div style={{ fontSize: 11.5, display: 'flex', flexDirection: 'column', gap: 3, minWidth: 168 }}>
-                        <span>Advance given: <strong>{formatCurrency(tripAdvanceGiven(t))}</strong></span>
-                        {Number(t.manager_advance) > 0.5 && Number(t.owner_given) > 0.5 && (
-                          <span style={{ color: '#1d4ed8' }}>Manager: <strong>{formatCurrency(t.manager_advance)}</strong></span>
-                        )}
-                        {Number(t.owner_given) > 0.5 && (
-                          <span style={{ color: '#6d28d9' }}>Owner{t.advance_owner_name ? ` (${t.advance_owner_name})` : ''}: <strong>{formatCurrency(t.owner_given)}</strong></span>
-                        )}
-                        {Number(t.applied_to_prior) > 0.5 && (
-                          <span style={{ color: '#c2410c' }}>Less previous trip: <strong>(-) {formatCurrency(t.applied_to_prior)}</strong></span>
-                        )}
-                        {Number(t.received_from_later) > 0.5 && (
-                          <span style={{ color: '#166534' }}>From next trip: <strong>{formatCurrency(t.received_from_later)}</strong></span>
-                        )}
-                        <span style={{ color: '#b91c1c' }}>Need to Pay: <strong>{formatCurrency(t.need_to_pay || 0)}</strong></span>
-                        <span style={{ color: '#047857' }}>In Hand: <strong>{formatCurrency(t.in_hand || 0)}</strong></span>
-                        {Number(t.driver_cash_paid) > 0.5 && (
-                          <span>Driver paid: <strong>{formatCurrency(t.driver_cash_paid)}</strong></span>
-                        )}
-                      </div>
-                    </td>
-                    <td style={{ textAlign: 'right', color: 'var(--success-700)', fontWeight: 600 }}>{formatCurrency(t.total_received)}</td>
-                    <td style={{ textAlign: 'right', fontWeight: 700, color: Number(t.balance_due) > 0 ? 'var(--danger-700)' : 'var(--success-700)' }}>
-                      {formatCurrency(t.balance_due)}
-                    </td>
-                    <td style={{ textAlign: 'center' }}><StatusBadge status={t.status} /></td>
-                    <td style={{ textAlign: 'center', whiteSpace: 'nowrap' }}>
-                      <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
-                        <button
-                          type="button"
-                          onClick={() => handlePrintSingleTrip(t)}
-                          className="btn btn-outline btn-sm"
-                          style={{
-                            padding: '4px 8px',
-                            fontSize: '12px',
-                            display: 'inline-flex',
-                            alignItems: 'center',
-                            gap: '4px',
-                            color: '#1d4ed8',
-                            borderColor: '#bfdbfe',
-                            background: '#eff6ff',
-                          }}
-                          title="Direct print trip voucher"
-                        >
-                          <Printer size={13} />
-                          <span>Print</span>
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => downloadSingleTripCSV(t)}
-                          className="btn btn-outline btn-sm"
-                          style={{ padding: '4px 8px', fontSize: '12px', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
-                          title="Download this trip (CSV)"
-                        >
-                          <Download size={13} />
-                          <span>CSV</span>
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))
+                        </td>
+                      </tr>
+                      {open && (
+                        <tr>
+                          <td colSpan={7} style={{ background: '#f8fafc', padding: '12px 16px 16px' }}>
+                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 12, fontSize: 12.5 }}>
+                              <div>
+                                <div style={{ fontSize: 10.5, fontWeight: 800, color: '#64748b', letterSpacing: 0.4, marginBottom: 6 }}>TRIP</div>
+                                <div><strong>Driver:</strong> {t.driver_name || '—'}</div>
+                                {t.owner_name ? <div><strong>Owner:</strong> {t.owner_name}</div> : null}
+                                <div><strong>Route:</strong> {t.from_location} → {t.to_location}</div>
+                                <div><strong>Weight:</strong> {t.goods_weight} {t.unit_name || 'Tons'}</div>
+                              </div>
+                              <div>
+                                <div style={{ fontSize: 10.5, fontWeight: 800, color: '#64748b', letterSpacing: 0.4, marginBottom: 6 }}>DRIVER EXPENSES</div>
+                                <div>Expenses: <strong style={{ color: '#6d28d9' }}>{formatCurrency(bal.total)}</strong></div>
+                                {parseJsonList(t.expense_items).map((item: any, idx: number) => (
+                                  <div key={`${t.id}-exp-${idx}`} style={{ color: '#475569' }}>
+                                    {humanizeCode(item.expense_type || 'OTHER')}
+                                    {item.description ? ` — ${item.description}` : ''}: {formatCurrency(item.amount)}
+                                  </div>
+                                ))}
+                                <div style={{ color: '#15803d' }}>Settled: <strong>{formatCurrency(bal.settled)}</strong></div>
+                                <div style={{ color: bal.toPay > 0 ? '#b91c1c' : '#15803d' }}>To Pay: <strong>{formatCurrency(bal.toPay)}</strong></div>
+                              </div>
+                              <div>
+                                <div style={{ fontSize: 10.5, fontWeight: 800, color: '#64748b', letterSpacing: 0.4, marginBottom: 6 }}>DRIVER PAYMENT</div>
+                                <div>Advance given: <strong>{formatCurrency(tripAdvanceGiven(t))}</strong></div>
+                                {Number(t.manager_advance) > 0.5 && Number(t.owner_given) > 0.5 && (
+                                  <div style={{ color: '#1d4ed8' }}>Manager: <strong>{formatCurrency(t.manager_advance)}</strong></div>
+                                )}
+                                {Number(t.owner_given) > 0.5 && (
+                                  <div style={{ color: '#6d28d9' }}>Owner{t.advance_owner_name ? ` (${t.advance_owner_name})` : ''}: <strong>{formatCurrency(t.owner_given)}</strong></div>
+                                )}
+                                {Number(t.applied_to_prior) > 0.5 && (
+                                  <div style={{ color: '#c2410c' }}>Less previous trip: <strong>(-) {formatCurrency(t.applied_to_prior)}</strong></div>
+                                )}
+                                {Number(t.received_from_later) > 0.5 && (
+                                  <div style={{ color: '#166534' }}>From next trip: <strong>{formatCurrency(t.received_from_later)}</strong></div>
+                                )}
+                                <div style={{ color: '#b91c1c' }}>Need to Pay: <strong>{formatCurrency(t.need_to_pay || 0)}</strong></div>
+                                <div style={{ color: '#047857' }}>In Hand: <strong>{formatCurrency(t.in_hand || 0)}</strong></div>
+                              </div>
+                              <div>
+                                <div style={{ fontSize: 10.5, fontWeight: 800, color: '#64748b', letterSpacing: 0.4, marginBottom: 6 }}>PARTY PAYMENT</div>
+                                <div style={{ color: '#15803d' }}>Received: <strong>{formatCurrency(t.total_received)}</strong></div>
+                                <div style={{ color: Number(t.balance_due) > 0 ? '#b91c1c' : '#15803d' }}>Balance: <strong>{formatCurrency(t.balance_due)}</strong></div>
+                                {parseJsonList(t.payment_items).map((item: any, idx: number) => (
+                                  <div key={`${t.id}-pay-${idx}`} style={{ color: '#475569' }}>
+                                    {item.payment_date ? formatDateDMY(item.payment_date) : 'Payment'}: {formatCurrency(item.received_amount)}
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+                    </React.Fragment>
+                  );
+                })
               )}
             </tbody>
             {tripData.trips.length > 0 && (
               <tfoot>
                 <tr style={{ background: '#f8fafc', fontWeight: 800, borderTop: '2px solid var(--border-medium, #cbd5e1)' }}>
-                  <td colSpan={5} style={{ padding: '12px 14px' }}>
+                  <td></td>
+                  <td colSpan={3} style={{ padding: '12px 14px' }}>
                     <strong>TOTAL ({totalTripsCount} Trips)</strong>
-                  </td>
-                  <td style={{ whiteSpace: 'nowrap', fontWeight: 700 }}>
-                    {totalGoodsWeight.toFixed(2)} Tons
+                    <div style={{ fontSize: 11, fontWeight: 600, color: '#64748b' }}>
+                      Weight {totalGoodsWeight.toFixed(2)} Tons · Exp {formatCurrency(totalDriverExpenses)} · Adv {formatCurrency(totalDriverAdvance)} · Recd {formatCurrency(totalReceivedAmount)} · Bal {formatCurrency(totalBalanceDueAmount)}
+                    </div>
                   </td>
                   <td style={{ textAlign: 'right', fontWeight: 800, color: 'var(--accent-hover, #2563eb)' }}>
                     {formatCurrency(totalFreightAmount)}
                   </td>
-                  <td style={{ fontWeight: 800, color: '#6d28d9' }}>
-                    {formatCurrency(totalDriverExpenses)}
-                    <div style={{ fontSize: 11, color: '#15803d' }}>Settled {formatCurrency(Math.max(0, totalDriverExpenses - totalNeedToPay))}</div>
-                    <div style={{ fontSize: 11, color: '#b91c1c' }}>To Pay {formatCurrency(totalNeedToPay)}</div>
-                  </td>
-                  <td style={{ fontWeight: 800 }}>
-                    Adv {formatCurrency(totalDriverAdvance)}
-                    <div style={{ fontSize: 11, color: '#b91c1c' }}>Pay {formatCurrency(totalNeedToPay)}</div>
-                    <div style={{ fontSize: 11, color: '#047857' }}>Hand {formatCurrency(totalInHand)}</div>
-                  </td>
-                  <td style={{ textAlign: 'right', color: 'var(--success-700, #15803d)', fontWeight: 800 }}>
-                    {formatCurrency(totalReceivedAmount)}
-                  </td>
-                  <td style={{ textAlign: 'right', fontWeight: 800, color: totalBalanceDueAmount > 0 ? 'var(--danger-700, #b91c1c)' : 'var(--success-700, #15803d)' }}>
-                    {formatCurrency(totalBalanceDueAmount)}
-                  </td>
-                  <td style={{ textAlign: 'center', fontWeight: 700 }}>
-                    {totalTripsCount} Trips
-                  </td>
+                  <td style={{ textAlign: 'center', fontWeight: 700 }}>{totalTripsCount} Trips</td>
                   <td></td>
                 </tr>
               </tfoot>

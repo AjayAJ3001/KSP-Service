@@ -4,34 +4,64 @@ import { AppError, asyncHandler } from '../middleware/errorHandler';
 import { AuthRequest } from '../middleware/auth';
 import { createAuditLog } from '../utils/auditLog';
 import { applyVehicleScope, assertOwnerVehicle, hasFleetWideAccess, isFleetScoped } from '../utils/ownerScope';
-import { parseWeighBillText } from '../utils/parseWeighBill';
+import { nameAppearsOnBill, normalizeVehicleNo, parseWeighBillText, vehicleNosMatch } from '../utils/parseWeighBill';
 import { decodeBillImage, hashBillImage, ocrWeighBill } from '../utils/weighBillOcr';
 
-const duplicateBillMessage = (dup: { id: number; trip_date?: string }) =>
-  `This bill is duplicate. It was already used on Trip #${dup.id}${dup.trip_date ? ` (${dup.trip_date})` : ''}. Upload a different weighment / acceptance bill.`;
+const duplicateBillMessage = (dup: { id: number; trip_date?: string; weigh_bill_slip_no?: string; weigh_bill_date?: string }) => {
+  const slip = dup.weigh_bill_slip_no ? ` slip ${dup.weigh_bill_slip_no}` : '';
+  const date = dup.weigh_bill_date || dup.trip_date;
+  return `This bill is duplicate${slip}${date ? ` dated ${date}` : ''}. It was already used on Trip #${dup.id}. Upload a different weighment / acceptance bill.`;
+};
+
+const toBillDateIso = (val?: string | null) => {
+  const s = String(val || '').trim();
+  if (!s) return null;
+  const dmy = s.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{2,4})$/);
+  if (dmy) {
+    const y = dmy[3].length === 2 ? (Number(dmy[3]) > 50 ? `19${dmy[3]}` : `20${dmy[3]}`) : dmy[3];
+    return `${y}-${dmy[2].padStart(2, '0')}-${dmy[1].padStart(2, '0')}`;
+  }
+  if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10);
+  return null;
+};
 
 const findDuplicateWeighBill = async (
-  hash: string | null,
-  slipNo: string | null,
-  excludeTripId?: number,
+  opts: {
+    hash?: string | null;
+    slipNo?: string | null;
+    billDate?: string | null;
+    excludeTripId?: number;
+  },
   exec: typeof query = query
 ) => {
   const params: any[] = [];
   const parts: string[] = [];
-  if (hash) {
-    params.push(hash);
+  if (opts.hash) {
+    params.push(opts.hash);
     parts.push(`weigh_bill_hash = $${params.length}`);
   }
-  if (slipNo) {
-    params.push(String(slipNo).trim());
+  const slip = String(opts.slipNo || '').trim();
+  const billDate = toBillDateIso(opts.billDate);
+  if (slip && billDate) {
+    params.push(slip);
+    params.push(billDate);
+    parts.push(`(
+      weigh_bill_slip_no = $${params.length - 1}
+      AND (
+        weigh_bill_date = $${params.length}::date
+        OR (weigh_bill_date IS NULL AND trip_date::date = $${params.length}::date)
+      )
+    )`);
+  } else if (slip) {
+    params.push(slip);
     parts.push(`weigh_bill_slip_no = $${params.length}`);
   }
   if (!parts.length) return null;
-  let sql = `SELECT id, trip_date, weigh_bill_slip_no
+  let sql = `SELECT id, trip_date, weigh_bill_slip_no, weigh_bill_date
              FROM trips
              WHERE status <> 'CANCELLED' AND (${parts.join(' OR ')})`;
-  if (excludeTripId) {
-    params.push(excludeTripId);
+  if (opts.excludeTripId) {
+    params.push(opts.excludeTripId);
     sql += ` AND id <> $${params.length}`;
   }
   sql += ' ORDER BY id DESC LIMIT 1';
@@ -40,36 +70,50 @@ const findDuplicateWeighBill = async (
 };
 
 export const parseWeighBill = asyncHandler(async (req: AuthRequest, res: Response): Promise<void> => {
-  const { image_base64, exclude_trip_id } = req.body || {};
+  const { image_base64, exclude_trip_id, expected_vehicle_no, expected_party_name, expected_unit_name } = req.body || {};
   if (!image_base64) throw new AppError('Upload the weighment / acceptance bill photo.', 400);
 
   const buffer = decodeBillImage(String(image_base64));
   const hash = hashBillImage(buffer);
+  const destPromise = query(
+    `SELECT DISTINCT to_location FROM routes WHERE status <> 'INACTIVE' AND to_location IS NOT NULL`
+  );
   let ocrText = '';
   try {
     ocrText = await ocrWeighBill(buffer);
-  } catch (err: any) {
+  } catch {
     ocrText = '';
   }
-  const parsed = parseWeighBillText(ocrText);
-  const duplicate = await findDuplicateWeighBill(hash, parsed.slip_no, exclude_trip_id ? Number(exclude_trip_id) : undefined);
+  const destRes = await destPromise;
+  const parsed = parseWeighBillText(
+    ocrText,
+    expected_vehicle_no ? String(expected_vehicle_no) : null,
+    expected_party_name ? String(expected_party_name) : null,
+    expected_unit_name ? String(expected_unit_name) : null,
+    destRes.rows.map((r: any) => String(r.to_location))
+  );
+  const duplicate = await findDuplicateWeighBill({
+    hash,
+    slipNo: parsed.slip_no,
+    billDate: parsed.bill_date,
+    excludeTripId: exclude_trip_id ? Number(exclude_trip_id) : undefined,
+  });
   if (duplicate) {
     throw new AppError(duplicateBillMessage(duplicate), 409);
   }
   if (!parsed.goods_weight) {
-    throw new AppError('Could not read Net / Nett Weight from this bill. Capture a clearer photo of the Net Weight section.', 422);
+    throw new AppError('Could not read weight from this bill. Capture Net Weight, Nett Weight, or Accepted Qty clearly.', 422);
   }
 
   res.json({
     success: true,
-    message: parsed.weight_source === 'NET'
-      ? 'Net weight read from bill.'
-      : 'Accepted quantity read from bill (no Net Weight on this slip).',
+    message: parsed.weight_source === 'ACCEPTED'
+      ? 'Accepted quantity read from bill.'
+      : 'Net / Nett weight read from bill.',
     data: {
       ...parsed,
       weigh_bill_hash: hash,
-      weigh_bill_image: String(image_base64),
-      ocr_preview: ocrText.slice(0, 400),
+      ocr_preview: ocrText.slice(0, 1200),
     },
   });
 });
@@ -273,6 +317,7 @@ export const createTrip = asyncHandler(async (req: AuthRequest, res: Response): 
   const {
     vehicle_id, driver_id, party_id, route_id, unit_id, freight_rate_id, freight_rate, goods_weight, advance_paid, trip_date, cancel_draft_trip_id,
     weigh_bill_hash, weigh_bill_slip_no, weigh_bill_vehicle_no, weigh_bill_net_weight, weigh_bill_accepted_weight, weigh_bill_image,
+    weigh_bill_party_name, weigh_bill_unit_name, weigh_bill_date,
   } = req.body;
 
   if (!vehicle_id || !driver_id || !party_id || !route_id || !freight_rate || !goods_weight || !trip_date) {
@@ -342,12 +387,47 @@ export const createTrip = asyncHandler(async (req: AuthRequest, res: Response): 
 
     const billHash = weigh_bill_hash ? String(weigh_bill_hash) : null;
     const billSlip = weigh_bill_slip_no ? String(weigh_bill_slip_no) : null;
-    const billVehicle = weigh_bill_vehicle_no ? String(weigh_bill_vehicle_no).replace(/\s/g, '').toUpperCase() : null;
+    const billVehicle = weigh_bill_vehicle_no ? normalizeVehicleNo(weigh_bill_vehicle_no) : null;
+    if (billVehicle) {
+      const vehRes = await client.query(`SELECT lorry_number FROM vehicles WHERE id = $1`, [vehicle_id]);
+      const selectedTruck = normalizeVehicleNo(vehRes.rows[0]?.lorry_number);
+      if (selectedTruck && !vehicleNosMatch(selectedTruck, billVehicle)) {
+        throw new AppError(
+          `Truck number on the bill (${weigh_bill_vehicle_no}) does not match selected truck (${vehRes.rows[0]?.lorry_number}).`,
+          422
+        );
+      }
+    }
+    const billParty = weigh_bill_party_name ? String(weigh_bill_party_name) : '';
+    const billUnit = weigh_bill_unit_name ? String(weigh_bill_unit_name) : '';
+    if (billParty || billUnit) {
+      const namesRes = await client.query(
+        `SELECT p.name as party_name, r.to_location as unit_name
+         FROM parties p, routes r
+         WHERE p.id = $1 AND r.id = $2`,
+        [party_id, route_id]
+      );
+      const selectedPartyName = namesRes.rows[0]?.party_name || '';
+      const selectedUnitName = namesRes.rows[0]?.unit_name || '';
+      const sources = [billParty, billUnit];
+      const partyOk = nameAppearsOnBill(selectedPartyName, sources);
+      const unitOk = nameAppearsOnBill(selectedUnitName, sources);
+      if (!partyOk || !unitOk) {
+        throw new AppError(
+          `Party, unit and truck on the bill must match the selected trip. Bill party/unit (${[billParty, billUnit].filter(Boolean).join(' / ')}) vs selected party (${selectedPartyName}) / unit (${selectedUnitName}).`,
+          422
+        );
+      }
+    }
+    const billDate = toBillDateIso(weigh_bill_date);
     if (billHash || billSlip) {
       const duplicate = await findDuplicateWeighBill(
-        billHash,
-        billSlip,
-        cancel_draft_trip_id ? Number(cancel_draft_trip_id) : undefined,
+        {
+          hash: billHash,
+          slipNo: billSlip,
+          billDate,
+          excludeTripId: cancel_draft_trip_id ? Number(cancel_draft_trip_id) : undefined,
+        },
         (sqlText, params) => client.query(sqlText, params)
       );
       if (duplicate) {
@@ -358,12 +438,12 @@ export const createTrip = asyncHandler(async (req: AuthRequest, res: Response): 
     const result = await client.query(
       `INSERT INTO trips (vehicle_id, driver_id, party_id, route_id, unit_id, freight_rate_id,
        freight_rate, goods_weight, total_freight, advance_paid, prior_deficit_deduction, trip_date, status, created_by,
-       weigh_bill_hash, weigh_bill_slip_no, weigh_bill_vehicle_no, weigh_bill_net_weight, weigh_bill_accepted_weight, weigh_bill_image)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, 'DRAFT', $13, $14, $15, $16, $17, $18, $19)
+       weigh_bill_hash, weigh_bill_slip_no, weigh_bill_vehicle_no, weigh_bill_net_weight, weigh_bill_accepted_weight, weigh_bill_image, weigh_bill_date)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, 'DRAFT', $13, $14, $15, $16, $17, $18, $19, $20)
        RETURNING *`,
       [vehicle_id, driver_id, party_id, route_id, effectiveUnitId, freight_rate_id || null,
        freight_rate, goods_weight, total_freight, entered_advance, deduction, normalized_trip_date, req.user?.id,
-       billHash, billSlip, billVehicle, weigh_bill_net_weight || null, weigh_bill_accepted_weight || null, weigh_bill_image || null]
+       billHash, billSlip, billVehicle, weigh_bill_net_weight || null, weigh_bill_accepted_weight || null, weigh_bill_image || null, billDate]
     );
 
     // If a portion of advance was deducted to settle prior trip dues:
@@ -430,7 +510,6 @@ export const createTrip = asyncHandler(async (req: AuthRequest, res: Response): 
       }
     }
 
-    // Record the advance given by the manager for this trip in truck_advances
     if (entered_advance > 0) {
       await client.query(
         `INSERT INTO truck_advances (vehicle_id, driver_id, manager_id, amount, advance_date, notes, created_by, trip_id)

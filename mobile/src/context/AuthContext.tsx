@@ -2,7 +2,7 @@ import React, { createContext, useContext, useState, useEffect } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { User } from '../types';
 import { mobileAuthService } from '../services/mobileService';
-import { setCachedAuthToken } from '../services/api';
+import { discoverWorkingBaseUrl, setCachedAuthToken } from '../services/api';
 
 interface AuthContextType {
   user: User | null;
@@ -27,6 +27,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const checkToken = async () => {
     try {
+      await Promise.race([
+        discoverWorkingBaseUrl(),
+        new Promise((resolve) => setTimeout(resolve, 6000)),
+      ]);
       const storedToken = await AsyncStorage.getItem('ksp_mobile_token');
       const storedUser = await AsyncStorage.getItem('ksp_mobile_user');
 
@@ -34,13 +38,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setCachedAuthToken(storedToken);
         setToken(storedToken);
         setUser(JSON.parse(storedUser));
-        // Verify with backend
         try {
           const res = await mobileAuthService.getMe();
           setUser(res.data);
           await AsyncStorage.setItem('ksp_mobile_user', JSON.stringify(res.data));
         } catch (e) {
-          // Token expired or invalid
           await AsyncStorage.removeItem('ksp_mobile_token');
           await AsyncStorage.removeItem('ksp_mobile_user');
           setCachedAuthToken(null);
@@ -56,6 +58,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const login = async (username: string, password: string) => {
+    await discoverWorkingBaseUrl();
     const res = await mobileAuthService.login(username, password);
     setCachedAuthToken(res.data.token);
     setToken(res.data.token);

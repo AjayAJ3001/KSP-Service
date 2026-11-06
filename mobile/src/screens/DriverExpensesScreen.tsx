@@ -151,7 +151,7 @@ export const DriverExpensesScreen: React.FC<{ route: any; navigation: any }> = (
   route,
   navigation,
 }) => {
-  const { trip } = route.params as { trip: Trip };
+  const { trip, viewOnly } = route.params as { trip: Trip; viewOnly?: boolean };
 
   const [expenses, setExpenses] = useState<DriverExpense[]>([]);
   const [totalExpenses, setTotalExpenses] = useState(0);
@@ -862,7 +862,7 @@ export const DriverExpensesScreen: React.FC<{ route: any; navigation: any }> = (
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
-      <Text style={styles.screenHeading}>Driver Expenses Entry</Text>
+      <Text style={styles.screenHeading}>{viewOnly ? 'Driver Expenses' : 'Driver Expenses Entry'}</Text>
       <Text style={styles.screenSub}>
         Trip #{trip.id} • Driver: {trip.driver_name || 'Driver'} ({trip.lorry_number || ''})
       </Text>
@@ -1044,6 +1044,46 @@ export const DriverExpensesScreen: React.FC<{ route: any; navigation: any }> = (
         </Text>
       </View>
 
+      {viewOnly ? (
+        <>
+          <Text style={styles.sectionHeaderTitle}>DRIVER EXPENSES</Text>
+          <Text style={styles.sectionHeaderSub}>Amounts recorded for this trip</Text>
+          {EXPENSE_CATEGORIES.map((cat) => {
+            const catItems = getCategoryItems(cat);
+            const catTotal = getCategoryTotal(cat);
+            const IconComponent = cat.icon;
+            return (
+              <View key={cat.key} style={styles.accordionCard}>
+                <View style={styles.accordionHeader}>
+                  <View style={styles.headerLeft}>
+                    <View style={styles.categoryIconBadge}>
+                      <IconComponent size={18} color={COLORS.primary} />
+                    </View>
+                    <View>
+                      <Text style={styles.categoryTitle}>{cat.shortName}</Text>
+                      <Text style={styles.entryCountText}>
+                        {catItems.length === 0 ? 'No entry' : `${catItems.length} ${catItems.length === 1 ? 'entry' : 'entries'}`}
+                      </Text>
+                    </View>
+                  </View>
+                  <Text style={[styles.categoryTitle, { fontSize: 16 }]}>{formatCurrency(catTotal)}</Text>
+                </View>
+                {catItems.map((item) => (
+                  <View key={item.id} style={{ paddingHorizontal: 14, paddingBottom: 10 }}>
+                    <Text style={{ fontSize: 13, fontWeight: '700', color: COLORS.primary }}>
+                      {formatCurrency(item.amount)}
+                    </Text>
+                    {item.description ? (
+                      <Text style={{ fontSize: 12, color: COLORS.textMuted, marginTop: 2 }}>{item.description}</Text>
+                    ) : null}
+                  </View>
+                ))}
+              </View>
+            );
+          })}
+        </>
+      ) : (
+        <>
       <Text style={styles.sectionHeaderTitle}>EXPENSE CATEGORIES</Text>
       <Text style={styles.sectionHeaderSub}>
         Tap any category to open — auto-save categories save instantly
@@ -1517,8 +1557,10 @@ export const DriverExpensesScreen: React.FC<{ route: any; navigation: any }> = (
           </View>
         );
       })}
+      </>
+      )}
 
-      {/* Screen Navigation Buttons: Previous & Generate PDF */}
+      {!viewOnly ? (
       <View style={styles.bottomNavigationRow}>
         <TouchableOpacity
           style={styles.navPreviousBtn}
@@ -1545,6 +1587,7 @@ export const DriverExpensesScreen: React.FC<{ route: any; navigation: any }> = (
           )}
         </TouchableOpacity>
       </View>
+      ) : null}
     </ScrollView>
   );
 };

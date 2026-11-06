@@ -367,7 +367,7 @@ export const attachAdvanceBreakdown = async (rows: any[]): Promise<any[]> => {
     }
   }
 
-  return rows.map((row) => {
+  const mapped = rows.map((row) => {
     const rec = byTrip.get(Number(row.trip_id || row.id)) || {
       manager_advance: numAmt(row.initial_trip_advance),
       effective_manager_advance: numAmt(row.initial_trip_advance),
@@ -389,6 +389,54 @@ export const attachAdvanceBreakdown = async (rows: any[]): Promise<any[]> => {
       owner_given: rec.owner_given,
       advance_given_total: Math.round(rec.manager_advance + rec.owner_given),
       advance_owner_name: ownerNames.filter(Boolean).join(' + '),
+    };
+  });
+
+  const tripIds = [...new Set(mapped.map((r) => Number(r.trip_id)).filter((id) => id > 0))];
+  if (!tripIds.length) return mapped;
+
+  const giverRes = await query(
+    `SELECT g.trip_id, g.amount, g.given_by_name, g.given_by_role
+     FROM (
+       SELECT ta.trip_id, ta.amount,
+              COALESCE(cu.name, mu.name) as given_by_name,
+              COALESCE(cu.role, mu.role, 'MANAGER') as given_by_role
+       FROM truck_advances ta
+       LEFT JOIN users cu ON cu.id = ta.created_by
+       LEFT JOIN users mu ON mu.id = ta.manager_id
+       WHERE ta.trip_id = ANY($1::int[])
+       UNION ALL
+       SELECT t.id, t.advance_paid,
+              u.name as given_by_name,
+              COALESCE(u.role, 'MANAGER') as given_by_role
+       FROM trips t
+       LEFT JOIN users u ON u.id = t.created_by
+       WHERE t.id = ANY($1::int[])
+         AND COALESCE(t.advance_paid, 0) > 0
+         AND NOT EXISTS (SELECT 1 FROM truck_advances ta WHERE ta.trip_id = t.id)
+     ) g`,
+    [tripIds]
+  );
+
+  const giversByTrip = new Map<number, Array<{ name: string; role: string; amount: number }>>();
+  for (const g of giverRes.rows) {
+    const tripId = Number(g.trip_id);
+    const name = String(g.given_by_name || '').trim();
+    if (!name) continue;
+    if (!giversByTrip.has(tripId)) giversByTrip.set(tripId, []);
+    const list = giversByTrip.get(tripId)!;
+    if (!list.some((x) => x.name === name)) {
+      list.push({ name, role: String(g.given_by_role || 'MANAGER'), amount: numAmt(g.amount) });
+    }
+  }
+
+  return mapped.map((row) => {
+    const givers = giversByTrip.get(Number(row.trip_id)) || [];
+    return {
+      ...row,
+      advance_given_by: givers,
+      advance_given_by_name: givers.map((g) => g.name).join(' + '),
+      advance_given_by_role: givers[0]?.role || null,
     };
   });
 };
@@ -521,8 +569,10 @@ export const getSettlementByTripId = asyncHandler(async (req: AuthRequest, res: 
             ) as driver_current_balance,
             (SELECT json_agg(json_build_object('expense_type', de.expense_type, 'description', de.description, 'amount', de.amount))
              FROM driver_expenses de WHERE de.trip_id = t.id) as expense_items,
-            (SELECT json_agg(json_build_object('id', dsp.id, 'amount', dsp.amount, 'payment_mode', dsp.payment_mode, 'payment_date', dsp.payment_date, 'reference_no', dsp.reference_no, 'notes', dsp.notes, 'created_at', dsp.created_at))
-             FROM driver_settlement_payments dsp WHERE dsp.settlement_id = s.id) as payment_history
+            (SELECT json_agg(json_build_object('id', dsp.id, 'amount', dsp.amount, 'payment_mode', dsp.payment_mode, 'payment_date', dsp.payment_date, 'reference_no', dsp.reference_no, 'notes', dsp.notes, 'created_at', dsp.created_at, 'created_by_name', pu.name))
+             FROM driver_settlement_payments dsp
+             LEFT JOIN users pu ON pu.id = dsp.created_by
+             WHERE dsp.settlement_id = s.id) as payment_history
      FROM settlements s
      JOIN trips t ON s.trip_id = t.id
      JOIN vehicles v ON t.vehicle_id = v.id
@@ -578,8 +628,10 @@ export const getSettlementById = asyncHandler(async (req: AuthRequest, res: Resp
             ) as driver_current_balance,
             (SELECT json_agg(json_build_object('expense_type', de.expense_type, 'description', de.description, 'amount', de.amount))
              FROM driver_expenses de WHERE de.trip_id = t.id) as expense_items,
-            (SELECT json_agg(json_build_object('id', dsp.id, 'amount', dsp.amount, 'payment_mode', dsp.payment_mode, 'payment_date', dsp.payment_date, 'reference_no', dsp.reference_no, 'notes', dsp.notes, 'created_at', dsp.created_at))
-             FROM driver_settlement_payments dsp WHERE dsp.settlement_id = s.id) as payment_history
+            (SELECT json_agg(json_build_object('id', dsp.id, 'amount', dsp.amount, 'payment_mode', dsp.payment_mode, 'payment_date', dsp.payment_date, 'reference_no', dsp.reference_no, 'notes', dsp.notes, 'created_at', dsp.created_at, 'created_by_name', pu.name))
+             FROM driver_settlement_payments dsp
+             LEFT JOIN users pu ON pu.id = dsp.created_by
+             WHERE dsp.settlement_id = s.id) as payment_history
      FROM settlements s
      JOIN trips t ON s.trip_id = t.id
      JOIN vehicles v ON t.vehicle_id = v.id

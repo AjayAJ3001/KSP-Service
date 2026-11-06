@@ -3,8 +3,8 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 
 export const API_PORT = 5000;
 /** Fallback PC LAN IPs. Live IP is learned from /health and saved. */
-export const CURRENT_WIFI_IP = '192.168.5.140';
-const EXTRA_WIFI_IPS = ['192.168.5.140', '192.168.5.197', '10.180.228.146'];
+export const CURRENT_WIFI_IP = '10.185.83.146';
+const EXTRA_WIFI_IPS = ['192.168.1.5', '192.168.5.140', '192.168.5.197', '10.180.228.146'];
 
 const SAVED_URL_KEY = 'ksp_server_base_url';
 const LAN_IPS_KEY = 'ksp_lan_ips';
@@ -34,9 +34,10 @@ const uniqueUrls = (urls: Array<string | null | undefined>) => {
 };
 
 export const CANDIDATE_BASE_URLS = uniqueUrls([
+  `http://${CURRENT_WIFI_IP}:${API_PORT}/api`,
+  `http://10.0.2.2:${API_PORT}/api`,
   `http://localhost:${API_PORT}/api`,
   `http://127.0.0.1:${API_PORT}/api`,
-  `http://10.0.2.2:${API_PORT}/api`,
   ...EXTRA_WIFI_IPS.map((ip) => `http://${ip}:${API_PORT}/api`),
 ]);
 
@@ -46,7 +47,7 @@ const api = axios.create({
     'Content-Type': 'application/json',
     'x-client-platform': 'MOBILE',
   },
-  timeout: 30000,
+  timeout: 12000,
 });
 
 let memoryToken: string | null = null;
@@ -87,15 +88,17 @@ export const discoverWorkingBaseUrl = async (): Promise<string | null> => {
     const saved = await AsyncStorage.getItem(SAVED_URL_KEY);
     const remembered = await loadLanApiUrls();
     const candidates = uniqueUrls([
-      saved,
+      DEFAULT_BASE_URL,
+      `http://${CURRENT_WIFI_IP}:${API_PORT}/api`,
       api.defaults.baseURL as string,
+      saved,
       ...remembered,
       ...CANDIDATE_BASE_URLS,
     ]);
 
     for (const candidate of candidates) {
       try {
-        const probe = await probeHealth(candidate, 2500);
+        const probe = await probeHealth(candidate, 1800);
         if (!probe.ok) continue;
         await rememberLanIps(probe.lanIps);
         const lanUrls = uniqueUrls((probe.lanIps || []).map((ip) => `http://${ip}:${API_PORT}/api`));
@@ -118,10 +121,7 @@ export const discoverWorkingBaseUrl = async (): Promise<string | null> => {
   }
 };
 
-AsyncStorage.getItem(SAVED_URL_KEY).then(async (saved) => {
-  if (saved) api.defaults.baseURL = toApiUrl(saved);
-  await discoverWorkingBaseUrl();
-}).catch(() => {});
+discoverWorkingBaseUrl().catch(() => {});
 
 export const getServerBaseUrl = (): string => {
   return (api.defaults.baseURL as string) || DEFAULT_BASE_URL;

@@ -16,6 +16,9 @@ type Ctx = {
   balance_due?: number;
   total_freight?: number;
   status?: string;
+  manager_name?: string;
+  manager_role?: string;
+  recipient_type?: string;
 };
 
 function parseDetails(raw: any): Record<string, any> {
@@ -137,6 +140,8 @@ function buildStory(log: any, details: Record<string, any>): string {
     ? `${cleanName(details.from_location)} to ${cleanName(details.to_location)}`
     : '';
   const amt = money(details.amount ?? details.received_amount ?? details.total_freight ?? details.entered_advance);
+  const manager = cleanName(details.manager_name);
+  const managerRole = niceType(details.manager_role || (manager ? 'MANAGER' : ''));
   const action = String(log.action || '').toUpperCase();
   const loginName = cleanName(log.username) || 'Staff';
 
@@ -249,16 +254,25 @@ function buildStory(log: any, details: Record<string, any>): string {
     ]);
   }
   if (action === 'CREATE_OWNER_ADVANCE') {
+    if (manager) {
+      return sentence([
+        owner
+          ? `${owner} (Owner) gave advance of ${amt || 'an amount'} to ${manager} (${managerRole || 'Manager'})`
+          : `Owner advance of ${amt || 'an amount'} was given to ${manager} (${managerRole || 'Manager'})`,
+        lorry && `for lorry ${lorry}`,
+      ]);
+    }
     if (driver) {
       return sentence([
-        `Owner advance of ${amt || 'an amount'} was given to driver ${driver}`,
-        owner && `from owner ${owner}`,
+        owner
+          ? `${owner} (Owner) gave advance of ${amt || 'an amount'} to driver ${driver}`
+          : `Owner advance of ${amt || 'an amount'} was given to driver ${driver}`,
         lorry && `for lorry ${lorry}`,
       ]);
     }
     return sentence([
       `Owner advance of ${amt || 'an amount'} was given`,
-      owner && `to owner ${owner}`,
+      owner && `by owner ${owner}`,
       lorry && `for lorry ${lorry}`,
     ]);
   }
@@ -266,14 +280,17 @@ function buildStory(log: any, details: Record<string, any>): string {
     return sentence([
       'An owner advance was updated',
       amt && `to ${amt}`,
-      owner && `for owner ${owner}`,
+      manager && `given to ${manager} (${managerRole || 'Manager'})`,
+      driver && `given to driver ${driver}`,
+      owner && `from owner ${owner}`,
     ]);
   }
   if (action === 'DELETE_OWNER_ADVANCE') {
     return sentence([
       'An owner advance was deleted',
       amt && `of ${amt}`,
-      owner && `for owner ${owner}`,
+      manager && `that was given to ${manager} (${managerRole || 'Manager'})`,
+      owner && `from owner ${owner}`,
     ]);
   }
   if (action === 'GENERATE_SETTLEMENT') {
@@ -423,12 +440,14 @@ export const enrichAuditLogRows = async (rows: any[]): Promise<any[]> => {
   });
 
   const ownerAdvs = await mapById(
-    `SELECT oa.id, oa.amount, oa.owner_id, oa.vehicle_id, oa.driver_id,
-            o.name as owner_name, d.name as driver_name, v.lorry_number
+    `SELECT oa.id, oa.amount, oa.owner_id, oa.vehicle_id, oa.driver_id, oa.manager_id, oa.recipient_type,
+            o.name as owner_name, d.name as driver_name, v.lorry_number,
+            u.name as manager_name, u.role as manager_role
      FROM owner_advances oa
      LEFT JOIN owners o ON oa.owner_id = o.id
      LEFT JOIN drivers d ON oa.driver_id = d.id
      LEFT JOIN vehicles v ON oa.vehicle_id = v.id
+     LEFT JOIN users u ON oa.manager_id = u.id
      WHERE oa.id = ANY($1::int[])`,
     intIds(ownerAdvIds)
   );
@@ -534,6 +553,9 @@ export const enrichAuditLogRows = async (rows: any[]): Promise<any[]> => {
           received_amount: details.received_amount ?? ctx.received_amount,
           balance_due: details.balance_due ?? ctx.balance_due,
           total_freight: details.total_freight ?? ctx.total_freight,
+          manager_name: ctx.manager_name,
+          manager_role: ctx.manager_role ? niceType(ctx.manager_role) : undefined,
+          recipient_type: ctx.recipient_type || details.recipient_type,
         };
 
     Object.keys(merged).forEach((k) => {
