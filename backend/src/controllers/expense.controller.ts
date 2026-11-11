@@ -4,39 +4,42 @@ import { AppError, asyncHandler } from '../middleware/errorHandler';
 import { AuthRequest } from '../middleware/auth';
 import { createAuditLog } from '../utils/auditLog';
 import { assertTripInOwnerScope } from '../utils/ownerScope';
+import { applyTripExpenseDefaults, buildTripExpenseDefaults, getTripExpensePayload } from '../utils/tripExpenseDefaults';
 
 export const getTripExpenses = asyncHandler(async (req: AuthRequest, res: Response): Promise<void> => {
   const { trip_id } = req.params;
   await assertTripInOwnerScope(req, trip_id);
-  const result = await query(
-    `SELECT de.*, u.name as created_by_name FROM driver_expenses de
-     JOIN users u ON de.created_by = u.id
-     WHERE de.trip_id = $1 ORDER BY de.created_at ASC`,
-    [trip_id]
-  );
+  try {
+    const data = await getTripExpensePayload(Number(trip_id));
+    res.json({ success: true, message: 'Expenses retrieved.', data });
+  } catch (err: any) {
+    if (String(err.message || '').includes('Trip not found')) throw new AppError('Trip not found.', 404);
+    throw err;
+  }
+});
 
-  const totalResult = await query(
-    `SELECT COALESCE(SUM(amount), 0) as total FROM driver_expenses WHERE trip_id = $1`,
-    [trip_id]
-  );
-
-  const tripResult = await query(`SELECT advance_paid FROM trips WHERE id = $1`, [trip_id]);
-  if (tripResult.rows.length === 0) throw new AppError('Trip not found.', 404);
-
-  const total_expenses = parseFloat(totalResult.rows[0].total);
-  const advance_paid = parseFloat(tripResult.rows[0].advance_paid);
-  const balance_to_driver = total_expenses - advance_paid;
-
-  res.json({
-    success: true,
-    message: 'Expenses retrieved.',
-    data: {
-      expenses: result.rows,
-      total_expenses,
-      advance_paid,
-      balance_to_driver,
-    },
-  });
+export const applyDefaultTripExpenses = asyncHandler(async (req: AuthRequest, res: Response): Promise<void> => {
+  const { trip_id } = req.params;
+  await assertTripInOwnerScope(req, trip_id);
+  if (!req.user?.id) throw new AppError('Unauthorized.', 401);
+  try {
+    const { defaults, applied } = await applyTripExpenseDefaults(Number(trip_id), req.user.id);
+    const data = await getTripExpensePayload(Number(trip_id), defaults);
+    if (applied.length) {
+      await createAuditLog(req.user.id, 'ADD_EXPENSE', 'EXPENSES', trip_id, {
+        trip_id,
+        auto_applied: applied,
+      });
+    }
+    res.json({
+      success: true,
+      message: applied.length ? 'Default expenses applied.' : 'Expenses retrieved.',
+      data: { ...data, applied },
+    });
+  } catch (err: any) {
+    if (String(err.message || '').includes('Trip not found')) throw new AppError('Trip not found.', 404);
+    throw err;
+  }
 });
 
 export const addExpense = asyncHandler(async (req: AuthRequest, res: Response): Promise<void> => {
@@ -59,6 +62,14 @@ export const addExpense = asyncHandler(async (req: AuthRequest, res: Response): 
   if (tripResult.rows[0].status === 'CANCELLED') throw new AppError('Cannot add expenses to a cancelled trip.', 400);
 
   const roundedAmount = Math.round(parseFloat(amount));
+
+  const otherTypes = ['OTHER', 'TOLL', 'FOOD', 'REPAIR', 'FREIGHT_BASED'];
+  if (otherTypes.includes(expense_type)) {
+    const defaults = await buildTripExpenseDefaults(Number(trip_id));
+    if (roundedAmount > defaults.other_limit) {
+      throw new AppError(`Other expense cannot exceed ₹${defaults.other_limit}. Contact admin to increase the limit.`, 400);
+    }
+  }
 
   const result = await query(
     `INSERT INTO driver_expenses (trip_id, expense_type, description, amount, created_by)

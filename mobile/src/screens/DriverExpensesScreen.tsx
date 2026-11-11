@@ -30,64 +30,50 @@ import {
   Download,
   Printer,
 } from 'lucide-react-native';
-import { mobileExpenseService, mobileSettlementService, mobileLookupService } from '../services/mobileService';
+import { mobileExpenseService, mobileSettlementService } from '../services/mobileService';
 import { Trip, DriverExpense, Settlement } from '../types';
 import { COLORS, SPACING, RADIUS, SHADOWS } from '../constants/theme';
 import { printTripPdf, shareTripPdf, downloadTripPdf } from '../utils/pdfGenerator';
 
-export interface KrishiUnit {
-  unitNumber: number; // 1 to 9
-  name: string;
-  routeId: number;
-  ratePerTon: number; // fallback default; overridden by admin panel at runtime
-  keywords: string[];
-}
-
-const pickCleaningRate = (
-  rates: { unit_name?: string; cleaning_charge: number; party_id?: number | null; vehicle_id?: number | null }[],
-  opts: { keywords: string[]; toLocation?: string; partyId?: number; vehicleId?: number }
-) => {
-  let best: (typeof rates)[0] | undefined;
-  let bestScore = -1;
-  for (const cr of rates) {
-    if (!cr.unit_name) continue;
-    const un = cr.unit_name.toUpperCase();
-    const keywordHit = opts.keywords.some(
-      (kw) => un.includes(kw.toUpperCase()) || kw.toUpperCase().includes(un)
-    );
-    let locHit = false;
-    if (opts.toLocation) {
-      const locUpper = opts.toLocation.toUpperCase();
-      locHit =
-        locUpper.includes(un) ||
-        un.split(/[\s\-–]+/).some((word: string) => word.length > 1 && locUpper.includes(word));
-    }
-    if (!keywordHit && !locHit) continue;
-    if (cr.vehicle_id && Number(cr.vehicle_id) !== Number(opts.vehicleId || 0)) continue;
-    if (cr.party_id && Number(cr.party_id) !== Number(opts.partyId || 0)) continue;
-    let score = 1;
-    if (cr.party_id) score += 2;
-    if (cr.vehicle_id) score += 4;
-    if (score > bestScore) {
-      bestScore = score;
-      best = cr;
-    }
-  }
-  return best;
+type ExpenseDefaults = {
+  party_name: string;
+  lorry_number: string | null;
+  goods_weight: number;
+  total_freight: number;
+  driver_carry_forward: number;
+  other_limit: number;
+  unloading_applies: boolean;
+  unloading_unit_name: string | null;
+  unloading_unit_number: number | null;
+  unloading_rate_per_ton: number;
+  unloading_amount: number;
+  loading_amount: number;
+  cleaning_amount: number;
+  cleaning_description: string;
+  bata_percentage: number;
+  bata_multiplier: number;
+  bata_amount: number;
 };
 
-// Fallback defaults — actual rates are fetched from admin panel's unloading_rates table at runtime
-export const KRISHI_UNITS: KrishiUnit[] = [
-  { unitNumber: 1, name: 'SIPCOT', routeId: 7, ratePerTon: 50, keywords: ['SIPCOT', 'SPICOT'] },
-  { unitNumber: 2, name: 'RGS - VAVIKADAI', routeId: 8, ratePerTon: 50, keywords: ['RGS', 'VAVIKADAI'] },
-  { unitNumber: 3, name: 'GOBI - SAKTHI FEEDS', routeId: 9, ratePerTon: 50, keywords: ['GOBI', 'SAKTHI'] },
-  { unitNumber: 4, name: 'PALLADAM - PPK HATCHERIES', routeId: 10, ratePerTon: 50, keywords: ['PALLADAM', 'PPK'] },
-  { unitNumber: 5, name: 'PAPPAMPATTI - VALARMATHI FEEDS', routeId: 11, ratePerTon: 60, keywords: ['PAPPAMPATTI', 'VALARMATHI'] },
-  { unitNumber: 6, name: 'NACHIPALAYAM - SUGUNA FEEDS', routeId: 12, ratePerTon: 60, keywords: ['NACHIPALAYAM', 'SUGUNA'] },
-  { unitNumber: 7, name: 'NAMAKKAL', routeId: 13, ratePerTon: 60, keywords: ['NAMAKKAL'] },
-  { unitNumber: 8, name: 'PUDHUCHATHRAM', routeId: 14, ratePerTon: 60, keywords: ['PUDHUCHATHARAM', 'PUDHUCHATHRAM'] },
-  { unitNumber: 9, name: 'VENNANTHUR', routeId: 15, ratePerTon: 60, keywords: ['VENNANTHUR'] },
-];
+const EMPTY_DEFAULTS: ExpenseDefaults = {
+  party_name: '',
+  lorry_number: null,
+  goods_weight: 0,
+  total_freight: 0,
+  driver_carry_forward: 0,
+  other_limit: 200,
+  unloading_applies: false,
+  unloading_unit_name: null,
+  unloading_unit_number: null,
+  unloading_rate_per_ton: 0,
+  unloading_amount: 0,
+  loading_amount: 0,
+  cleaning_amount: 0,
+  cleaning_description: '',
+  bata_percentage: 15,
+  bata_multiplier: 0.15,
+  bata_amount: 0,
+};
 
 interface CategoryConfig {
   key: string;
@@ -160,62 +146,32 @@ export const DriverExpensesScreen: React.FC<{ route: any; navigation: any }> = (
   const [isSettled, setIsSettled] = useState(trip.status === 'SETTLED');
   const [isLoading, setIsLoading] = useState(true);
   const [pdfAction, setPdfAction] = useState<'print' | 'share' | 'download' | null>(null);
+  const [defaults, setDefaults] = useState<ExpenseDefaults>({
+    ...EMPTY_DEFAULTS,
+    party_name: trip.party_name || '',
+    lorry_number: trip.lorry_number || null,
+    goods_weight: parseFloat(String(trip.goods_weight || 0)) || 0,
+    total_freight: Math.round(parseFloat(String(trip.total_freight || 0)) || 0),
+  });
 
-  // Driver's carry-forward advance balance from prior trips (fetched from drivers API)
-  const [driverCarryForwardBalance, setDriverCarryForwardBalance] = useState<number>(0);
-
-  // Loading amount auto-retrieved based on selected truck
-  const [truckLoadingAmount, setTruckLoadingAmount] = useState<number>(0);
-  const [truckCleaningAmount, setTruckCleaningAmount] = useState<number>(0);
-
-  // Krishi party detection & units calculation (Unloading is ONLY for Krishi Nutrition Company)
-  const isKrishiParty = Boolean(
-    (trip.party_name && trip.party_name.toUpperCase().includes('KRISHI')) ||
-    trip.party_id === 5
-  );
-  const goodsWeight = parseFloat(String(trip.goods_weight || 0)) || 0;
-
-  // Dynamic unloading rates fetched from admin panel (updated at loadExpenses time)
-  const [dynamicKrishiUnits, setDynamicKrishiUnits] = useState<KrishiUnit[]>(KRISHI_UNITS);
-
-  // Auto-detected Krishi unit (1 to 9) strictly from Step 1 (via route_id or to_location)
-  const activeKrishiUnit = (() => {
-    if (isKrishiParty) {
-      const units = dynamicKrishiUnits;
-      let matched = units.find((u) => u.routeId === trip.route_id);
-      if (!matched && trip.to_location) {
-        const locUpper = trip.to_location.toUpperCase();
-        matched = units.find((u) =>
-          u.keywords.some((kw) => locUpper.includes(kw.toUpperCase()))
-        );
+  const goodsWeight = defaults.goods_weight;
+  const totalFreight = defaults.total_freight;
+  const driverCarryForwardBalance = defaults.driver_carry_forward;
+  const truckLoadingAmount = defaults.loading_amount;
+  const truckCleaningAmount = defaults.cleaning_amount;
+  const driverBataPercentage = defaults.bata_percentage;
+  const driverBataMultiplier = defaults.bata_multiplier;
+  const driverBataAmount = defaults.bata_amount;
+  const maxOtherExpenseLimit = defaults.other_limit;
+  const unloadingApplies = defaults.unloading_applies;
+  const krishiUnloadingAmount = defaults.unloading_amount;
+  const activeKrishiUnit = unloadingApplies
+    ? {
+        unitNumber: defaults.unloading_unit_number || 0,
+        name: defaults.unloading_unit_name || trip.to_location || 'Unit',
+        ratePerTon: defaults.unloading_rate_per_ton,
       }
-      return matched || units[0];
-    }
-    return null;
-  })();
-
-  const krishiUnloadingRate = activeKrishiUnit ? activeKrishiUnit.ratePerTon : 0;
-  // If not Krishi party, unloading is strictly 0
-  const krishiUnloadingAmount = isKrishiParty && activeKrishiUnit
-    ? Math.round(goodsWeight * krishiUnloadingRate)
-    : 0;
-
-  // Total Freight Amount from Step 1
-  const totalFreight = (() => {
-    const tf = parseFloat(String(trip.total_freight || 0)) || 0;
-    if (tf > 0) return Math.round(tf);
-    const gw = parseFloat(String(trip.goods_weight || 0)) || 0;
-    const fr = parseFloat(String(trip.freight_rate || 0)) || 0;
-    return Math.round(gw * fr);
-  })();
-
-  // Driver Bata Rate Configuration (Default 15% / 0.1500 Multiplier, configurable in Admin Master)
-  const [driverBataPercentage, setDriverBataPercentage] = useState<number>(15);
-  const [driverBataMultiplier, setDriverBataMultiplier] = useState<number>(0.15);
-  const driverBataAmount = Math.round(totalFreight * driverBataMultiplier);
-
-  // Other Expense Maximum Limit (Default 200, configurable in Admin Master)
-  const [maxOtherExpenseLimit, setMaxOtherExpenseLimit] = useState<number>(200);
+    : null;
 
   // Accordion open/close state: starts closed; user taps to open one at a time
   const [openCategory, setOpenCategory] = useState<string | null>(null);
@@ -243,244 +199,50 @@ export const DriverExpensesScreen: React.FC<{ route: any; navigation: any }> = (
     loadExpenses();
   }, []);
 
+  const applyServerDefaults = (payload: any) => {
+    const d = payload?.defaults;
+    if (!d) return;
+    setDefaults({
+      party_name: d.party_name || trip.party_name || '',
+      lorry_number: d.lorry_number || trip.lorry_number || null,
+      goods_weight: Number(d.goods_weight) || 0,
+      total_freight: Math.round(Number(d.total_freight) || 0),
+      driver_carry_forward: Number(d.driver_carry_forward) || 0,
+      other_limit: Number(d.other_limit) || 200,
+      unloading_applies: Boolean(d.unloading_applies),
+      unloading_unit_name: d.unloading_unit_name || null,
+      unloading_unit_number: d.unloading_unit_number ?? null,
+      unloading_rate_per_ton: Number(d.unloading_rate_per_ton) || 0,
+      unloading_amount: Math.round(Number(d.unloading_amount) || 0),
+      loading_amount: Math.round(Number(d.loading_amount) || 0),
+      cleaning_amount: Math.round(Number(d.cleaning_amount) || 0),
+      cleaning_description: d.cleaning_description || '',
+      bata_percentage: Number(d.bata_percentage) || 15,
+      bata_multiplier: Number(d.bata_multiplier) || 0.15,
+      bata_amount: Math.round(Number(d.bata_amount) || 0),
+    });
+  };
+
   const loadExpenses = async () => {
     try {
       setIsLoading(true);
-
-      const [
-        driversRes,
-        res,
-        settleRes,
-        cleaningRates,
-        vRes,
-        unloadingRes,
-        bataRes,
-        limitRes,
-      ] = await Promise.all([
-        mobileLookupService.getDrivers().catch(() => null),
-        mobileExpenseService.getTripExpenses(trip.id),
+      const [res, settleRes] = await Promise.all([
+        viewOnly
+          ? mobileExpenseService.getTripExpenses(trip.id)
+          : mobileExpenseService.applyDefaultExpenses(trip.id),
         mobileSettlementService.getSettlementByTripId(trip.id).catch(() => null),
-        isKrishiParty ? mobileLookupService.getCleaningExpenseRates().catch(() => null) : Promise.resolve(null),
-        trip.vehicle_id ? mobileLookupService.getVehicles().catch(() => null) : Promise.resolve(null),
-        isKrishiParty ? mobileLookupService.getUnloadingRates(trip.party_id).catch(() => null) : Promise.resolve(null),
-        mobileLookupService.getEffectiveDriverBataRate(trip.party_id).catch(() => null),
-        mobileLookupService.getEffectiveOtherExpenseLimit(trip.party_id).catch(() => null),
       ]);
-
-      const matchedDriver = driversRes?.data?.items?.find((d) => d.id === trip.driver_id);
-      if (matchedDriver && Number(matchedDriver.remaining_advance_balance || 0) > 0) {
-        setDriverCarryForwardBalance(parseFloat(String(matchedDriver.remaining_advance_balance)));
-      } else {
-        setDriverCarryForwardBalance(0);
-      }
 
       const fetchedExpenses = res.data.expenses || [];
       setExpenses(fetchedExpenses);
       setTotalExpenses(res.data.total_expenses || 0);
       setAdvancePaid(res.data.advance_paid || 0);
       setBalanceToDriver(res.data.balance_to_driver || 0);
+      applyServerDefaults(res.data);
+      autoSavedRef.current = true;
 
       if (settleRes?.data?.settlement_status === 'SETTLED') {
         setIsSettled(true);
-      }
-
-      let cleaningExp = 0;
-      if (isKrishiParty) {
-        if (cleaningRates?.data && cleaningRates.data.length > 0) {
-          const matched = pickCleaningRate(cleaningRates.data, {
-            keywords: activeKrishiUnit?.keywords || [],
-            toLocation: trip.to_location,
-            partyId: trip.party_id,
-            vehicleId: trip.vehicle_id,
-          });
-          if (matched) {
-            cleaningExp = parseFloat(String(matched.cleaning_charge)) || 0;
-          }
-        }
-      } else {
-        cleaningExp = 100;
-      }
-      setTruckCleaningAmount(cleaningExp);
-
-      let loadingExp = 0;
-      if (trip.vehicle_id && vRes?.data?.items) {
-        const vehicle = vRes.data.items.find((v) => v.id === trip.vehicle_id);
-        if (vehicle && vehicle.goodshed_loading_expense) {
-          loadingExp = Math.round(parseFloat(String(vehicle.goodshed_loading_expense)) || 0);
-        }
-      }
-      if (loadingExp <= 0) {
-        loadingExp = Math.round(parseFloat(String(trip.goodshed_loading_expense || 0)) || 0);
-      }
-      setTruckLoadingAmount(loadingExp);
-
-      let updatedUnits: KrishiUnit[] = [];
-      if (isKrishiParty && unloadingRes?.data && unloadingRes.data.length > 0) {
-        updatedUnits = KRISHI_UNITS.map((ku) => {
-          let fetched = unloadingRes.data.find(
-            (ur) => ur.route_id !== null && ur.route_id === ku.routeId
-          );
-          if (!fetched) {
-            fetched = unloadingRes.data.find((ur) =>
-              ur.unit_name &&
-              ku.keywords.some((kw) =>
-                ur.unit_name.toUpperCase().includes(kw.toUpperCase()) ||
-                kw.toUpperCase().includes(ur.unit_name.toUpperCase())
-              )
-            );
-          }
-          if (fetched && fetched.rate_per_ton !== undefined) {
-            return { ...ku, ratePerTon: parseFloat(String(fetched.rate_per_ton)) || ku.ratePerTon };
-          }
-          return ku;
-        });
-        setDynamicKrishiUnits(updatedUnits);
-      }
-
-      let bataMultiplier = 0.15;
-      let bataPct = 15;
-      if (bataRes?.data) {
-        bataMultiplier = parseFloat(String(bataRes.data.rate_multiplier)) || 0.15;
-        bataPct = parseFloat(String(bataRes.data.rate_percentage)) || (bataMultiplier * 100);
-      }
-      setDriverBataMultiplier(bataMultiplier);
-      setDriverBataPercentage(bataPct);
-
-      const calculatedBata = Math.round(totalFreight * bataMultiplier);
-
-      if (limitRes?.data && limitRes.data.max_amount !== undefined) {
-        setMaxOtherExpenseLimit(parseFloat(String(limitRes.data.max_amount)) || 200);
-      }
-
-      // 4. Pre-fill Loading, Driver Bata and Cleaning Charge drafts immediately
-      const existingLoading = fetchedExpenses.filter((e: any) => e.expense_type === 'LOADING');
-      const existingCleaning = fetchedExpenses.filter((e: any) =>
-        e.expense_type === 'CLEANING_CHARGE' || e.expense_type === 'CLEANING'
-      );
-      const existingBata = fetchedExpenses.filter((e: any) =>
-        e.expense_type === 'DRIVER_BATA' || e.expense_type === 'DRIVER_BETA'
-      );
-      setCategoryInputs((prev) => ({
-        ...prev,
-        LOADING: {
-          amount:
-            existingLoading.length === 0 && loadingExp > 0
-              ? String(loadingExp)
-              : prev.LOADING.amount,
-          description:
-            existingLoading.length === 0 && loadingExp > 0
-              ? `Loading charge for ${trip.lorry_number || 'truck'}`
-              : prev.LOADING.description,
-        },
-        DRIVER_BATA: {
-          amount:
-            existingBata.length === 0 && calculatedBata > 0
-              ? String(calculatedBata)
-              : prev.DRIVER_BATA?.amount || '',
-          description:
-            existingBata.length === 0 && calculatedBata > 0
-              ? `Driver Bata (${bataPct}% of Total Freight ₹${totalFreight})`
-              : prev.DRIVER_BATA?.description || '',
-        },
-        CLEANING_CHARGE: {
-          amount:
-            existingCleaning.length === 0 && prev.CLEANING_CHARGE.amount === '' && cleaningExp > 0
-              ? String(cleaningExp)
-              : prev.CLEANING_CHARGE.amount,
-          description:
-            existingCleaning.length === 0 && prev.CLEANING_CHARGE.description === '' && cleaningExp > 0
-              ? isKrishiParty
-                ? (activeKrishiUnit
-                    ? `Cleaning charge: Unit ${activeKrishiUnit.unitNumber} - ${activeKrishiUnit.name}`
-                    : `Cleaning charge for ${trip.to_location || trip.lorry_number || 'truck'}`)
-                : `Cleaning charge (₹100 fixed)`
-              : prev.CLEANING_CHARGE.description,
-        },
-      }));
-
-      // 5. Automatically save the 4 fixed/calculated categories on initial load if not already saved
-      if (!autoSavedRef.current) {
-        let hasSavedAny = false;
-
-        // Auto-save Loading
-        if (loadingExp > 0 && !fetchedExpenses.some((e: any) => e.expense_type === 'LOADING')) {
-          try {
-            await mobileExpenseService.addExpense(trip.id, {
-              expense_type: 'LOADING',
-              description: `Loading charge for ${trip.lorry_number || 'truck'}`,
-              amount: loadingExp,
-            });
-            hasSavedAny = true;
-          } catch (e) {
-            console.log('Auto-save loading error:', e);
-          }
-        }
-
-        // Auto-save Unloading (Krishi only)
-        let matchedUnit = activeKrishiUnit;
-        if (isKrishiParty) {
-          const dest = (trip.to_location || trip.from_location || '').toUpperCase();
-          const unitsList = updatedUnits.length > 0 ? updatedUnits : KRISHI_UNITS;
-          matchedUnit = unitsList.find((u) => u.keywords.some((kw) => dest.includes(kw.toUpperCase()))) || unitsList[0];
-        }
-        const effectiveUnloadingRate = matchedUnit?.ratePerTon || 0;
-        const unloadingAmt = isKrishiParty && matchedUnit ? Math.round(goodsWeight * effectiveUnloadingRate) : 0;
-
-        if (isKrishiParty && unloadingAmt > 0 && !fetchedExpenses.some((e: any) => e.expense_type === 'UNLOADING')) {
-          try {
-            await mobileExpenseService.addExpense(trip.id, {
-              expense_type: 'UNLOADING',
-              description: `Unloading ${matchedUnit?.name || 'Unit'} (${goodsWeight}T × ₹${effectiveUnloadingRate}/T)`,
-              amount: unloadingAmt,
-            });
-            hasSavedAny = true;
-          } catch (e) {
-            console.log('Auto-save unloading error:', e);
-          }
-        }
-
-        // Auto-save Driver Bata
-        if (calculatedBata > 0 && !fetchedExpenses.some((e: any) => e.expense_type === 'DRIVER_BATA' || e.expense_type === 'DRIVER_BETA')) {
-          try {
-            await mobileExpenseService.addExpense(trip.id, {
-              expense_type: 'DRIVER_BATA',
-              description: `Driver Bata (${bataPct}% of Total Freight ₹${totalFreight})`,
-              amount: calculatedBata,
-            });
-            hasSavedAny = true;
-          } catch (e) {
-            console.log('Auto-save driver bata error:', e);
-          }
-        }
-
-        // Auto-save Cleaning Charge
-        if (cleaningExp > 0 && !fetchedExpenses.some((e: any) => e.expense_type === 'CLEANING_CHARGE' || e.expense_type === 'CLEANING')) {
-          try {
-            await mobileExpenseService.addExpense(trip.id, {
-              expense_type: 'CLEANING_CHARGE',
-              description: isKrishiParty
-                ? (matchedUnit
-                    ? `Cleaning charge: Unit ${matchedUnit.unitNumber} - ${matchedUnit.name}`
-                    : `Cleaning charge for ${trip.to_location || trip.lorry_number || 'truck'}`)
-                : `Cleaning charge (₹100 fixed)`,
-              amount: cleaningExp,
-            });
-            hasSavedAny = true;
-          } catch (e) {
-            console.log('Auto-save cleaning error:', e);
-          }
-        }
-
-        autoSavedRef.current = true;
-
-        if (hasSavedAny) {
-          const freshRes = await mobileExpenseService.getTripExpenses(trip.id);
-          const freshExpenses = freshRes.data.expenses || [];
-          setExpenses(freshExpenses);
-          setTotalExpenses(freshRes.data.total_expenses || 0);
-          setAdvancePaid(freshRes.data.advance_paid || 0);
-          setBalanceToDriver(freshRes.data.balance_to_driver || 0);
-        }
       }
     } catch (err) {
       console.error('Failed to load expenses', err);
@@ -523,8 +285,8 @@ export const DriverExpensesScreen: React.FC<{ route: any; navigation: any }> = (
         }
       }
 
-      // UNLOADING (Krishi only)
-      if (catKey === 'UNLOADING' && isKrishiParty && activeKrishiUnit && krishiUnloadingAmount > 0) {
+      // UNLOADING (only when backend matched an unloading rate for this party/destination)
+      if (catKey === 'UNLOADING' && unloadingApplies && activeKrishiUnit && krishiUnloadingAmount > 0) {
         const existingUnloading = expenses.filter((e) => e.expense_type === 'UNLOADING');
         if (existingUnloading.length === 0) {
           try {
@@ -575,9 +337,7 @@ export const DriverExpensesScreen: React.FC<{ route: any; navigation: any }> = (
             setIsAddingKey('CLEANING_CHARGE');
             await mobileExpenseService.addExpense(trip.id, {
               expense_type: 'CLEANING_CHARGE',
-              description: activeKrishiUnit
-                ? `Cleaning charge: Unit ${activeKrishiUnit.unitNumber} - ${activeKrishiUnit.name}`
-                : `Cleaning charge for ${trip.to_location || trip.lorry_number || 'truck'}`,
+              description: defaults.cleaning_description || `Cleaning charge for ${trip.to_location || trip.lorry_number || 'truck'}`,
               amount: truckCleaningAmount,
             });
             await loadExpenses();
@@ -624,13 +384,10 @@ export const DriverExpensesScreen: React.FC<{ route: any; navigation: any }> = (
       }
     }
 
-    // If Cleaning Charge: enforce fixed ₹100 for non-Krishi, or master rate for Krishi
     if (catKey === 'CLEANING_CHARGE' && truckCleaningAmount > 0) {
       amt = Math.round(truckCleaningAmount);
       if (!desc) {
-        desc = isKrishiParty
-          ? `Cleaning charge for ${trip.to_location || trip.lorry_number || 'truck'}`
-          : `Cleaning charge (₹100 fixed)`;
+        desc = defaults.cleaning_description || `Cleaning charge for ${trip.to_location || trip.lorry_number || 'truck'}`;
       }
     }
 
@@ -677,7 +434,7 @@ export const DriverExpensesScreen: React.FC<{ route: any; navigation: any }> = (
       if (currentIndex >= 0 && currentIndex < CATEGORY_KEYS.length - 1) {
         nextKey = CATEGORY_KEYS[currentIndex + 1];
         // If advancing from LOADING into UNLOADING, but party is NOT Krishi, skip UNLOADING directly to DRIVER_BATA
-        if (nextKey === 'UNLOADING' && !isKrishiParty) {
+        if (nextKey === 'UNLOADING' && !unloadingApplies) {
           nextKey = 'DRIVER_BATA';
         }
       }
@@ -698,7 +455,7 @@ export const DriverExpensesScreen: React.FC<{ route: any; navigation: any }> = (
         }
 
         // Auto-fill UNLOADING if advancing INTO it for Krishi
-        if (nextKey === 'UNLOADING' && isKrishiParty && activeKrishiUnit && krishiUnloadingAmount > 0) {
+        if (nextKey === 'UNLOADING' && unloadingApplies && activeKrishiUnit && krishiUnloadingAmount > 0) {
           const existingUnloading = expenses.filter((e) => e.expense_type === 'UNLOADING');
           if (existingUnloading.length === 0) {
             setCategoryInputs((inputs) => ({
@@ -1126,7 +883,7 @@ export const DriverExpensesScreen: React.FC<{ route: any; navigation: any }> = (
                       Truck rate: {formatCurrency(truckLoadingAmount)}
                     </Text>
                   ) : cat.key === 'UNLOADING' ? (
-                    isKrishiParty && activeKrishiUnit ? (
+                    unloadingApplies && activeKrishiUnit ? (
                       <Text style={styles.autoRateHintText}>
                         Unit {activeKrishiUnit.unitNumber} ({activeKrishiUnit.name}): {formatCurrency(krishiUnloadingAmount)}
                       </Text>
@@ -1153,13 +910,13 @@ export const DriverExpensesScreen: React.FC<{ route: any; navigation: any }> = (
                     <Text style={styles.totalBadgeAutoText}>Rate: {formatCurrency(truckLoadingAmount)}</Text>
                   </View>
                 ) : cat.key === 'UNLOADING' ? (
-                  isKrishiParty && activeKrishiUnit && krishiUnloadingAmount > 0 ? (
+                  unloadingApplies && activeKrishiUnit && krishiUnloadingAmount > 0 ? (
                     <View style={styles.totalBadgeAuto}>
                       <Text style={styles.totalBadgeAutoText}>Rate: {formatCurrency(krishiUnloadingAmount)}</Text>
                     </View>
                   ) : (
                     <View style={styles.totalBadgeMuted}>
-                      <Text style={styles.totalBadgeMutedText}>{isKrishiParty ? '₹0' : 'N/A'}</Text>
+                      <Text style={styles.totalBadgeMutedText}>{unloadingApplies ? '₹0' : 'N/A'}</Text>
                     </View>
                   )
                 ) : cat.key === 'DRIVER_BATA' && driverBataAmount > 0 ? (
@@ -1200,14 +957,14 @@ export const DriverExpensesScreen: React.FC<{ route: any; navigation: any }> = (
 
                 {/* Krishi Nutrition Company Unloading Section */}
                 {cat.key === 'UNLOADING' && (
-                  isKrishiParty ? (
+                  unloadingApplies ? (
                     <View style={styles.krishiUnloadingBox}>
                       <View style={styles.krishiHeaderRow}>
                         <View style={styles.krishiIconBadge}>
                           <Building2 size={16} color={COLORS.white} />
                         </View>
                         <View style={{ flex: 1 }}>
-                          <Text style={styles.krishiCompanyTitle}>KRISHI NUTRITION COMPANY</Text>
+                          <Text style={styles.krishiCompanyTitle}>{defaults.party_name || trip.party_name || 'UNLOADING'}</Text>
                           <Text style={styles.krishiUnitSub}>
                             Unit {activeKrishiUnit?.unitNumber}: {activeKrishiUnit?.name}
                           </Text>
@@ -1352,7 +1109,7 @@ export const DriverExpensesScreen: React.FC<{ route: any; navigation: any }> = (
                       <Text style={styles.closeCardBtnText}>CLOSE</Text>
                     </TouchableOpacity>
                   </View>
-                ) : cat.key === 'UNLOADING' && !isKrishiParty ? (
+                ) : cat.key === 'UNLOADING' && !unloadingApplies ? (
                   // Non-Krishi Party notice: unloading is not applicable
                   <View style={styles.nonKrishiNoticeBox}>
                     <View style={styles.nonKrishiIconRow}>
@@ -1385,7 +1142,7 @@ export const DriverExpensesScreen: React.FC<{ route: any; navigation: any }> = (
                       </TouchableOpacity>
                     </View>
                   </View>
-                ) : cat.key === 'UNLOADING' && isKrishiParty ? (
+                ) : cat.key === 'UNLOADING' && unloadingApplies ? (
                   // Krishi unloading: auto-saved, show confirmation
                   <View style={styles.entryFormContainer}>
                     <View style={styles.unloadingLockedBox}>

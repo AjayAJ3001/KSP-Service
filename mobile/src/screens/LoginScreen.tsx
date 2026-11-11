@@ -510,7 +510,7 @@ export const LoginScreen: React.FC<{ navigation: any }> = ({ navigation }) => {
                     customServerUrl.includes(CURRENT_WIFI_IP) && styles.presetTextActive,
                   ]}
                 >
-                  Wi-Fi ({CURRENT_WIFI_IP})
+                  Server ({CURRENT_WIFI_IP})
                 </Text>
               </TouchableOpacity>
             </View>
@@ -522,7 +522,7 @@ export const LoginScreen: React.FC<{ navigation: any }> = ({ navigation }) => {
                 style={styles.modalInput}
                 value={customServerUrl}
                 onChangeText={setCustomServerUrl}
-                placeholder="http://10.180.228.146:5000/api"
+                placeholder="http://189.72.146.91:5000/api"
                 placeholderTextColor={COLORS.textLight}
                 autoCapitalize="none"
                 autoCorrect={false}

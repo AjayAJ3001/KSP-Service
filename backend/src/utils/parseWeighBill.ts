@@ -499,3 +499,77 @@ export function parseWeighBillText(
     bill_date,
   };
 }
+
+export type WeighBillMatchResult = { ok: boolean; title: string; message: string };
+
+export function matchWeighBillToTrip(opts: {
+  selectedTruck?: string | null;
+  selectedParty?: string | null;
+  selectedUnit?: string | null;
+  billTruck?: string | null;
+  billParty?: string | null;
+  billUnit?: string | null;
+  billHeading?: string | null;
+  billOcr?: string | null;
+}): WeighBillMatchResult {
+  const selectedTruck = normalizeVehicleNo(opts.selectedTruck);
+  const billTruck = normalizeVehicleNo(opts.billTruck);
+  if (!billTruck) {
+    return {
+      ok: false,
+      title: 'Truck Not Found On Bill',
+      message: 'Could not read the truck / vehicle number from the uploaded bill. Capture Truck No or Vehicle No clearly and try again.',
+    };
+  }
+  if (!selectedTruck) {
+    return {
+      ok: false,
+      title: 'Select Truck First',
+      message: 'Select the truck number first, then upload the weighment bill.',
+    };
+  }
+  if (!vehicleNosMatch(selectedTruck, billTruck)) {
+    return {
+      ok: false,
+      title: 'Truck Number Mismatch',
+      message: `Selected truck ${opts.selectedTruck} does not match the bill truck / vehicle no ${opts.billTruck}. Trip entry cannot start.`,
+    };
+  }
+
+  const selectedParty = opts.selectedParty || '';
+  const selectedUnit = opts.selectedUnit || '';
+  if (!selectedParty || !selectedUnit) {
+    return {
+      ok: false,
+      title: 'Select Party And Unit',
+      message: 'Select party and unit first, then upload the weighment bill so names can be checked.',
+    };
+  }
+
+  const sources = [opts.billParty, opts.billUnit, opts.billHeading, opts.billOcr];
+  const partyOk = nameAppearsOnBill(selectedParty, sources);
+  const unitOk = nameAppearsOnBill(selectedUnit, sources);
+  if (!partyOk && !unitOk) {
+    return {
+      ok: false,
+      title: 'Party And Unit Mismatch',
+      message: `Bill party (${opts.billParty || opts.billHeading || 'not found'}) and unit (${opts.billUnit || opts.billHeading || 'not found'}) do not match selected party (${selectedParty}) and unit (${selectedUnit}). Trip entry cannot start.`,
+    };
+  }
+  if (!partyOk) {
+    return {
+      ok: false,
+      title: 'Party Name Mismatch',
+      message: `Party on the bill (${opts.billParty || opts.billHeading || 'not found'}) does not match selected party (${selectedParty}). Trip entry cannot start.`,
+    };
+  }
+  if (!unitOk) {
+    return {
+      ok: false,
+      title: 'Unit Name Mismatch',
+      message: `Unit / heading on the bill (${opts.billUnit || opts.billHeading || 'not found'}) does not match selected unit (${selectedUnit}). Trip entry cannot start.`,
+    };
+  }
+
+  return { ok: true, title: '', message: '' };
+}

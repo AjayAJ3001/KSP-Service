@@ -17,13 +17,14 @@
     },
     "android": {
       "package": "com.ksptransport.app",
+      "usesCleartextTraffic": true,
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#0f172a"
       }
     },
     "extra": {
-      "apiBaseUrl": "http://10.180.228.146:5000/api"
+      "apiBaseUrl": "http://189.72.146.91:5000/api"
     },
     "plugins": [
       "expo-asset",

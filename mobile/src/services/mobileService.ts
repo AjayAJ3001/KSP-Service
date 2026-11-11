@@ -146,8 +146,12 @@ export const mobilePaymentService = {
 };
 
 export const mobileExpenseService = {
-  getTripExpenses: async (tripId: number): Promise<ApiResponse<{ expenses: DriverExpense[]; total_expenses: number; advance_paid: number; balance_to_driver: number }>> => {
+  getTripExpenses: async (tripId: number): Promise<ApiResponse<{ expenses: DriverExpense[]; total_expenses: number; advance_paid: number; balance_to_driver: number; defaults?: any }>> => {
     const res = await api.get(`/expenses/trip/${tripId}`);
+    return res.data;
+  },
+  applyDefaultExpenses: async (tripId: number): Promise<ApiResponse<{ expenses: DriverExpense[]; total_expenses: number; advance_paid: number; balance_to_driver: number; defaults?: any; applied?: string[] }>> => {
+    const res = await api.post(`/expenses/trip/${tripId}/apply-defaults`);
     return res.data;
   },
   addExpense: async (tripId: number, data: { expense_type: string; description?: string; amount: number }): Promise<ApiResponse<DriverExpense>> => {

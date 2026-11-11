@@ -484,14 +484,16 @@ export const NewTripScreen: React.FC<Props> = ({ navigation, route }) => {
         rejectBill('Bill Not Readable', 'Could not read weight. Capture Net Weight, Nett Weight, or Accepted Qty clearly.');
         return;
       }
-      const match = billMatchesTrip({
-        ...selection,
-        billTruck: data.vehicle_no,
-        billParty: data.party_name,
-        billUnit: data.unit_name,
-        billHeading: data.heading_name,
-        billOcr: data.ocr_preview,
-      });
+      const match = typeof data.match?.ok === 'boolean'
+        ? data.match
+        : billMatchesTrip({
+            ...selection,
+            billTruck: data.vehicle_no,
+            billParty: data.party_name,
+            billUnit: data.unit_name,
+            billHeading: data.heading_name,
+            billOcr: data.ocr_preview,
+          });
       if (!match.ok) {
         rejectBill(match.title, match.message);
         return;

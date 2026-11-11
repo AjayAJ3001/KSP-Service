@@ -4,7 +4,7 @@ import { AppError, asyncHandler } from '../middleware/errorHandler';
 import { AuthRequest } from '../middleware/auth';
 import { createAuditLog } from '../utils/auditLog';
 import { applyVehicleScope, assertOwnerVehicle, hasFleetWideAccess, isFleetScoped } from '../utils/ownerScope';
-import { nameAppearsOnBill, normalizeVehicleNo, parseWeighBillText, vehicleNosMatch } from '../utils/parseWeighBill';
+import { matchWeighBillToTrip, normalizeVehicleNo, parseWeighBillText, vehicleNosMatch } from '../utils/parseWeighBill';
 import { decodeBillImage, hashBillImage, ocrWeighBill } from '../utils/weighBillOcr';
 
 const duplicateBillMessage = (dup: { id: number; trip_date?: string; weigh_bill_slip_no?: string; weigh_bill_date?: string }) => {
@@ -105,6 +105,17 @@ export const parseWeighBill = asyncHandler(async (req: AuthRequest, res: Respons
     throw new AppError('Could not read weight from this bill. Capture Net Weight, Nett Weight, or Accepted Qty clearly.', 422);
   }
 
+  const match = matchWeighBillToTrip({
+    selectedTruck: expected_vehicle_no ? String(expected_vehicle_no) : null,
+    selectedParty: expected_party_name ? String(expected_party_name) : null,
+    selectedUnit: expected_unit_name ? String(expected_unit_name) : null,
+    billTruck: parsed.vehicle_no,
+    billParty: parsed.party_name,
+    billUnit: parsed.unit_name,
+    billHeading: parsed.heading_name,
+    billOcr: ocrText,
+  });
+
   res.json({
     success: true,
     message: parsed.weight_source === 'ACCEPTED'
@@ -114,6 +125,7 @@ export const parseWeighBill = asyncHandler(async (req: AuthRequest, res: Respons
       ...parsed,
       weigh_bill_hash: hash,
       ocr_preview: ocrText.slice(0, 1200),
+      match,
     },
   });
 });
@@ -402,21 +414,21 @@ export const createTrip = asyncHandler(async (req: AuthRequest, res: Response): 
     const billUnit = weigh_bill_unit_name ? String(weigh_bill_unit_name) : '';
     if (billParty || billUnit) {
       const namesRes = await client.query(
-        `SELECT p.name as party_name, r.to_location as unit_name
-         FROM parties p, routes r
-         WHERE p.id = $1 AND r.id = $2`,
-        [party_id, route_id]
+        `SELECT p.name as party_name, r.to_location as unit_name, v.lorry_number
+         FROM parties p, routes r, vehicles v
+         WHERE p.id = $1 AND r.id = $2 AND v.id = $3`,
+        [party_id, route_id, vehicle_id]
       );
-      const selectedPartyName = namesRes.rows[0]?.party_name || '';
-      const selectedUnitName = namesRes.rows[0]?.unit_name || '';
-      const sources = [billParty, billUnit];
-      const partyOk = nameAppearsOnBill(selectedPartyName, sources);
-      const unitOk = nameAppearsOnBill(selectedUnitName, sources);
-      if (!partyOk || !unitOk) {
-        throw new AppError(
-          `Party, unit and truck on the bill must match the selected trip. Bill party/unit (${[billParty, billUnit].filter(Boolean).join(' / ')}) vs selected party (${selectedPartyName}) / unit (${selectedUnitName}).`,
-          422
-        );
+      const billMatch = matchWeighBillToTrip({
+        selectedTruck: namesRes.rows[0]?.lorry_number,
+        selectedParty: namesRes.rows[0]?.party_name,
+        selectedUnit: namesRes.rows[0]?.unit_name,
+        billTruck: weigh_bill_vehicle_no || namesRes.rows[0]?.lorry_number,
+        billParty,
+        billUnit,
+      });
+      if (!billMatch.ok) {
+        throw new AppError(billMatch.message || 'Party, unit and truck on the bill must match the selected trip.', 422);
       }
     }
     const billDate = toBillDateIso(weigh_bill_date);
