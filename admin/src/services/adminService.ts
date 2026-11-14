@@ -252,6 +252,10 @@ export const tripService = {
     const res = await api.post('/trips', data);
     return res.data;
   },
+  updateTrip: async (id: number, data: { trip_date: string }): Promise<ApiResponse<Trip>> => {
+    const res = await api.patch(`/trips/${id}`, data);
+    return res.data;
+  },
   updateTripStatus: async (id: number, status: string): Promise<ApiResponse<Trip>> => {
     const res = await api.patch(`/trips/${id}/status`, { status });
     return res.data;

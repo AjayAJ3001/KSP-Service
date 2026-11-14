@@ -48,7 +48,7 @@ type Props = NativeStackScreenProps<RootStackParamList, 'GiveTruckAdvance'>;
 
 export const GiveTruckAdvanceScreen: React.FC<Props> = ({ navigation, route }) => {
   const { user } = useAuth();
-  const isAdmin = String(user?.role || '').toUpperCase() === 'ADMIN';
+  const isAdmin = ['ADMIN', 'OWNER'].includes(String(user?.role || '').toUpperCase());
   const initialBalance = route.params?.availableBalance ?? 0;
   const [availableBalance, setAvailableBalance] = useState<number>(initialBalance);
 
@@ -525,7 +525,7 @@ export const GiveTruckAdvanceScreen: React.FC<Props> = ({ navigation, route }) =
             </View>
             <View style={styles.balanceTextBlock}>
               <Text style={styles.balanceLabel}>
-                {isAdmin ? 'Admin / Office Advance' : 'Manager Available Balance'}
+                {isAdmin ? 'Office Advance' : 'Manager Available Balance'}
               </Text>
               <Text style={styles.balanceValue}>
                 {isAdmin ? 'No wallet limit' : formatCurrency(availableBalance)}

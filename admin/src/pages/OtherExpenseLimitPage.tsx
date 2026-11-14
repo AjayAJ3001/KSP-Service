@@ -4,6 +4,7 @@ import { otherExpenseLimitService, partyService } from '../services/adminService
 import { OtherExpenseLimit, Party } from '../types';
 import { DataTable, Column } from '../components/Common/DataTable';
 import { Modal } from '../components/Common/Modal';
+import { ViewButton, DetailsModal } from '../components/Common/ViewDetails';
 import { StatusBadge } from '../components/Common/StatusBadge';
 
 export const OtherExpenseLimitPage: React.FC = () => {
@@ -27,6 +28,7 @@ export const OtherExpenseLimitPage: React.FC = () => {
   });
   const [formError, setFormError] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [viewLimit, setViewLimit] = useState<OtherExpenseLimit | null>(null);
 
   useEffect(() => {
     loadLookups();
@@ -228,6 +230,7 @@ export const OtherExpenseLimitPage: React.FC = () => {
       header: 'Actions',
       accessor: (lim) => (
         <div style={{ display: 'flex', gap: '8px' }}>
+          <ViewButton onClick={() => setViewLimit(lim)} />
           <button
             onClick={() => openEditModal(lim)}
             className="btn btn-outline btn-sm"
@@ -623,6 +626,17 @@ export const OtherExpenseLimitPage: React.FC = () => {
           </div>
         </form>
       </Modal>
+      <DetailsModal
+        isOpen={!!viewLimit}
+        onClose={() => setViewLimit(null)}
+        title="Other expense limit"
+        rows={viewLimit ? [
+          { label: 'Party', value: viewLimit.party_name || 'Default / all parties' },
+          { label: 'Max amount', value: `₹${Number(viewLimit.max_amount || 0).toLocaleString('en-IN')}` },
+          { label: 'Note', value: viewLimit.description || '—' },
+          { label: 'Status', value: String(viewLimit.status).toUpperCase() },
+        ] : []}
+      />
     </div>
   );
 };

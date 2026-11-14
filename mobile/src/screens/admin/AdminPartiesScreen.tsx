@@ -30,6 +30,8 @@ import { printMastersPdf, downloadMastersPdf } from '../../utils/pdfGenerator';
 import { adminPartyService } from '../../services/adminService';
 import { Party } from '../../types';
 import { COLORS, SPACING, RADIUS, SHADOWS } from '../../constants/theme';
+import { DetailsSheet } from '../../components/DetailsSheet';
+import { ViewChip } from '../../components/ViewChip';
 
 export const AdminPartiesScreen: React.FC<{ navigation: any }> = ({ navigation }) => {
   const [parties, setParties] = useState<Party[]>([]);
@@ -41,6 +43,7 @@ export const AdminPartiesScreen: React.FC<{ navigation: any }> = ({ navigation }
   // Add / Edit Modal
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingParty, setEditingParty] = useState<Party | null>(null);
+  const [viewParty, setViewParty] = useState<Party | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   // Form Fields
@@ -336,6 +339,7 @@ export const AdminPartiesScreen: React.FC<{ navigation: any }> = ({ navigation }
 
                 {/* Actions */}
                 <View style={styles.cardActions}>
+                  <ViewChip compact onPress={() => setViewParty(p)} />
                   <TouchableOpacity
                     style={[styles.toggleBtn, { backgroundColor: isActive ? '#fef2f2' : '#ecfdf5' }]}
                     onPress={() => handleToggleStatus(p)}
@@ -418,6 +422,18 @@ export const AdminPartiesScreen: React.FC<{ navigation: any }> = ({ navigation }
           </ScrollView>
         </View>
       </Modal>
+      <DetailsSheet
+        visible={!!viewParty}
+        title={viewParty ? viewParty.name : 'Party details'}
+        rows={viewParty ? [
+          { label: 'Name', value: viewParty.name },
+          { label: 'Contact', value: viewParty.contact_person || '—' },
+          { label: 'Mobile', value: viewParty.mobile_number || '—' },
+          { label: 'Address', value: viewParty.address || '—' },
+          { label: 'Status', value: viewParty.status },
+        ] : []}
+        onClose={() => setViewParty(null)}
+      />
     </View>
   );
 };
@@ -594,6 +610,8 @@ const styles = StyleSheet.create({
   cardActions: {
     flexDirection: 'row',
     justifyContent: 'flex-end',
+    alignItems: 'center',
+    gap: 8,
     marginTop: 6,
     borderTopWidth: 1,
     borderTopColor: '#f1f5f9',

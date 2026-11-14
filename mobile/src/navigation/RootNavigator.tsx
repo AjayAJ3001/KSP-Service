@@ -92,7 +92,7 @@ export const RootNavigator: React.FC = () => {
       <Stack.Screen
         name="AdminDashboard"
         component={AdminDashboardScreen}
-        options={{ title: 'Admin Control Center' }}
+        options={{ title: 'Control Center' }}
       />
       <Stack.Screen
         name="AdminReports"

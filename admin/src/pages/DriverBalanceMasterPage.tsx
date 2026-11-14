@@ -53,6 +53,9 @@ import { formatIST, formatISTDate } from '../utils/dateUtils';
 import { useAuth } from '../context/AuthContext';
 import { generateDriverStatementHtml, openStatementWindow } from '../utils/driverStatementPdf';
 import { PRINT_BRAND_CSS, printBrandLockup } from '../utils/printBrand';
+import { expenseLinesFromItems, formatExpenseType } from '../utils/expenseBreakdown';
+import { ViewButton } from '../components/Common/ViewDetails';
+import { PdfPreviewModal } from '../components/Common/PdfPreviewModal';
 
 const formatCurrency = (val: number | string) => {
   const num = Math.max(0, parseFloat(String(val)) || 0);
@@ -368,7 +371,7 @@ const tripDetailRowHtml = (tr: Trip, advances: DriverAdvance[], settlements: Set
     <td>${tr.party_name || '—'}<div style="font-size:10px;color:#64748b">${tr.from_location || '—'} → ${tr.to_location || '—'}</div></td>
     <td>${tr.lorry_number || '—'}${tr.owner_name ? `<div style="font-size:10px;color:#64748b">${tr.owner_name}</div>` : ''}</td>
     <td>${advancePaidHtml(paid.chips) || '—'}</td>
-    <td class="num" style="color:#b45309">${formatCurrency(tripExpenseTotal(tr))}</td>
+    <td class="num" style="color:#b45309">${formatCurrency(tripExpenseTotal(tr))}${expenseLinesFromItems(tr.expense_items).map((l) => `<div style="font-size:9px;font-weight:700;color:#92400e">${l.label} ${formatCurrency(l.amount)}</div>`).join('')}</td>
     ${cashCellsHtml(paid, pay)}
     <td style="font-weight:800;color:${paymentStatusColor(pay.driverKind)}">${pay.driverLabel}${adjNotes.map((n) => `<div style="font-size:10px;font-weight:700;color:#c2410c">${n}</div>`).join('')}</td>
   </tr>`;
@@ -645,7 +648,7 @@ const buildTripSlipHtml = (trip: Trip, ctx: SlipContext = {}) => {
     : `<tr><td colspan="2" class="center">No advance recorded</td></tr>`;
   const expenseItems = trip.expense_items || [];
   const expenseRows = expenseItems.length
-    ? expenseItems.map((item, idx) => `<tr><td>${idx + 1}</td><td>${item.expense_type || 'Expense'}</td><td>${item.description || '—'}</td><td class="num">${formatCurrency(item.amount)}</td></tr>`).join('')
+    ? expenseItems.map((item, idx) => `<tr><td>${idx + 1}</td><td>${formatExpenseType(item.expense_type)}</td><td>${item.description || '—'}</td><td class="num">${formatCurrency(item.amount)}</td></tr>`).join('')
     : `<tr><td>1</td><td>Trip expenses</td><td>—</td><td class="num">${formatCurrency(pay.expenses)}</td></tr>`;
 
   const adj = buildAdvanceAdjustmentLinks(ctx.trips || []).get(trip.id);
@@ -765,6 +768,7 @@ export const DriverBalanceMasterPage: React.FC = () => {
   const navigate = useNavigate();
   const { user: authUser } = useAuth();
   const isManagerLogin = authUser?.role === 'MANAGER' || authUser?.role === 'TRANSPORT_USER';
+  const isOwnerUser = authUser?.role === 'OWNER';
   const [tripSlipLoading, setTripSlipLoading] = useState<{ [tripId: number]: 'print' | 'download' | 'share' | null }>({});
   // Lookups
   const [drivers, setDrivers] = useState<Driver[]>([]);
@@ -809,6 +813,9 @@ export const DriverBalanceMasterPage: React.FC = () => {
   const [isPrinting, setIsPrinting] = useState(false);
   const [printingDriverId, setPrintingDriverId] = useState<number | null>(null);
   const [selectedTripIds, setSelectedTripIds] = useState<{ [driverId: number]: number[] }>({});
+  const [pdfHtml, setPdfHtml] = useState<string | null>(null);
+  const [pdfTitle, setPdfTitle] = useState('PDF view');
+  const [pdfLoading, setPdfLoading] = useState(false);
 
   // Give Advance Modal
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -1486,6 +1493,36 @@ export const DriverBalanceMasterPage: React.FC = () => {
     }
   };
 
+  const openDriverPdfView = async (d: DriverAdvanceSummary) => {
+    setPdfTitle(`Driver statement — ${d.driver_name}`);
+    setPdfHtml(null);
+    setPdfLoading(true);
+    try {
+      const data = await loadStatementData(d.driver_id);
+      setPdfHtml(generateDriverStatementHtml(data));
+    } catch (err: any) {
+      alert(err?.message || 'Failed to open PDF view.');
+      setPdfTitle('PDF view');
+    } finally {
+      setPdfLoading(false);
+    }
+  };
+
+  const openTripPdfView = async (tr: Trip) => {
+    setPdfTitle(`Trip #${tr.id} statement`);
+    setPdfHtml(null);
+    setPdfLoading(true);
+    try {
+      const data = await loadStatementData(tr.driver_id);
+      setPdfHtml(generateDriverStatementHtml(data, { tripId: tr.id }));
+    } catch (err: any) {
+      alert(err?.message || 'Failed to open PDF view.');
+      setPdfTitle('PDF view');
+    } finally {
+      setPdfLoading(false);
+    }
+  };
+
 
   // ── Download Excel (.xlsx) ─────────────────────────────────────────
   const handleExportExcel = () => {
@@ -1774,7 +1811,7 @@ export const DriverBalanceMasterPage: React.FC = () => {
             minWidth: '150px',
           }}
         >
-          <option value="">All Owners</option>
+          <option value="">{isOwnerUser ? 'My Trucks' : 'All Owners'}</option>
           {owners.map((o) => (
             <option key={o.id} value={o.id}>
               {o.name}
@@ -1948,6 +1985,14 @@ export const DriverBalanceMasterPage: React.FC = () => {
                               <div style={{ fontSize: 13, fontWeight: 800, color: needToPay > 0 ? '#dc2626' : '#64748b' }}>{formatCurrency(needToPay)}</div>
                             </div>
                             {renderStatusBadge(d)}
+                            <span
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                openDriverPdfView(d);
+                              }}
+                            >
+                              <ViewButton onClick={() => openDriverPdfView(d)} />
+                            </span>
                           </div>
                         </button>
 
@@ -2065,7 +2110,9 @@ export const DriverBalanceMasterPage: React.FC = () => {
                                                   ))}
                                                 </div>
                                               </td>
-                                              <td style={{ padding: '10px', textAlign: 'right', fontWeight: 700, color: '#b45309' }}>{formatCurrency(expAmt)}</td>
+                                              <td style={{ padding: '10px', textAlign: 'right', fontWeight: 700, color: '#b45309' }}>
+                                                {formatCurrency(expAmt)}
+                                              </td>
                                               <td style={{ padding: '10px', textAlign: 'right', fontWeight: 800, color: cash.inHandAmt > 0 ? '#047857' : '#64748b' }}>
                                                 {formatCurrency(cash.inHandAmt)}
                                               </td>
@@ -2079,7 +2126,8 @@ export const DriverBalanceMasterPage: React.FC = () => {
                                                 ))}
                                               </td>
                                               <td style={{ padding: '10px' }}>
-                                                <div style={{ display: 'flex', gap: 6, justifyContent: 'center' }}>
+                                                <div style={{ display: 'flex', gap: 6, justifyContent: 'center', flexWrap: 'wrap' }}>
+                                                  <ViewButton onClick={() => openTripPdfView(tr)} />
                                                   <button type="button" title="Print this trip only" onClick={() => printTripSlip(tr)} style={{ border: '1px solid #93c5fd', background: '#eff6ff', color: '#1d4ed8', borderRadius: 6, padding: '4px 8px', cursor: 'pointer', fontWeight: 700, fontSize: 11, display: 'flex', alignItems: 'center', gap: 4 }}>
                                                     {slipBusy === 'print' ? <Loader2 size={12} className="animate-spin" /> : <Printer size={12} />} Print
                                                   </button>
@@ -2512,6 +2560,17 @@ export const DriverBalanceMasterPage: React.FC = () => {
           </form>
         </Modal>
       )}
+
+      <PdfPreviewModal
+        isOpen={pdfLoading || !!pdfHtml}
+        title={pdfTitle}
+        html={pdfHtml}
+        loading={pdfLoading}
+        onClose={() => {
+          setPdfHtml(null);
+          setPdfLoading(false);
+        }}
+      />
     </div>
   );
 };

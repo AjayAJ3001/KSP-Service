@@ -21,10 +21,12 @@ import * as XLSX from 'xlsx';
 import { truckAdvanceService, vehicleService, driverService, userService, partyService, tripService, ownerService } from '../services/adminService';
 import { Vehicle, Driver, User, Party, Trip, Owner } from '../types';
 import { DataTable, Column } from '../components/Common/DataTable';
+import { ViewButton, DetailsModal } from '../components/Common/ViewDetails';
 import { Modal } from '../components/Common/Modal';
 import { DateField } from '../components/Common/DateField';
 import { formatIST } from '../utils/dateUtils';
 import { PRINT_BRAND_CSS, printBrandLockup } from '../utils/printBrand';
+import { useAuth } from '../context/AuthContext';
 
 interface TruckAdvance {
   id: number;
@@ -85,6 +87,8 @@ const formatAdvanceDateTime = (dateStr?: string | Date | null, createdAtStr?: st
 };
 
 export const TruckAdvancesPage: React.FC = () => {
+  const { user } = useAuth();
+  const isOwnerUser = user?.role === 'OWNER';
   const [advances, setAdvances] = useState<TruckAdvance[]>([]);
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
   const [owners, setOwners] = useState<Owner[]>([]);
@@ -114,6 +118,7 @@ export const TruckAdvancesPage: React.FC = () => {
   }, [vehicles, ownerFilter]);
 
   const [isLoading, setIsLoading] = useState(false);
+  const [viewAdvance, setViewAdvance] = useState<any>(null);
   const [isExportingExcel, setIsExportingExcel] = useState(false);
   const [isPrinting, setIsPrinting] = useState(false);
 
@@ -707,6 +712,7 @@ export const TruckAdvancesPage: React.FC = () => {
       header: 'Actions',
       render: (a) => (
         <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
+          <ViewButton onClick={() => setViewAdvance(a)} />
           <button
             onClick={() => handlePrintSingleAdvance(a)}
             className="btn btn-outline btn-sm"
@@ -804,7 +810,7 @@ export const TruckAdvancesPage: React.FC = () => {
               className="form-control form-select"
               style={{ height: '38px', width: '100%' }}
             >
-              <option value="">All Owners</option>
+              <option value="">{isOwnerUser ? 'My Trucks' : 'All Owners'}</option>
               {owners.map((o) => (
                 <option key={o.id} value={o.id}>{o.name}</option>
               ))}
@@ -1144,6 +1150,22 @@ export const TruckAdvancesPage: React.FC = () => {
           </div>
         </div>
       </Modal>
+      <DetailsModal
+        isOpen={!!viewAdvance}
+        onClose={() => setViewAdvance(null)}
+        title={viewAdvance ? `Trip advance #${viewAdvance.id}` : 'Advance details'}
+        rows={viewAdvance ? [
+          { label: 'Lorry', value: viewAdvance.lorry_number },
+          { label: 'Owner', value: viewAdvance.owner_name || '—' },
+          { label: 'Driver', value: viewAdvance.driver_name || '—' },
+          { label: 'Trip', value: viewAdvance.trip_id ? `#${viewAdvance.trip_id}` : '—' },
+          { label: 'Amount', value: formatCurrency(viewAdvance.amount) },
+          { label: 'Date', value: formatIST(viewAdvance.advance_date) },
+          { label: 'Manager', value: viewAdvance.manager_name || '—' },
+          { label: 'Driver expenses', value: viewAdvance.driver_expenses != null ? formatCurrency(viewAdvance.driver_expenses) : '—' },
+          { label: 'Notes', value: viewAdvance.notes || '—' },
+        ] : []}
+      />
     </div>
   );
 };

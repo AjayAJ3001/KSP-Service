@@ -18,7 +18,7 @@ export const MainTabNavigator: React.FC = () => {
   const role = String(user?.role || '').toUpperCase();
   const isOwner = role === 'OWNER';
   const isAdmin = role === 'ADMIN' || isOwner;
-  const showTripEntry = role === 'ADMIN' || role === 'MANAGER' || role === 'TRANSPORT_USER';
+  const showTripEntry = role === 'ADMIN' || role === 'OWNER' || role === 'MANAGER' || role === 'TRANSPORT_USER';
 
   return (
     <Tab.Navigator
@@ -73,7 +73,7 @@ export const MainTabNavigator: React.FC = () => {
           component={HomeScreen}
           options={{
             title: 'Entry',
-            headerTitle: role === 'ADMIN' ? 'Admin Trip Entry' : 'KSP Transport',
+            headerTitle: role === 'ADMIN' ? 'Admin Trip Entry' : role === 'OWNER' ? 'Owner Trip Entry' : 'KSP Transport',
             tabBarIcon: ({ color, size }) => <Home color={color} size={size} />,
           }}
         />
@@ -102,7 +102,7 @@ export const MainTabNavigator: React.FC = () => {
         component={ProfileScreen}
         options={{
           title: 'Profile',
-          headerTitle: isAdmin ? 'Admin Profile' : 'My Operator Profile',
+          headerTitle: isOwner ? 'Owner Profile' : isAdmin ? 'Admin Profile' : 'My Operator Profile',
           tabBarIcon: ({ color, size }) => <User color={color} size={size} />,
         }}
       />

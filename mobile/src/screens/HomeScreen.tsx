@@ -239,7 +239,7 @@ const DriverAdvanceModal: React.FC<DriverAdvanceModalProps> = ({
   onRefreshDashboard,
 }) => {
   const { user } = useAuth();
-  const isAdmin = user?.role === 'ADMIN';
+  const isAdmin = user?.role === 'ADMIN' || user?.role === 'OWNER';
 
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<'ALL' | 'DEFICIT' | 'SURPLUS' | 'SETTLED'>('ALL');
@@ -1561,6 +1561,12 @@ const RecentTripsModal: React.FC<RecentTripsModalProps> = ({
                   {selectedTrip.driver_name ? (
                     <Row label="Driver" value={selectedTrip.driver_name} />
                   ) : null}
+                  {selectedTrip.created_by_name ? (
+                    <Row
+                      label="Started by"
+                      value={`${selectedTrip.created_by_name}${selectedTrip.created_by_role ? ` (${selectedTrip.created_by_role === 'OWNER' ? 'Owner' : selectedTrip.created_by_role === 'ADMIN' ? 'Admin' : 'Manager'})` : ''}`}
+                    />
+                  ) : null}
                   <Row
                     label="Goods Weight"
                     value={
@@ -1584,7 +1590,7 @@ const RecentTripsModal: React.FC<RecentTripsModalProps> = ({
                   {selectedTrip.advance_paid != null && selectedTrip.advance_paid > 0 && (
                     <Row label="Driver Advance" value={formatCurrency(selectedTrip.advance_paid)} />
                   )}
-                  {user?.role === 'ADMIN' && (
+                  {(user?.role === 'ADMIN' || user?.role === 'OWNER') && (
                     <>
                       {selectedTrip.total_received != null && (
                         <Row label="Amount Received" value={formatCurrency(selectedTrip.total_received)} />
@@ -1730,10 +1736,20 @@ const RecentTripsModal: React.FC<RecentTripsModalProps> = ({
                               <Text style={mStyles.tripListDate}>{formatDateDMY(trip.trip_date)}</Text>
                               <Text style={mStyles.tripListLorry}> · {trip.lorry_number}</Text>
                             </View>
+                            {trip.created_by_name ? (
+                              <Text style={[mStyles.tripListDate, { marginTop: 3 }]}>
+                                Started by: {trip.created_by_name}
+                                {trip.created_by_role === 'OWNER'
+                                  ? ' (Owner)'
+                                  : trip.created_by_role === 'ADMIN'
+                                    ? ' (Admin)'
+                                    : ' (Manager)'}
+                              </Text>
+                            ) : null}
                           </View>
                           <View style={{ alignItems: 'flex-end' }}>
                             <Text style={mStyles.tripListFreight}>{formatCurrency(trip.total_freight)}</Text>
-                            {user?.role === 'ADMIN' ? (
+                            {(user?.role === 'ADMIN' || user?.role === 'OWNER') ? (
                               <Text style={mStyles.tripListBalance}>
                                 Due: {formatCurrency(
                                   trip.balance_due ??
@@ -1997,7 +2013,7 @@ export const HomeScreen: React.FC<{ navigation: any }> = ({ navigation }) => {
               <Text style={styles.statLabel}>Trips Today</Text>
               <Text style={styles.statValue}>{data?.trips_today || 0}</Text>
             </View>
-            {user?.role === 'ADMIN' ? (
+            {(user?.role === 'ADMIN' || user?.role === 'OWNER') ? (
               <View style={[styles.statBox, { borderLeftWidth: 1, borderLeftColor: 'rgba(255,255,255,0.15)' }]}>
                 <Text style={styles.statLabel}>Balance Due</Text>
                 <Text style={[styles.statValue, { color: COLORS.accent }]}>

@@ -13,6 +13,7 @@ export interface User {
   driver_mobile?: string;
   license_number?: string;
   status: 'ACTIVE' | 'INACTIVE';
+  current_password?: string | null;
   created_at?: string;
   updated_at?: string;
 }
@@ -223,6 +224,9 @@ export interface Trip {
   owner_id?: number;
   owner_name?: string;
   owner_mobile?: string;
+  created_by?: number;
+  created_by_name?: string;
+  created_by_role?: string;
   driver_name?: string;
   driver_mobile?: string;
   party_name?: string;
@@ -381,6 +385,7 @@ export interface OwnerAdvance {
   driver_mobile?: string;
   lorry_number?: string;
   vehicle_number?: string;
+  created_by_name?: string;
   created_at: string;
 }
 
@@ -513,7 +518,7 @@ export type RootStackParamList = {
   AdminTrips: undefined;
   AdminPayments: undefined;
   AdminSettlements: undefined;
-  AdminOwnerAdvances: undefined;
+  AdminOwnerAdvances: { openGive?: boolean } | undefined;
   AdminManagerLedger: undefined;
   AdminTruckAdvances: undefined;
   AdminDriverAdvances: undefined;

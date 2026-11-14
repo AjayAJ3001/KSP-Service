@@ -42,6 +42,8 @@ import { COLORS, SPACING, RADIUS, SHADOWS } from '../../constants/theme';
 import { formatDateDMY } from '../../utils/dateUtils';
 import { printMastersPdf, downloadMastersPdf } from '../../utils/pdfGenerator';
 import { DatePickerModal, toDisplayDate } from '../../components/DatePickerModal';
+import { DetailsSheet } from '../../components/DetailsSheet';
+import { ViewChip } from '../../components/ViewChip';
 
 const getTripStatusStyle = (status?: string) => {
   switch (status) {
@@ -112,6 +114,7 @@ export const AdminDriverAdvancesScreen: React.FC<{ navigation: any }> = ({ navig
   // Add / Edit Modal
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [viewAdvance, setViewAdvance] = useState<DriverAdvance | null>(null);
 
   // Form Fields
   const [selectedDriverId, setSelectedDriverId] = useState<number | null>(null);
@@ -677,6 +680,7 @@ export const AdminDriverAdvancesScreen: React.FC<{ navigation: any }> = ({ navig
                     {adv.advance_date ? formatDateDMY(adv.advance_date) : '—'}
                   </Text>
                 </View>
+                <ViewChip compact onPress={() => setViewAdvance(adv)} />
                 <TouchableOpacity
                   style={styles.delBtn}
                   onPress={() => handleDeleteAdvance(adv)}
@@ -887,6 +891,19 @@ export const AdminDriverAdvancesScreen: React.FC<{ navigation: any }> = ({ navig
           setDatePickerTarget(null);
         }}
         onClose={() => setDatePickerTarget(null)}
+      />
+      <DetailsSheet
+        visible={!!viewAdvance}
+        title={viewAdvance ? `Driver advance #${viewAdvance.id}` : 'Advance details'}
+        rows={viewAdvance ? [
+          { label: 'Driver', value: viewAdvance.driver_name },
+          { label: 'Lorry', value: viewAdvance.lorry_number || '—' },
+          { label: 'Amount', value: formatCurrency(viewAdvance.amount) },
+          { label: 'Date', value: viewAdvance.advance_date ? formatDateDMY(viewAdvance.advance_date) : '—' },
+          { label: 'Mode', value: viewAdvance.payment_mode || '—' },
+          { label: 'Notes', value: viewAdvance.notes || '—' },
+        ] : []}
+        onClose={() => setViewAdvance(null)}
       />
     </View>
   );

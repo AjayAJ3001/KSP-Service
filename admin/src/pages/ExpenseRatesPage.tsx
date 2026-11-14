@@ -4,6 +4,7 @@ import { expenseRateService } from '../services/adminService';
 import { ExpenseRate } from '../types';
 import { DataTable, Column } from '../components/Common/DataTable';
 import { Modal } from '../components/Common/Modal';
+import { ViewButton, DetailsModal } from '../components/Common/ViewDetails';
 import { StatusBadge } from '../components/Common/StatusBadge';
 
 export const ExpenseRatesPage: React.FC = () => {
@@ -21,6 +22,7 @@ export const ExpenseRatesPage: React.FC = () => {
   });
   const [formError, setFormError] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [viewRate, setViewRate] = useState<ExpenseRate | null>(null);
 
   useEffect(() => {
     loadRates();
@@ -131,6 +133,7 @@ export const ExpenseRatesPage: React.FC = () => {
       header: 'Actions',
       render: (r) => (
         <div style={{ display: 'flex', gap: '6px' }}>
+          <ViewButton onClick={() => setViewRate(r)} />
           <button onClick={() => openEditModal(r)} className="btn btn-outline btn-sm" title="Edit">
             <Edit2 size={14} />
           </button>
@@ -272,6 +275,17 @@ export const ExpenseRatesPage: React.FC = () => {
           </div>
         </form>
       </Modal>
+      <DetailsModal
+        isOpen={!!viewRate}
+        onClose={() => setViewRate(null)}
+        title={viewRate ? viewRate.name : 'Expense rate'}
+        rows={viewRate ? [
+          { label: 'Type', value: viewRate.expense_type },
+          { label: 'Name', value: viewRate.name },
+          { label: 'Rate', value: viewRate.rate_per_unit ? `₹${Number(viewRate.rate_per_unit).toLocaleString('en-IN')}` : 'Variable' },
+          { label: 'Status', value: viewRate.status },
+        ] : []}
+      />
     </div>
   );
 };

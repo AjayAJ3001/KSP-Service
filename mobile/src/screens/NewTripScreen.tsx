@@ -37,6 +37,7 @@ import { COLORS, SPACING, RADIUS, SHADOWS } from '../constants/theme';
 import { ComplianceAlertModal, ComplianceDoc } from '../components/ComplianceAlertModal';
 import { AppNoticeModal, AppNoticeModalProps, NoticeKind } from '../components/AppNoticeModal';
 import { formatDateDMY } from '../utils/dateUtils';
+import { DatePickerModal } from '../components/DatePickerModal';
 import { billMatchesTrip } from '../utils/weighBillMatch';
 import { useAuth } from '../context/AuthContext';
 
@@ -56,6 +57,7 @@ export const NewTripScreen: React.FC<Props> = ({ navigation, route }) => {
 
   // Form Fields
   const [tripDate, setTripDate] = useState(formatDateDMY(new Date()));
+  const [showTripDatePicker, setShowTripDatePicker] = useState(false);
 
   const handleTripDateChange = (raw: string) => {
     const digits = raw.replace(/\D/g, '').slice(0, 8);
@@ -820,7 +822,6 @@ export const NewTripScreen: React.FC<Props> = ({ navigation, route }) => {
           <View style={styles.formRow}>
             <Text style={styles.fieldLabel}>Trip Date (DD-MM-YYYY) *</Text>
             <View style={styles.inputWithIcon}>
-              <Calendar size={18} color={COLORS.accent} style={{ marginRight: 10 }} />
               <TextInput
                 style={styles.innerInput}
                 value={tripDate}
@@ -829,6 +830,12 @@ export const NewTripScreen: React.FC<Props> = ({ navigation, route }) => {
                 maxLength={10}
                 keyboardType="numeric"
               />
+              <TouchableOpacity
+                onPress={() => setShowTripDatePicker(true)}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              >
+                <Calendar size={20} color={COLORS.accent} />
+              </TouchableOpacity>
             </View>
           </View>
 
@@ -1417,6 +1424,17 @@ export const NewTripScreen: React.FC<Props> = ({ navigation, route }) => {
         notice={complianceModal.notice}
         onProceed={complianceModal.onProceed}
         onCancel={complianceModal.onCancel}
+      />
+
+      <DatePickerModal
+        visible={showTripDatePicker}
+        value={tripDate}
+        title="Select Trip Date"
+        onConfirm={(isoDate) => {
+          setTripDate(formatDateDMY(isoDate));
+          setShowTripDatePicker(false);
+        }}
+        onClose={() => setShowTripDatePicker(false)}
       />
     </View>
   );

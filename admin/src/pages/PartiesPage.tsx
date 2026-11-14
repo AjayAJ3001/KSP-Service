@@ -18,6 +18,7 @@ import {
 import { partyService, routeService } from '../services/adminService';
 import { Party, Route } from '../types';
 import { Modal } from '../components/Common/Modal';
+import { ViewButton, DetailsModal } from '../components/Common/ViewDetails';
 import { StatusBadge } from '../components/Common/StatusBadge';
 import * as XLSX from 'xlsx';
 import { PRINT_BRAND_CSS, printBrandLockup } from '../utils/printBrand';
@@ -35,6 +36,8 @@ export const PartiesPage: React.FC = () => {
 
   // Selected party
   const [selectedParty, setSelectedParty] = useState<Party | null>(null);
+  const [viewParty, setViewParty] = useState<Party | null>(null);
+  const [viewRoute, setViewRoute] = useState<Route | null>(null);
 
   // Units/Routes for selected party
   const [routes, setRoutes] = useState<Route[]>([]);
@@ -1002,6 +1005,7 @@ export const PartiesPage: React.FC = () => {
                       </div>
 
                       <div style={{ display: 'flex', gap: '4px' }}>
+                        <ViewButton compact onClick={() => setViewParty(party)} />
                         <button
                           onClick={(e) => openEditPartyModal(party, e)}
                           className="btn btn-outline btn-sm"
@@ -1488,6 +1492,7 @@ export const PartiesPage: React.FC = () => {
                       {/* Actions */}
                       <td style={{ textAlign: 'center' }}>
                         <div style={{ display: 'inline-flex', gap: '5px' }}>
+                          <ViewButton compact onClick={() => setViewRoute(route)} />
                           <button
                             onClick={() => openEditRouteModal(route)}
                             className="btn btn-outline btn-sm"
@@ -1758,6 +1763,31 @@ export const PartiesPage: React.FC = () => {
           </div>
         </form>
       </Modal>
+      <DetailsModal
+        isOpen={!!viewParty}
+        onClose={() => setViewParty(null)}
+        title={viewParty ? `Party — ${viewParty.name}` : 'Party details'}
+        rows={viewParty ? [
+          { label: 'Name', value: viewParty.name },
+          { label: 'Contact', value: viewParty.contact_person || '—' },
+          { label: 'Mobile', value: viewParty.mobile_number || '—' },
+          { label: 'Address', value: viewParty.address || '—' },
+          { label: 'Units', value: viewParty.routes_count ?? '—' },
+          { label: 'Status', value: viewParty.status },
+        ] : []}
+      />
+      <DetailsModal
+        isOpen={!!viewRoute}
+        onClose={() => setViewRoute(null)}
+        title={viewRoute ? `Unit — ${viewRoute.to_location || viewRoute.from_location}` : 'Unit details'}
+        rows={viewRoute ? [
+          { label: 'From', value: viewRoute.from_location },
+          { label: 'To', value: viewRoute.to_location },
+          { label: 'Party', value: viewRoute.party_name || '—' },
+          { label: 'Rate', value: viewRoute.rate_per_unit != null ? `₹${Number(viewRoute.rate_per_unit).toLocaleString('en-IN')}` : '—' },
+          { label: 'Status', value: viewRoute.status },
+        ] : []}
+      />
     </div>
   );
 };

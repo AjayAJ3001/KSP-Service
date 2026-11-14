@@ -5,6 +5,7 @@ import { AppError, asyncHandler } from '../middleware/errorHandler';
 import { AuthRequest } from '../middleware/auth';
 import { createAuditLog } from '../utils/auditLog';
 import { assertOwnerManager, isOwnerUser } from '../utils/ownerScope';
+import { decryptPassword, encryptPassword, ensurePasswordVaultColumn } from '../utils/passwordVault';
 
 export const getUsers = asyncHandler(async (req: AuthRequest, res: Response): Promise<void> => {
   const page = parseInt(req.query.page as string) || 1;
@@ -77,16 +78,20 @@ export const getUsers = asyncHandler(async (req: AuthRequest, res: Response): Pr
 export const getUserById = asyncHandler(async (req: AuthRequest, res: Response): Promise<void> => {
   const { id } = req.params;
   await assertOwnerManager(req, id);
+  await ensurePasswordVaultColumn();
   const result = await query(
     `SELECT u.id, u.username, u.name, u.email, u.mobile_number, u.role, u.status,
-            u.driver_id, u.created_at, u.updated_at, u.last_login,
+            u.driver_id, u.created_at, u.updated_at, u.last_login, u.password_vault,
             d.name as driver_name
      FROM users u LEFT JOIN drivers d ON u.driver_id = d.id
      WHERE u.id = $1`,
     [id]
   );
   if (result.rows.length === 0) throw new AppError('User not found.', 404);
-  res.json({ success: true, message: 'User retrieved.', data: result.rows[0] });
+  const row = result.rows[0];
+  const current_password = decryptPassword(row.password_vault);
+  delete row.password_vault;
+  res.json({ success: true, message: 'User retrieved.', data: { ...row, current_password } });
 });
 
 export const createUser = asyncHandler(async (req: AuthRequest, res: Response): Promise<void> => {
@@ -109,12 +114,14 @@ export const createUser = asyncHandler(async (req: AuthRequest, res: Response): 
 
   const rounds = parseInt(process.env.BCRYPT_ROUNDS || '12');
   const passwordHash = await bcrypt.hash(password, rounds);
+  await ensurePasswordVaultColumn();
+  const passwordVault = encryptPassword(password);
 
   const result = await query(
-    `INSERT INTO users (username, name, password_hash, email, mobile_number, role, driver_id, status)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, 'ACTIVE')
+    `INSERT INTO users (username, name, password_hash, password_vault, email, mobile_number, role, driver_id, status)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'ACTIVE')
      RETURNING id, username, name, email, mobile_number, role, driver_id, status, created_at`,
-    [username.trim().toLowerCase(), name.trim(), passwordHash, email || null, mobile_number || null, role, driver_id || null]
+    [username.trim().toLowerCase(), name.trim(), passwordHash, passwordVault, email || null, mobile_number || null, role, driver_id || null]
   );
 
   await createAuditLog(req.user?.id, 'CREATE_USER', 'USERS', result.rows[0].id, { username, role });
@@ -182,8 +189,13 @@ export const resetPassword = asyncHandler(async (req: AuthRequest, res: Response
 
   const rounds = parseInt(process.env.BCRYPT_ROUNDS || '12');
   const passwordHash = await bcrypt.hash(new_password, rounds);
+  await ensurePasswordVaultColumn();
+  const passwordVault = encryptPassword(new_password);
 
-  await query('UPDATE users SET password_hash = $1, updated_at = NOW() WHERE id = $2', [passwordHash, id]);
+  await query(
+    'UPDATE users SET password_hash = $1, password_vault = $2, updated_at = NOW() WHERE id = $3',
+    [passwordHash, passwordVault, id]
+  );
   await createAuditLog(req.user?.id, 'RESET_PASSWORD', 'USERS', id, { target_user: existing.rows[0].username });
 
   res.json({ success: true, message: 'Password reset successfully.' });

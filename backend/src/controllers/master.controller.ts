@@ -3,7 +3,7 @@ import { query } from '../config/database';
 import { AppError, asyncHandler } from '../middleware/errorHandler';
 import { AuthRequest } from '../middleware/auth';
 import { createAuditLog } from '../utils/auditLog';
-import { applyOwnerScope, assertOwnerOwner, assertOwnerVehicle, isFleetScoped, isOwnerUser } from '../utils/ownerScope';
+import { applyOwnerScope, assertOwnerOwner, assertOwnerVehicle, isFleetScoped, isOwnerUser, sqlOwnerVehicleIn } from '../utils/ownerScope';
 
 // ===== DRIVERS =====
 export const getDrivers = asyncHandler(async (req: AuthRequest, res: Response): Promise<void> => {
@@ -19,6 +19,16 @@ export const getDrivers = asyncHandler(async (req: AuthRequest, res: Response): 
 
   if (search) { conditions.push(`(name ILIKE $${paramIdx} OR mobile_number ILIKE $${paramIdx} OR license_number ILIKE $${paramIdx})`); params.push(`%${search}%`); paramIdx++; }
   if (status) { conditions.push(`status = $${paramIdx}`); params.push(status); paramIdx++; }
+  if (isFleetScoped(req)) {
+    conditions.push(`id IN (
+      SELECT t.driver_id FROM trips t
+      WHERE ${sqlOwnerVehicleIn('t.vehicle_id', `$${paramIdx}`)} AND t.status NOT IN ('CANCELLED', 'DRAFT')
+      UNION
+      SELECT ta.driver_id FROM truck_advances ta WHERE ${sqlOwnerVehicleIn('ta.vehicle_id', `$${paramIdx}`)}
+    )`);
+    params.push(req.user?.id || 0);
+    paramIdx++;
+  }
 
   const where = conditions.join(' AND ');
   const countResult = await query(`SELECT COUNT(*) FROM drivers WHERE ${where}`, params);
@@ -308,7 +318,7 @@ export const getExpiringVehicles = asyncHandler(async (req: AuthRequest, res: Re
        COALESCE(rc_reg_date, rc_expiry_date) as rc_reg_date
      FROM vehicles
      WHERE status = 'ACTIVE'
-       ${isFleetScoped(req) && req.user?.vehicleIds?.length ? `AND id = ANY($1::int[])` : isFleetScoped(req) ? 'AND FALSE' : ''}
+       ${isFleetScoped(req) && req.user?.id ? `AND ${sqlOwnerVehicleIn('id', '$1')}` : isFleetScoped(req) ? 'AND FALSE' : ''}
        AND (
          (COALESCE(tds_expiry_date, dts_expiry_date) IS NOT NULL AND COALESCE(tds_expiry_date, dts_expiry_date) <= CURRENT_DATE + (${interval})::INTERVAL)
          OR (insurance_expiry_date IS NOT NULL AND insurance_expiry_date <= CURRENT_DATE + (${interval})::INTERVAL)
@@ -323,7 +333,7 @@ export const getExpiringVehicles = asyncHandler(async (req: AuthRequest, res: Re
        COALESCE(fc_expiry_date, 'infinity'::date),
        COALESCE(tax_expiry_date, 'infinity'::date)
      ) ASC`,
-    isFleetScoped(req) && req.user?.vehicleIds?.length ? [req.user.vehicleIds] : []
+    isFleetScoped(req) && req.user?.id ? [req.user.id] : []
   );
   res.json({ success: true, message: 'Expiring vehicles retrieved.', data: result.rows });
 });

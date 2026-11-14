@@ -6,6 +6,7 @@ import { AppError, asyncHandler } from '../middleware/errorHandler';
 import { AuthRequest } from '../middleware/auth';
 import { createAuditLog } from '../utils/auditLog';
 import { loadOwnerScope } from '../utils/ownerScope';
+import { encryptPassword, ensurePasswordVaultColumn } from '../utils/passwordVault';
 
 export const login = asyncHandler(async (req: Request, res: Response): Promise<void> => {
   const { username, password } = req.body;
@@ -154,7 +155,11 @@ export const changePassword = asyncHandler(async (req: AuthRequest, res: Respons
   const rounds = parseInt(process.env.BCRYPT_ROUNDS || '12');
   const newHash = await bcrypt.hash(new_password, rounds);
 
-  await query('UPDATE users SET password_hash = $1, updated_at = NOW() WHERE id = $2', [newHash, req.user?.id]);
+  await ensurePasswordVaultColumn();
+  await query(
+    'UPDATE users SET password_hash = $1, password_vault = $2, updated_at = NOW() WHERE id = $3',
+    [newHash, encryptPassword(new_password), req.user?.id]
+  );
   await createAuditLog(req.user?.id, 'CHANGE_PASSWORD', 'AUTH', req.user?.id);
 
   res.json({ success: true, message: 'Password changed successfully.' });

@@ -4,6 +4,7 @@ import { userService, driverService } from '../services/adminService';
 import { User, Driver } from '../types';
 import { DataTable, Column } from '../components/Common/DataTable';
 import { Modal } from '../components/Common/Modal';
+import { ViewButton, DetailsModal } from '../components/Common/ViewDetails';
 import { StatusBadge } from '../components/Common/StatusBadge';
 import { formatIST } from '../utils/dateUtils';
 import { useAuth } from '../context/AuthContext';
@@ -21,6 +22,7 @@ export const UsersPage: React.FC = () => {
   const [roleFilter, setRoleFilter] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [viewUser, setViewUser] = useState<User | null>(null);
   const [isPrinting, setIsPrinting] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
 
@@ -509,6 +511,7 @@ export const UsersPage: React.FC = () => {
       header: 'Actions',
       render: (u) => (
         <div style={{ display: 'flex', gap: '6px' }}>
+          <ViewButton onClick={() => setViewUser(u)} />
           <button
             onClick={() => openEditModal(u)}
             className="btn btn-outline btn-sm"
@@ -962,6 +965,19 @@ export const UsersPage: React.FC = () => {
           </div>
         </form>
       </Modal>
+      <DetailsModal
+        isOpen={!!viewUser}
+        onClose={() => setViewUser(null)}
+        title={viewUser ? `User — ${viewUser.name}` : 'User details'}
+        rows={viewUser ? [
+          { label: 'Name', value: viewUser.name },
+          { label: 'Username', value: viewUser.username },
+          { label: 'Role', value: viewUser.role },
+          { label: 'Mobile', value: viewUser.mobile_number || '—' },
+          { label: 'Status', value: viewUser.status },
+          { label: 'Created', value: viewUser.created_at ? formatIST(viewUser.created_at) : '—' },
+        ] : []}
+      />
     </div>
   );
 };

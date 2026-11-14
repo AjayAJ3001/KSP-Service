@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Droplets, Plus, Edit2, Trash2 } from 'lucide-react';
+import { ViewButton, DetailsModal } from '../components/Common/ViewDetails';
 import { cleaningExpenseRateService, partyService, vehicleService } from '../services/adminService';
 import { CleaningExpenseRate, Party, Vehicle } from '../types';
 import { DataTable, Column } from '../components/Common/DataTable';
@@ -24,6 +25,7 @@ export const CleaningExpensesPage: React.FC = () => {
   });
   const [formError, setFormError] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [viewRate, setViewRate] = useState<CleaningExpenseRate | null>(null);
 
   useEffect(() => {
     loadRates();
@@ -216,6 +218,7 @@ export const CleaningExpensesPage: React.FC = () => {
       header: 'Actions',
       render: (r) => (
         <div style={{ display: 'flex', gap: '6px' }}>
+          <ViewButton onClick={() => setViewRate(r)} />
           <button onClick={() => openEditModal(r)} className="btn btn-outline btn-sm" title="Edit">
             <Edit2 size={14} />
           </button>
@@ -393,6 +396,19 @@ export const CleaningExpensesPage: React.FC = () => {
           </div>
         </form>
       </Modal>
+      <DetailsModal
+        isOpen={!!viewRate}
+        onClose={() => setViewRate(null)}
+        title={viewRate ? `Cleaning rate — ${viewRate.unit_name}` : 'Cleaning rate'}
+        rows={viewRate ? [
+          { label: 'Unit / destination', value: viewRate.unit_name },
+          { label: 'Party', value: viewRate.party_name || 'All parties' },
+          { label: 'Truck', value: viewRate.lorry_number || 'All trucks' },
+          { label: 'Cleaning charge', value: `₹${Number(viewRate.cleaning_charge || 0).toLocaleString('en-IN')}` },
+          { label: 'Note', value: viewRate.description || '—' },
+          { label: 'Status', value: viewRate.status },
+        ] : []}
+      />
     </div>
   );
 };

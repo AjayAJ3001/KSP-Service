@@ -63,6 +63,10 @@ import { COLORS, SPACING, RADIUS, SHADOWS } from '../../constants/theme';
 import { formatDateDMY } from '../../utils/dateUtils';
 import { DatePickerModal, toDisplayDate } from '../../components/DatePickerModal';
 import { useAuth } from '../../context/AuthContext';
+import { ViewChip } from '../../components/ViewChip';
+import { PdfPreviewSheet } from '../../components/PdfPreviewSheet';
+
+const DRIVER_DOC_VIEW = 5;
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -78,6 +82,11 @@ interface DriverBalanceRow {
   // Financials
   total_advance_given: number;
   total_expenses_reported: number;
+  loading_expense: number;
+  unloading_expense: number;
+  bata_expense: number;
+  cleaning_expense: number;
+  other_expense: number;
   balance_in_hand: number;         // cash with driver
   need_to_pay: number;             // office owes driver
   settlement_status?: string;
@@ -114,6 +123,9 @@ export const AdminDriverBalanceMasterScreen: React.FC<{ navigation: any }> = ({ 
   const [selectedOwnerFilter, setSelectedOwnerFilter] = useState<number | null>(null);
   const [selectedVehicleFilter, setSelectedVehicleFilter] = useState<number | null>(null);
   const [isFilterModalOpen, setIsFilterModalOpen] = useState(false);
+  const [pdfData, setPdfData] = useState<DriverStatementPdfData | null>(null);
+  const [pdfTitle, setPdfTitle] = useState('Driver statement');
+  const [pdfLoading, setPdfLoading] = useState(false);
 
   // PDF Action Loading states
   const [pdfActionLoading, setPdfActionLoading] = useState<'print' | 'download' | 'share' | null>(null);
@@ -189,6 +201,11 @@ export const AdminDriverBalanceMasterScreen: React.FC<{ navigation: any }> = ({ 
         owner_name: r.owner_name,
         total_advance_given: Math.max(0, parseFloat(String(r.total_advance_given || 0))),
         total_expenses_reported: Math.max(0, parseFloat(String(r.total_expenses_reported || 0))),
+        loading_expense: Math.max(0, parseFloat(String(r.loading_expense || 0))),
+        unloading_expense: Math.max(0, parseFloat(String(r.unloading_expense || 0))),
+        bata_expense: Math.max(0, parseFloat(String(r.bata_expense || 0))),
+        cleaning_expense: Math.max(0, parseFloat(String(r.cleaning_expense || 0))),
+        other_expense: Math.max(0, parseFloat(String(r.other_expense || 0))),
         balance_in_hand: Math.max(0, parseFloat(String(r.balance_in_hand || 0))),
         need_to_pay: Math.max(0, parseFloat(String(r.need_to_pay || 0))),
         settlement_status: r.settlement_status,
@@ -472,11 +489,26 @@ export const AdminDriverBalanceMasterScreen: React.FC<{ navigation: any }> = ({ 
     return {
       driver: data.driver,
       summary: data.summary,
-      timeline: data.timeline,
+      timeline: data.chronological_timeline || data.timeline,
       advances: data.advances,
       trips_and_expenses: data.trips_and_expenses,
       settlement_payments: data.settlement_payments,
     };
+  };
+
+  const openDriverPdfView = async (driver: DriverBalanceRow) => {
+    setPdfTitle(`Driver statement — ${driver.driver_name}`);
+    setPdfData(null);
+    setPdfLoading(true);
+    try {
+      const doc = await fetchDriverStatementData(driver.driver_id);
+      setPdfData(doc);
+    } catch (err: any) {
+      Alert.alert('View', err.message || 'Could not open driver statement.');
+      setPdfLoading(false);
+      return;
+    }
+    setPdfLoading(false);
   };
 
   const handlePrintDriverSlip = async (driver: DriverBalanceRow) => {
@@ -713,15 +745,15 @@ export const AdminDriverBalanceMasterScreen: React.FC<{ navigation: any }> = ({ 
                 </View>
               </View>
               <View style={styles.summaryDivider} />
-              <View style={styles.summaryItem}>
-                <HandCoins size={14} color="#b45309" />
-                <View>
-                  <Text style={styles.summaryItemLabel}>Expenses</Text>
-                  <Text style={[styles.summaryItemValue, { color: '#b45309' }]}>
-                    {formatCurrency(filteredTotals.total_expenses_reported)}
-                  </Text>
-                </View>
-              </View>
+                  <View style={styles.summaryItem}>
+                    <HandCoins size={14} color="#b45309" />
+                    <View>
+                      <Text style={styles.summaryItemLabel}>Expenses</Text>
+                      <Text style={[styles.summaryItemValue, { color: '#b45309' }]}>
+                        {formatCurrency(filteredTotals.total_expenses_reported)}
+                      </Text>
+                    </View>
+                  </View>
               <View style={styles.summaryDivider} />
               <View style={styles.summaryItem}>
                 <ArrowDownCircle size={14} color="#059669" />
@@ -863,13 +895,7 @@ export const AdminDriverBalanceMasterScreen: React.FC<{ navigation: any }> = ({ 
 
                 {/* Card Action Buttons */}
                 <View style={styles.cardActions}>
-                  <TouchableOpacity
-                    style={styles.giveAdvanceBtn}
-                    onPress={() => openGiveAdvance(driver)}
-                  >
-                    <HandCoins size={13} color={COLORS.white} />
-                    <Text style={styles.giveAdvanceBtnText}>Give Advance</Text>
-                  </TouchableOpacity>
+                  <ViewChip compact onPress={() => openDriverPdfView(driver)} />
 
                   <TouchableOpacity
                     style={styles.slipBtn}
@@ -970,7 +996,7 @@ export const AdminDriverBalanceMasterScreen: React.FC<{ navigation: any }> = ({ 
                 onPress={() => setSelectedOwnerFilter(null)}
               >
                 <Text style={[styles.chipText, selectedOwnerFilter === null && styles.chipTextActive]}>
-                  All Owners
+                  {authUser?.role === 'OWNER' ? 'My Trucks' : 'All Owners'}
                 </Text>
               </TouchableOpacity>
               {owners.map((o) => (
@@ -1314,6 +1340,17 @@ export const AdminDriverBalanceMasterScreen: React.FC<{ navigation: any }> = ({ 
         title="Select Advance Date"
         onConfirm={(iso) => { setAdvanceDate(iso); setDatePickerTarget(null); }}
         onClose={() => setDatePickerTarget(null)}
+      />
+      <PdfPreviewSheet
+        key={DRIVER_DOC_VIEW}
+        visible={pdfLoading || !!pdfData}
+        title={pdfTitle}
+        data={pdfData}
+        loading={pdfLoading}
+        onClose={() => {
+          setPdfData(null);
+          setPdfLoading(false);
+        }}
       />
     </View>
   );

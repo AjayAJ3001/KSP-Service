@@ -10,6 +10,8 @@ import { formatDateDMY } from '../utils/dateUtils';
 import { DateField } from '../components/Common/DateField';
 import { OverduePaymentAlertModal } from '../components/Common/OverduePaymentAlertModal';
 import { PRINT_BRAND_CSS, printBrandLockup } from '../utils/printBrand';
+import { ViewButton, DetailsModal } from '../components/Common/ViewDetails';
+import { useAuth } from '../context/AuthContext';
 
 function downloadCSV(filename: string, headers: string[], rows: (string | number)[][]) {
   const escape = (v: any) => `"${String(v ?? '').replace(/"/g, '""')}"`;
@@ -39,6 +41,8 @@ function getThisWeekRange() {
 }
 
 export const PaymentsPage: React.FC = () => {
+  const { user } = useAuth();
+  const isOwnerUser = user?.role === 'OWNER';
   const [trips, setTrips] = useState<Trip[]>([]);
   const [parties, setParties] = useState<Party[]>([]);
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
@@ -57,6 +61,7 @@ export const PaymentsPage: React.FC = () => {
   const [routeFilter, setRouteFilter] = useState('');
 
   const [isLoading, setIsLoading] = useState(false);
+  const [viewTrip, setViewTrip] = useState<Trip | null>(null);
   const [isExportingExcel, setIsExportingExcel] = useState(false);
   const [isPrinting, setIsPrinting] = useState(false);
   const [rowExportBusy, setRowExportBusy] = useState<{ id: number; action: 'print' | 'share' | 'download' } | null>(null);
@@ -965,6 +970,7 @@ export const PaymentsPage: React.FC = () => {
       className: 'actions-cell',
       render: (t) => (
         <div className="table-actions">
+          <ViewButton onClick={() => setViewTrip(t)} />
           {(t.balance_due ?? t.total_freight) > 0 && t.status !== 'CANCELLED' && (
             <button onClick={() => openPaymentModal(t)} className="btn btn-primary btn-sm" title="Collect Payment">
               <CreditCard size={14} /> Collect
@@ -1221,7 +1227,7 @@ export const PaymentsPage: React.FC = () => {
                 setPage(1);
               }}
             >
-              <option value="">All Truck Owners</option>
+              <option value="">{isOwnerUser ? 'My Trucks' : 'All Truck Owners'}</option>
               {owners.map((o) => (
                 <option key={o.id} value={o.id}>
                   {o.name} {o.mobile_number ? `(${o.mobile_number})` : ''}
@@ -1542,6 +1548,22 @@ export const PaymentsPage: React.FC = () => {
           )}
         </div>
       </Modal>
+      <DetailsModal
+        isOpen={!!viewTrip}
+        onClose={() => setViewTrip(null)}
+        title={viewTrip ? `Payment — Trip #${viewTrip.id}` : 'Payment details'}
+        rows={viewTrip ? [
+          { label: 'Lorry', value: viewTrip.lorry_number },
+          { label: 'Party', value: viewTrip.party_name },
+          { label: 'Owner', value: viewTrip.owner_name || '—' },
+          { label: 'Driver', value: viewTrip.driver_name || '—' },
+          { label: 'Date', value: viewTrip.trip_date ? formatDateDMY(viewTrip.trip_date) : '—' },
+          { label: 'Freight', value: formatCurrency(viewTrip.total_freight) },
+          { label: 'Received', value: formatCurrency(viewTrip.total_received || 0) },
+          { label: 'Balance due', value: formatCurrency(viewTrip.balance_due ?? viewTrip.total_freight) },
+          { label: 'Status', value: viewTrip.status },
+        ] : []}
+      />
     </div>
   );
 };

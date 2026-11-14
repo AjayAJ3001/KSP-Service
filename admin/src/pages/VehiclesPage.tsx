@@ -27,6 +27,7 @@ import { formatDateDMY } from '../utils/dateUtils';
 import { DateField } from '../components/Common/DateField';
 import * as XLSX from 'xlsx';
 import { PRINT_BRAND_CSS, printBrandLockup } from '../utils/printBrand';
+import { useAuth } from '../context/AuthContext';
 
 const readAsBase64 = (file: File): Promise<string> =>
   new Promise((res, rej) => {
@@ -1030,6 +1031,8 @@ const VehicleDetailPanel: React.FC<VehicleDetailPanelProps> = ({ vehicle: v, onE
 };
 
 export const VehiclesPage: React.FC = () => {
+  const { user } = useAuth();
+  const isOwnerUser = user?.role === 'OWNER';
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
   const [allVehiclesList, setAllVehiclesList] = useState<Vehicle[]>([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -2066,7 +2069,7 @@ export const VehiclesPage: React.FC = () => {
             value={ownerFilter}
             onChange={(e) => { setOwnerFilter(e.target.value); setPage(1); }}
           >
-            <option value="">All Owners</option>
+            <option value="">{isOwnerUser ? 'My Trucks' : 'All Owners'}</option>
             {ownersList.map(o => (
               <option key={o.id} value={String(o.id)}>{o.name}</option>
             ))}

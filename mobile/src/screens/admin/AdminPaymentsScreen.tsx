@@ -26,11 +26,14 @@ import {
   Printer,
 } from 'lucide-react-native';
 import { adminTripService, adminOwnerService, adminVehicleService } from '../../services/adminService';
+import { useAuth } from '../../context/AuthContext';
 import { Trip, Owner, Vehicle } from '../../types';
 import { COLORS, SPACING, RADIUS, SHADOWS } from '../../constants/theme';
 import { formatDateDMY } from '../../utils/dateUtils';
 import { DatePickerModal, toDisplayDate } from '../../components/DatePickerModal';
 import { printTripPdf, shareTripPdf, downloadTripPdf } from '../../utils/pdfGenerator';
+import { DetailsSheet } from '../../components/DetailsSheet';
+import { ViewChip } from '../../components/ViewChip';
 
 type StatusFilter = 'ALL' | 'PAYMENT_PENDING' | 'PARTIALLY_PAID' | 'SETTLED';
 
@@ -40,6 +43,8 @@ const formatCurrency = (val: number | string) => {
 };
 
 export const AdminPaymentsScreen: React.FC<{ navigation: any }> = ({ navigation }) => {
+  const { user } = useAuth();
+  const isOwnerUser = user?.role === 'OWNER';
   const [trips, setTrips] = useState<Trip[]>([]);
   const [owners, setOwners] = useState<Owner[]>([]);
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
@@ -54,6 +59,7 @@ export const AdminPaymentsScreen: React.FC<{ navigation: any }> = ({ navigation 
   const [toDate, setToDate] = useState('');
   const [datePickerTarget, setDatePickerTarget] = useState<'from' | 'to' | null>(null);
   const [pdfLoading, setPdfLoading] = useState<string | null>(null);
+  const [viewTrip, setViewTrip] = useState<Trip | null>(null);
 
   const availableVehicles = useMemo(() => {
     if (!ownerFilter) return vehicles;
@@ -255,6 +261,7 @@ export const AdminPaymentsScreen: React.FC<{ navigation: any }> = ({ navigation 
                 </View>
               </View>
               <View style={styles.cardActions}>
+                <ViewChip compact onPress={() => setViewTrip(t)} />
                 <TouchableOpacity
                   style={[styles.actionBtn, { backgroundColor: '#eff6ff', borderColor: '#93c5fd' }]}
                   onPress={() => handlePrintTrip(t)}
@@ -332,9 +339,12 @@ export const AdminPaymentsScreen: React.FC<{ navigation: any }> = ({ navigation 
             <FlatList
               data={
                 pickerModalType === 'owner'
-                  ? [{ id: '', name: 'All Owners' }, ...owners.filter((o) => o.name.toLowerCase().includes(modalSearch.toLowerCase()))]
+                  ? [
+                      ...(isOwnerUser ? [] : [{ id: '', name: 'All Owners' }]),
+                      ...owners.filter((o) => o.name.toLowerCase().includes(modalSearch.toLowerCase())),
+                    ]
                   : [
-                      { id: '', lorry_number: 'All Trucks' },
+                      { id: '', lorry_number: isOwnerUser ? 'My Trucks' : 'All Trucks' },
                       ...availableVehicles.filter((v) => v.lorry_number.toLowerCase().includes(modalSearch.toLowerCase())),
                     ]
               }
@@ -361,6 +371,22 @@ export const AdminPaymentsScreen: React.FC<{ navigation: any }> = ({ navigation 
           </View>
         </TouchableOpacity>
       </Modal>
+      <DetailsSheet
+        visible={!!viewTrip}
+        title={viewTrip ? `Payment — Trip #${viewTrip.id}` : 'Payment details'}
+        rows={viewTrip ? [
+          { label: 'Lorry', value: viewTrip.lorry_number },
+          { label: 'Party', value: viewTrip.party_name },
+          { label: 'Owner', value: viewTrip.owner_name || '—' },
+          { label: 'Driver', value: viewTrip.driver_name || '—' },
+          { label: 'Date', value: viewTrip.trip_date ? formatDateDMY(viewTrip.trip_date) : '—' },
+          { label: 'Freight', value: formatCurrency(viewTrip.total_freight) },
+          { label: 'Received', value: formatCurrency(viewTrip.total_received || 0) },
+          { label: 'Balance due', value: formatCurrency(viewTrip.balance_due || 0) },
+          { label: 'Status', value: viewTrip.status },
+        ] : []}
+        onClose={() => setViewTrip(null)}
+      />
     </View>
   );
 };

@@ -45,9 +45,12 @@ import {
   adminTripService,
 } from '../../services/adminService';
 import { Settlement, Trip, Owner, Vehicle, Party, Driver } from '../../types';
+import { useAuth } from '../../context/AuthContext';
 import { COLORS, SPACING, RADIUS, SHADOWS } from '../../constants/theme';
 import { formatDateDMY } from '../../utils/dateUtils';
 import { DatePickerModal, toDisplayDate } from '../../components/DatePickerModal';
+import { ViewChip } from '../../components/ViewChip';
+import { PdfPreviewSheet } from '../../components/PdfPreviewSheet';
 import { exportCSV } from '../../utils/exportUtils';
 import {
   downloadSettlementPdf,
@@ -75,11 +78,14 @@ const getNetBalance = (s: Settlement) => {
     : Math.max(0, managerGiven - priorDeficit);
   const ownerGiven = Math.round(Number(s.owner_given || 0));
   const leftoverUsed = Math.round(Number(s.owner_leftover_used || 0));
+  const priorInHand = leftoverUsed > 0
+    ? leftoverUsed
+    : Math.round(Number(s.previous_driver_balance || 0));
   const ownerBal = Math.round(Number(s.owner_balance || 0));
   const cashPaid = s.payment_mode !== 'ADJUSTED_ADVANCE' ? Math.round(Number(s.paid_amount || 0)) : 0;
   if (s.owner_applied != null || s.owner_given != null || s.owner_balance != null || (s as any).effective_manager_advance != null) {
     if (ownerBal > 0) return -ownerBal;
-    return Math.max(0, expenses - manager - ownerGiven - leftoverUsed - cashPaid);
+    return Math.max(0, expenses - manager - ownerGiven - priorInHand - cashPaid);
   }
   if (s.net_balance_to_driver !== undefined && s.net_balance_to_driver !== null) {
     return parseFloat(String(s.net_balance_to_driver)) || 0;
@@ -106,7 +112,9 @@ function getThisWeekRange() {
   return { from: fmt(start), to: fmt(end) };
 }
 
-export const AdminSettlementsScreen: React.FC<{ navigation: any }> = () => {
+export const AdminSettlementsScreen: React.FC<{ navigation: any }> = ({ navigation }) => {
+  const { user } = useAuth();
+  const isOwnerUser = user?.role === 'OWNER';
   const [items, setItems] = useState<Settlement[]>([]);
   const [total, setTotal] = useState(0);
   const [search, setSearch] = useState('');
@@ -122,6 +130,7 @@ export const AdminSettlementsScreen: React.FC<{ navigation: any }> = () => {
   const [modalSearch, setModalSearch] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [pdfLoading, setPdfLoading] = useState<string | null>(null);
+  const [viewSlip, setViewSlip] = useState<{ trip: Trip; settlement: Settlement } | null>(null);
   const [isExporting, setIsExporting] = useState(false);
   const [payTarget, setPayTarget] = useState<Settlement | null>(null);
   const [payMode, setPayMode] = useState<'CASH' | 'UPI' | 'BANK_TRANSFER'>('CASH');
@@ -379,7 +388,7 @@ export const AdminSettlementsScreen: React.FC<{ navigation: any }> = () => {
 
   const renderAdvancePaid = (s: Settlement) => {
     const manager = Math.round(parseFloat(String(s.manager_advance ?? s.initial_trip_advance ?? 0)) || 0);
-    const leftoverUsed = Math.round(parseFloat(String(s.owner_leftover_used ?? 0)) || 0);
+    const leftoverUsed = Math.round(parseFloat(String(s.owner_leftover_used ?? s.previous_driver_balance ?? 0)) || 0);
     const ownerAdvance = Math.round(Number(s.owner_given || 0));
     const ownerAdvanceBal = Math.round(parseFloat(String(s.owner_balance ?? 0)) || 0);
     const isOwnerLeftover = leftoverUsed > 0 && ownerAdvance <= 0 && manager <= 0;
@@ -402,6 +411,9 @@ export const AdminSettlementsScreen: React.FC<{ navigation: any }> = () => {
     }
     if (ownerAdvanceBal > 0) {
       rows.push({ label: ownBalLabel, value: ownerAdvanceBal, color: '#047857', bg: '#ecfdf5' });
+    }
+    if (leftoverUsed > 0 && !isOwnerLeftover) {
+      rows.push({ label: 'Prior advance', value: leftoverUsed, color: '#047857', bg: '#ecfdf5' });
     }
     if (isOwnerLeftover) {
       rows.push({ label: ownBalLabel, value: leftoverUsed, color: '#047857', bg: '#ecfdf5' });
@@ -672,9 +684,9 @@ export const AdminSettlementsScreen: React.FC<{ navigation: any }> = () => {
         title: o.name,
         subtitle: (o as any).mobile_number || '',
       }));
-      const all = { id: '', title: 'All Owners', subtitle: '' };
+      const all = { id: '', title: isOwnerUser ? 'My Trucks (All)' : 'All Owners', subtitle: '' };
       const filteredList = q ? list.filter((o) => o.title.toLowerCase().includes(q) || o.subtitle.includes(q)) : list;
-      return [all, ...filteredList];
+      return isOwnerUser ? filteredList : [all, ...filteredList];
     }
     if (pickerModalType === 'vehicle') {
       const list = availableVehicles.map((v) => ({
@@ -684,7 +696,7 @@ export const AdminSettlementsScreen: React.FC<{ navigation: any }> = () => {
       }));
       const all = {
         id: '',
-        title: ownerFilter ? `All Trucks for Owner (${availableVehicles.length})` : 'All Trucks',
+        title: ownerFilter ? `All Trucks for Owner (${availableVehicles.length})` : (isOwnerUser ? 'My Trucks' : 'All Trucks'),
         subtitle: '',
       };
       const filteredList = q
@@ -717,7 +729,7 @@ export const AdminSettlementsScreen: React.FC<{ navigation: any }> = () => {
       return [all, ...filteredList];
     }
     return [];
-  }, [pickerModalType, owners, availableVehicles, parties, drivers, ownerFilter, modalSearch]);
+  }, [pickerModalType, owners, availableVehicles, parties, drivers, ownerFilter, modalSearch, isOwnerUser]);
 
   const applyPicker = (id: string) => {
     if (pickerModalType === 'owner') {
@@ -1025,14 +1037,14 @@ export const AdminSettlementsScreen: React.FC<{ navigation: any }> = () => {
                   </View>
                 </View>
 
-                <Text style={styles.partyText}>Party: {s.party_name || '—'}</Text>
+                <Text style={styles.partyText}>Driver: {s.driver_name || '—'}</Text>
                 <Text style={styles.metaLine}>
                   {[s.owner_name ? `Owner: ${s.owner_name}` : '', [s.from_location, s.to_location].filter(Boolean).join(' to ')]
                     .filter(Boolean)
                     .join('  ·  ')}
                 </Text>
                 <Text style={styles.metaLine}>
-                  Driver: {s.driver_name || '—'}  ·  Trip #{s.trip_id}
+                  Trip #{s.trip_id}
                 </Text>
                 <Text style={styles.metaLine}>Date: {formatDateDMY(s.trip_date || s.created_at)}</Text>
 
@@ -1096,6 +1108,7 @@ export const AdminSettlementsScreen: React.FC<{ navigation: any }> = () => {
                 </View>
 
                 <View style={styles.actionRow}>
+                  <ViewChip compact onPress={() => setViewSlip({ trip: toTrip(s), settlement: s })} />
                   {canAct && netBal > 0 && !isCoveredByAdvance ? (
                     <TouchableOpacity style={styles.payBtn} onPress={() => openPayModal(s)} disabled={isPaying}>
                       <Banknote size={14} color="#fff" />
@@ -1348,6 +1361,14 @@ export const AdminSettlementsScreen: React.FC<{ navigation: any }> = () => {
           </View>
         </View>
       </Modal>
+
+      <PdfPreviewSheet
+        visible={!!viewSlip}
+        title={viewSlip ? `Settlement SETTLE-${viewSlip.settlement.id}` : 'Settlement challan'}
+        trip={viewSlip?.trip}
+        settlement={viewSlip?.settlement}
+        onClose={() => setViewSlip(null)}
+      />
 
       <DatePickerModal
         visible={datePickerTarget !== null}

@@ -34,8 +34,10 @@ import { OwnerAdvance, Owner, User, Driver, Vehicle } from '../../types';
 import { COLORS, SPACING, RADIUS, SHADOWS } from '../../constants/theme';
 import { formatDateDMY } from '../../utils/dateUtils';
 import { DatePickerModal, toDisplayDate } from '../../components/DatePickerModal';
+import { DetailsSheet } from '../../components/DetailsSheet';
+import { ViewChip } from '../../components/ViewChip';
 
-export const AdminOwnerAdvancesScreen: React.FC<{ navigation: any }> = ({ navigation }) => {
+export const AdminOwnerAdvancesScreen: React.FC<{ navigation: any; route?: any }> = ({ navigation, route }) => {
   const [advances, setAdvances] = useState<OwnerAdvance[]>([]);
   const [owners, setOwners] = useState<Owner[]>([]);
   const [managers, setManagers] = useState<User[]>([]);
@@ -54,6 +56,7 @@ export const AdminOwnerAdvancesScreen: React.FC<{ navigation: any }> = ({ naviga
   // Add / Edit Modal
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingAdvance, setEditingAdvance] = useState<OwnerAdvance | null>(null);
+  const [viewAdvance, setViewAdvance] = useState<OwnerAdvance | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   // Form Fields
@@ -113,6 +116,13 @@ export const AdminOwnerAdvancesScreen: React.FC<{ navigation: any }> = ({ naviga
   useEffect(() => {
     loadAdvances();
   }, [loadAdvances]);
+
+  useEffect(() => {
+    if (route?.params?.openGive) {
+      openAddModal();
+      navigation.setParams?.({ openGive: undefined });
+    }
+  }, [route?.params?.openGive]);
 
   const formatCurrency = (val: number | string) => {
     const num = parseFloat(String(val)) || 0;
@@ -330,11 +340,12 @@ export const AdminOwnerAdvancesScreen: React.FC<{ navigation: any }> = ({ naviga
             )}
           </TouchableOpacity>
 
-          <TouchableOpacity style={styles.addBtn} onPress={openAddModal}>
-            <Plus size={16} color={COLORS.white} />
-            <Text style={styles.addBtnText}>Give Advance</Text>
-          </TouchableOpacity>
         </View>
+
+        <TouchableOpacity style={styles.giveAdvanceBanner} onPress={openAddModal} activeOpacity={0.85}>
+          <Plus size={20} color={COLORS.white} />
+          <Text style={styles.giveAdvanceBannerText}>+ Give Advance</Text>
+        </TouchableOpacity>
 
         {/* Recipient Filter Pills */}
         <View style={styles.filterChipRow}>
@@ -458,47 +469,40 @@ export const AdminOwnerAdvancesScreen: React.FC<{ navigation: any }> = ({ naviga
                   )}
                 </View>
 
-                <View style={styles.infoRow}>
-                  <View style={styles.infoItem}>
-                    {isDriver ? (
-                      <Truck size={13} color="#7c3aed" />
-                    ) : (
-                      <UserCheck size={13} color={COLORS.accentDark} />
-                    )}
-                    <Text style={styles.infoText}>
-                      {isDriver ? 'Driver: ' : 'Manager: '}
-                      <Text style={{ fontWeight: '700', color: COLORS.text }}>
-                        {isDriver
-                          ? (adv.driver_name || `Driver #${adv.driver_id}`)
-                          : (adv.manager_name || `Manager #${adv.manager_id}`)}
-                      </Text>
-                      {isDriver && adv.lorry_number ? (
-                        <Text style={{ color: COLORS.textMuted, fontSize: 11 }}>
-                          {` (${adv.lorry_number})`}
-                        </Text>
-                      ) : null}
+                <View style={styles.detailBlock}>
+                  <Text style={styles.detailLine}>
+                    <Text style={styles.detailLabel}>Given by owner: </Text>
+                    {adv.owner_name || `Owner #${adv.owner_id}`}
+                  </Text>
+                  <Text style={styles.detailLine}>
+                    <Text style={styles.detailLabel}>Received by: </Text>
+                    {isDriver
+                      ? `${adv.driver_name || `Driver #${adv.driver_id}`}${adv.lorry_number ? ` · ${adv.lorry_number}` : ''}`
+                      : (adv.manager_name || `Manager #${adv.manager_id}`)}
+                  </Text>
+                  <Text style={styles.detailLine}>
+                    <Text style={styles.detailLabel}>Date: </Text>
+                    {formatDateDMY(adv.advance_date)}
+                    <Text style={styles.detailLabel}>  ·  Mode: </Text>
+                    {adv.payment_mode || 'CASH'}
+                  </Text>
+                  {adv.created_by_name ? (
+                    <Text style={styles.detailLine}>
+                      <Text style={styles.detailLabel}>Recorded by: </Text>
+                      {adv.created_by_name}
                     </Text>
-                  </View>
-                  <View style={styles.infoItem}>
-                    <Calendar size={13} color={COLORS.textMuted} />
-                    <Text style={styles.infoText}>{formatDateDMY(adv.advance_date)}</Text>
-                  </View>
-                </View>
-
-                <View style={styles.modeRow}>
-                  <View style={styles.modeBadge}>
-                    <CreditCard size={11} color="#047857" />
-                    <Text style={styles.modeBadgeText}>{adv.payment_mode || 'CASH'}</Text>
-                  </View>
+                  ) : null}
                   {adv.notes ? (
-                    <Text style={styles.notesText} numberOfLines={1}>
-                      Note: {adv.notes}
+                    <Text style={styles.detailLine}>
+                      <Text style={styles.detailLabel}>Notes: </Text>
+                      {adv.notes}
                     </Text>
                   ) : null}
                 </View>
 
                 {/* Action Buttons */}
                 <View style={styles.cardActions}>
+                  <ViewChip compact onPress={() => setViewAdvance(adv)} />
                   <TouchableOpacity
                     style={[styles.actionBtn, { backgroundColor: '#eff6ff' }]}
                     onPress={() => openEditModal(adv)}
@@ -746,6 +750,21 @@ export const AdminOwnerAdvancesScreen: React.FC<{ navigation: any }> = ({ naviga
         }}
         onClose={() => setDatePickerTarget(null)}
       />
+      <DetailsSheet
+        visible={!!viewAdvance}
+        title={viewAdvance ? `Owner advance #${viewAdvance.id}` : 'Advance details'}
+        rows={viewAdvance ? [
+          { label: 'Owner', value: viewAdvance.owner_name },
+          { label: 'Given to', value: viewAdvance.recipient_type === 'DRIVER' ? (viewAdvance.driver_name || 'Driver') : (viewAdvance.manager_name || 'Manager') },
+          { label: 'Lorry', value: viewAdvance.lorry_number || '—' },
+          { label: 'Amount', value: `₹${Number(viewAdvance.amount || 0).toLocaleString('en-IN')}` },
+          { label: 'Date', value: formatDateDMY(viewAdvance.advance_date) },
+          { label: 'Mode', value: viewAdvance.payment_mode || 'CASH' },
+          { label: 'Notes', value: viewAdvance.notes || '—' },
+          { label: 'Recorded by', value: viewAdvance.created_by_name || '—' },
+        ] : []}
+        onClose={() => setViewAdvance(null)}
+      />
     </View>
   );
 };
@@ -783,19 +802,37 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: COLORS.text,
   },
-  addBtn: {
+  giveAdvanceBanner: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
-    backgroundColor: COLORS.primary,
-    paddingHorizontal: 14,
-    paddingVertical: 8,
+    justifyContent: 'center',
+    gap: 8,
+    backgroundColor: '#d97706',
+    paddingVertical: 12,
     borderRadius: RADIUS.md,
+    marginBottom: 10,
   },
-  addBtnText: {
+  giveAdvanceBannerText: {
     color: COLORS.white,
-    fontSize: 12,
+    fontSize: 15,
     fontWeight: '800',
+    letterSpacing: 0.3,
+  },
+  detailBlock: {
+    backgroundColor: '#f8fafc',
+    borderRadius: RADIUS.sm,
+    padding: 10,
+    marginTop: 4,
+    gap: 4,
+  },
+  detailLine: {
+    fontSize: 12.5,
+    color: COLORS.text,
+    lineHeight: 18,
+  },
+  detailLabel: {
+    fontWeight: '700',
+    color: COLORS.textMuted,
   },
   summaryCard: {
     backgroundColor: '#0f172a',

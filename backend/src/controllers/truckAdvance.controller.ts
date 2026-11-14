@@ -3,7 +3,7 @@ import { query } from '../config/database';
 import { AppError, asyncHandler } from '../middleware/errorHandler';
 import { AuthRequest } from '../middleware/auth';
 import { createAuditLog } from '../utils/auditLog';
-import { applyVehicleScope, assertOwnerVehicle, hasFleetWideAccess, isLinkedManager, isOwnerUser } from '../utils/ownerScope';
+import { applyVehicleScope, assertOwnerVehicle, hasFleetWideAccess, isLinkedManager, isOwnerUser, sqlIsCompanyOperator, sqlSelfOrCompany } from '../utils/ownerScope';
 import { reconcileDriverPendingSettlements } from './settlement.controller';
 
 // ===== TRUCK ADVANCES =====
@@ -137,8 +137,8 @@ export const getTruckAdvances = asyncHandler(async (req: AuthRequest, res: Respo
     paramIdx++;
   }
   paramIdx = applyVehicleScope(req, conditions, params, paramIdx, 'ta.vehicle_id');
-  if (!hasFleetWideAccess(req) && req.user?.id && !manager_id && !isLinkedManager(req)) {
-    conditions.push(`ta.manager_id = $${paramIdx}`);
+  if (!isOwnerUser(req) && !hasFleetWideAccess(req) && req.user?.id && !manager_id && !isLinkedManager(req)) {
+    conditions.push(`(${sqlSelfOrCompany('ta.manager_id', `$${paramIdx}`)} OR ${sqlIsCompanyOperator('ta.created_by')})`);
     params.push(req.user.id);
     paramIdx++;
   }

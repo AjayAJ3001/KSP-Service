@@ -33,15 +33,21 @@ import {
   Calendar,
 } from 'lucide-react-native';
 import { adminTripService, adminOwnerService, adminVehicleService } from '../../services/adminService';
+import { useAuth } from '../../context/AuthContext';
 import { Trip, Owner, Vehicle } from '../../types';
 import { COLORS, SPACING, RADIUS, SHADOWS } from '../../constants/theme';
 import { formatDateDMY } from '../../utils/dateUtils';
 import { downloadTripPdf, downloadReportsPdf, printReportsPdf } from '../../utils/pdfGenerator';
 import { DatePickerModal, toDisplayDate } from '../../components/DatePickerModal';
+import { DetailsSheet } from '../../components/DetailsSheet';
+import { ViewChip } from '../../components/ViewChip';
+import { expenseLinesFromItems } from '../../utils/expenseBreakdown';
 
 type TripStatusFilter = 'ALL' | 'NEW' | 'PAYMENT_PENDING' | 'PARTIALLY_PAID' | 'SETTLED' | 'CANCELLED';
 
 export const AdminTripsScreen: React.FC<{ navigation: any }> = ({ navigation }) => {
+  const { user } = useAuth();
+  const isOwnerUser = user?.role === 'OWNER';
   const [trips, setTrips] = useState<Trip[]>([]);
   const [owners, setOwners] = useState<Owner[]>([]);
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
@@ -56,7 +62,9 @@ export const AdminTripsScreen: React.FC<{ navigation: any }> = ({ navigation }) 
   const [pdfLoading, setPdfLoading] = useState<string | null>(null);
   const [fromDate, setFromDate] = useState('');
   const [toDate, setToDate] = useState('');
-  const [datePickerTarget, setDatePickerTarget] = useState<'from' | 'to' | null>(null);
+  const [datePickerTarget, setDatePickerTarget] = useState<'from' | 'to' | 'trip' | null>(null);
+  const [editingTrip, setEditingTrip] = useState<Trip | null>(null);
+  const [viewTrip, setViewTrip] = useState<Trip | null>(null);
 
   // Available vehicles filtered dynamically by selected owner
   const availableVehicles = useMemo(() => {
@@ -67,18 +75,18 @@ export const AdminTripsScreen: React.FC<{ navigation: any }> = ({ navigation }) 
   // Modal options filtered by search term
   const modalItems = useMemo(() => {
     if (pickerModalType === 'owner') {
-      const allOwnersOption = { id: '', name: 'All Owners', mobile: '' };
+      const allOwnersOption = { id: '', name: isOwnerUser ? 'My Trucks (All)' : 'All Owners', mobile: '' };
       const list = owners.map(o => ({ id: String(o.id), name: o.name, mobile: (o as any).mobile_number || '' }));
-      if (!modalSearch.trim()) return [allOwnersOption, ...list];
+      if (!modalSearch.trim()) return isOwnerUser ? list : [allOwnersOption, ...list];
       const q = modalSearch.toLowerCase();
-      return [
-        allOwnersOption,
-        ...list.filter(o => o.name.toLowerCase().includes(q) || (o.mobile && o.mobile.includes(q)))
-      ];
+      const filtered = list.filter(o => o.name.toLowerCase().includes(q) || (o.mobile && o.mobile.includes(q)));
+      return isOwnerUser ? filtered : [allOwnersOption, ...filtered];
     } else if (pickerModalType === 'vehicle') {
       const allVehiclesOption = {
         id: '',
-        lorry_number: ownerFilter ? `All Trucks for Owner (${availableVehicles.length})` : 'All Trucks / Lorries',
+        lorry_number: ownerFilter
+          ? `All Trucks for Owner (${availableVehicles.length})`
+          : (isOwnerUser ? 'My Trucks' : 'All Trucks / Lorries'),
         owner_name: ''
       };
       const list = availableVehicles.map(v => ({ id: String(v.id), lorry_number: v.lorry_number, owner_name: v.owner_name || '' }));
@@ -90,7 +98,7 @@ export const AdminTripsScreen: React.FC<{ navigation: any }> = ({ navigation }) 
       ];
     }
     return [];
-  }, [pickerModalType, owners, availableVehicles, ownerFilter, modalSearch]);
+  }, [pickerModalType, owners, availableVehicles, ownerFilter, modalSearch, isOwnerUser]);
 
   const hasActiveFilters = Boolean(search || statusFilter !== 'ALL' || ownerFilter || vehicleFilter || fromDate || toDate);
 
@@ -501,7 +509,19 @@ export const AdminTripsScreen: React.FC<{ navigation: any }> = ({ navigation }) 
 
               {/* Driver & Date footer */}
               <View style={styles.metaRow}>
-                <Text style={styles.metaText}>📅 {formatDateDMY(t.trip_date)}</Text>
+                <TouchableOpacity
+                  style={styles.dateEditBtn}
+                  onPress={() => {
+                    setEditingTrip(t);
+                    setDatePickerTarget('trip');
+                  }}
+                >
+                  <Calendar size={13} color="#1d4ed8" />
+                  <Text style={[styles.metaText, { color: '#1d4ed8', fontWeight: '800' }]}>
+                    {formatDateDMY(t.trip_date)}
+                  </Text>
+                  <Text style={styles.dateEditHint}>Edit</Text>
+                </TouchableOpacity>
                 <Text style={styles.metaText}>👤 {t.driver_name || 'No driver'}</Text>
               </View>
 
@@ -516,6 +536,7 @@ export const AdminTripsScreen: React.FC<{ navigation: any }> = ({ navigation }) 
 
               {/* Action Buttons: Challan PDF, Party Payment, Driver Expenses, Settlement Slip */}
               <View style={styles.cardActions}>
+                <ViewChip compact onPress={() => setViewTrip(t)} />
                 <TouchableOpacity
                   style={[styles.actionBtn, { backgroundColor: '#fef2f2', borderColor: '#fca5a5', borderWidth: 1 }]}
                   onPress={() => handleDownloadTripChallan(t)}
@@ -676,14 +697,67 @@ export const AdminTripsScreen: React.FC<{ navigation: any }> = ({ navigation }) 
       {/* Calendar Date Picker Modal */}
       <DatePickerModal
         visible={datePickerTarget !== null}
-        value={datePickerTarget === 'from' ? fromDate : toDate}
-        title={datePickerTarget === 'from' ? 'Filter: From Date' : 'Filter: To Date'}
-        onConfirm={(isoDate) => {
-          if (datePickerTarget === 'from') setFromDate(isoDate);
-          else if (datePickerTarget === 'to') setToDate(isoDate);
-          setDatePickerTarget(null);
+        value={
+          datePickerTarget === 'from'
+            ? fromDate
+            : datePickerTarget === 'to'
+              ? toDate
+              : (editingTrip?.trip_date || '')
+        }
+        title={
+          datePickerTarget === 'from'
+            ? 'Filter: From Date'
+            : datePickerTarget === 'to'
+              ? 'Filter: To Date'
+              : 'Edit Trip Date'
+        }
+        onConfirm={async (isoDate) => {
+          if (datePickerTarget === 'from') {
+            setFromDate(isoDate);
+            setDatePickerTarget(null);
+            return;
+          }
+          if (datePickerTarget === 'to') {
+            setToDate(isoDate);
+            setDatePickerTarget(null);
+            return;
+          }
+          if (editingTrip) {
+            try {
+              await adminTripService.updateTrip(editingTrip.id, { trip_date: isoDate });
+              setTrips((prev) =>
+                prev.map((item) => (item.id === editingTrip.id ? { ...item, trip_date: isoDate } : item))
+              );
+            } catch (err: any) {
+              Alert.alert('Update Failed', err.message || 'Could not update trip date.');
+            } finally {
+              setEditingTrip(null);
+              setDatePickerTarget(null);
+            }
+          }
         }}
-        onClose={() => setDatePickerTarget(null)}
+        onClose={() => {
+          setDatePickerTarget(null);
+          setEditingTrip(null);
+        }}
+      />
+      <DetailsSheet
+        visible={!!viewTrip}
+        title={viewTrip ? `Trip #${viewTrip.id}` : 'Trip details'}
+        rows={viewTrip ? [
+          { label: 'Lorry', value: viewTrip.lorry_number },
+          { label: 'Date', value: formatDateDMY(viewTrip.trip_date) },
+          { label: 'Party', value: viewTrip.party_name },
+          { label: 'Driver', value: viewTrip.driver_name },
+          { label: 'Owner', value: viewTrip.owner_name || '—' },
+          { label: 'Route', value: `${viewTrip.from_location || '—'} → ${viewTrip.to_location || '—'}` },
+          { label: 'Freight', value: formatCurrency(viewTrip.total_freight) },
+          { label: 'Advance', value: formatCurrency(viewTrip.advance_paid) },
+          { label: 'Expenses', value: formatCurrency(viewTrip.total_expenses || 0) },
+          ...expenseLinesFromItems(viewTrip.expense_items).map((l) => ({ label: l.label, value: formatCurrency(l.amount) })),
+          { label: 'Status', value: viewTrip.status },
+        ] : []}
+        onClose={() => setViewTrip(null)}
       />
     </View>
   );
@@ -926,6 +1000,22 @@ const styles = StyleSheet.create({
   metaText: {
     fontSize: 11,
     color: COLORS.textLight,
+  },
+  dateEditBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: '#eff6ff',
+    borderWidth: 1,
+    borderColor: '#bfdbfe',
+    borderRadius: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+  },
+  dateEditHint: {
+    fontSize: 10,
+    fontWeight: '800',
+    color: '#1d4ed8',
   },
   cardActions: {
     flexDirection: 'row',

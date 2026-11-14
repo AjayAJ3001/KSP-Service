@@ -3,7 +3,7 @@ import { query, getClient } from '../config/database';
 import { AppError, asyncHandler } from '../middleware/errorHandler';
 import { AuthRequest } from '../middleware/auth';
 import { createAuditLog } from '../utils/auditLog';
-import { applyVehicleScope, assertOwnerVehicle, hasFleetWideAccess, isFleetScoped } from '../utils/ownerScope';
+import { applyOwnerScope, applyVehicleScope, assertOwnerVehicle, assertOwnerVehicleAsync, assertTripInOwnerScope, hasFleetWideAccess, isCompanyOperatorUserId, isFleetScoped, sqlManagerVisibleTrip } from '../utils/ownerScope';
 import { matchWeighBillToTrip, normalizeVehicleNo, parseWeighBillText, vehicleNosMatch } from '../utils/parseWeighBill';
 import { decodeBillImage, hashBillImage, ocrWeighBill } from '../utils/weighBillOcr';
 
@@ -152,8 +152,11 @@ export const getTrips = asyncHandler(async (req: AuthRequest, res: Response): Pr
 
   if (isFleetScoped(req)) {
     paramIdx = applyVehicleScope(req, conditions, params, paramIdx, 't.vehicle_id');
+    paramIdx = applyOwnerScope(req, conditions, params, paramIdx, 'v.owner_id');
   } else if (!hasFleetWideAccess(req) && req.user?.id) {
-    conditions.push(`t.created_by = $${paramIdx}`); params.push(req.user.id); paramIdx++;
+    conditions.push(sqlManagerVisibleTrip('t.created_by', 't.vehicle_id', `$${paramIdx}`));
+    params.push(req.user.id);
+    paramIdx++;
   } else if (created_by) {
     conditions.push(`t.created_by = $${paramIdx}`); params.push(created_by); paramIdx++;
   }
@@ -213,8 +216,24 @@ export const getTrips = asyncHandler(async (req: AuthRequest, res: Response): Pr
             COALESCE(s.prior_deficit_deduction, t.prior_deficit_deduction, 0) as prior_deficit_deduction,
             COALESCE(s.total_expenses, COALESCE(exp.total_expenses, 0)) as total_expenses,
             (COALESCE(s.advance_paid, t.advance_paid) - COALESCE(s.total_expenses, COALESCE(exp.total_expenses, 0))) as trip_driver_balance,
-            '[]'::json as expense_items,
-            '[]'::json as truck_advances
+            (
+              SELECT COALESCE(
+                json_agg(
+                  json_build_object(
+                    'id', de.id,
+                    'expense_type', de.expense_type,
+                    'description', de.description,
+                    'amount', de.amount
+                  ) ORDER BY de.id ASC
+                ),
+                '[]'::json
+              )
+              FROM driver_expenses de
+              WHERE de.trip_id = t.id
+            ) as expense_items,
+            '[]'::json as truck_advances,
+            cu.name as created_by_name,
+            cu.role as created_by_role
      FROM trips t
      JOIN vehicles v ON t.vehicle_id = v.id
      LEFT JOIN owners o ON v.owner_id = o.id
@@ -233,6 +252,7 @@ export const getTrips = asyncHandler(async (req: AuthRequest, res: Response): Pr
        FROM driver_expenses
        GROUP BY trip_id
      ) exp ON exp.trip_id = t.id
+     LEFT JOIN users cu ON t.created_by = cu.id
      WHERE ${where}
      ORDER BY t.trip_date DESC, t.created_at DESC
      LIMIT $${paramIdx} OFFSET $${paramIdx + 1}`;
@@ -254,6 +274,7 @@ export const getTripById = asyncHandler(async (req: AuthRequest, res: Response):
             GREATEST(0, COALESCE(s.advance_paid, t.advance_paid) - COALESCE(t.advance_paid, 0)) as additional_advance_paid,
             v.lorry_number, v.goodshed_loading_expense,
             o.id as owner_id, o.name as owner_name, o.mobile_number as owner_mobile,
+            cu.name as created_by_name, cu.role as created_by_role,
             d.name as driver_name, d.mobile_number as driver_mobile,
             p.name as party_name, p.mobile_number as party_mobile,
             r.from_location, r.to_location, u.name as unit_name, u.abbreviation as unit_abbreviation,
@@ -310,6 +331,7 @@ export const getTripById = asyncHandler(async (req: AuthRequest, res: Response):
      JOIN routes r ON t.route_id = r.id
      JOIN units u ON t.unit_id = u.id
      LEFT JOIN settlements s ON s.trip_id = t.id
+     LEFT JOIN users cu ON t.created_by = cu.id
      WHERE t.id = $1`,
     [req.params.id]
   );
@@ -317,9 +339,16 @@ export const getTripById = asyncHandler(async (req: AuthRequest, res: Response):
   if (result.rows.length === 0) throw new AppError('Trip not found.', 404);
 
   if (isFleetScoped(req)) {
-    assertOwnerVehicle(req, result.rows[0].vehicle_id);
+    await assertOwnerVehicleAsync(req, result.rows[0].vehicle_id);
   } else if (!hasFleetWideAccess(req) && req.user?.id && result.rows[0].created_by !== req.user.id) {
-    throw new AppError('You do not have permission to view this trip.', 403);
+    const companyTrip = await isCompanyOperatorUserId(result.rows[0].created_by);
+    const linkedOwnerTrip =
+      req.user.ownerIds?.length &&
+      result.rows[0].owner_id &&
+      req.user.ownerIds.includes(parseInt(String(result.rows[0].owner_id), 10));
+    if (!companyTrip && !linkedOwnerTrip) {
+      throw new AppError('You do not have permission to view this trip.', 403);
+    }
   }
 
   res.json({ success: true, message: 'Trip retrieved.', data: result.rows[0] });
@@ -581,6 +610,38 @@ export const deleteDraftTrip = asyncHandler(async (req: AuthRequest, res: Respon
   res.json({ success: true, message: 'Draft trip discarded successfully.' });
 });
 
+
+const normalizeTripDateInput = (trip_date: string): string => {
+  const raw = String(trip_date || '').trim();
+  if (/^\d{2}-\d{2}-\d{4}$/.test(raw)) {
+    const [d, m, y] = raw.split('-');
+    return `${y}-${m}-${d}`;
+  }
+  if (/^\d{4}-\d{2}-\d{2}/.test(raw)) return raw.slice(0, 10);
+  throw new AppError('Invalid trip date. Use DD-MM-YYYY.', 400);
+};
+
+export const updateTrip = asyncHandler(async (req: AuthRequest, res: Response): Promise<void> => {
+  const { id } = req.params;
+  const { trip_date } = req.body;
+  if (!trip_date) throw new AppError('Trip date is required.', 400);
+
+  await assertTripInOwnerScope(req, id);
+  const existing = await query('SELECT id, trip_date FROM trips WHERE id = $1', [id]);
+  if (existing.rows.length === 0) throw new AppError('Trip not found.', 404);
+
+  const normalized = normalizeTripDateInput(trip_date);
+  const result = await query(
+    `UPDATE trips SET trip_date = $1, updated_at = NOW() WHERE id = $2 RETURNING *`,
+    [normalized, id]
+  );
+
+  await createAuditLog(req.user?.id, 'UPDATE_TRIP_DATE', 'TRIPS', id, {
+    from: existing.rows[0].trip_date,
+    to: normalized,
+  });
+  res.json({ success: true, message: 'Trip date updated.', data: result.rows[0] });
+});
 
 export const updateTripStatus = asyncHandler(async (req: AuthRequest, res: Response): Promise<void> => {
   const { status } = req.body;

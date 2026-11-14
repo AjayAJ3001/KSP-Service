@@ -22,12 +22,13 @@ import {
   Truck,
   User as UserIcon,
 } from 'lucide-react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import * as XLSX from 'xlsx';
 import { ownerAdvanceService, ownerService, userService, driverService, vehicleService } from '../services/adminService';
 import { OwnerAdvance, Owner, User, Driver, Vehicle } from '../types';
 import { DataTable, Column } from '../components/Common/DataTable';
 import { Modal } from '../components/Common/Modal';
+import { ViewButton, DetailsModal } from '../components/Common/ViewDetails';
 import { formatIST } from '../utils/dateUtils';
 import { DateField } from '../components/Common/DateField';
 import { useAuth } from '../context/AuthContext';
@@ -35,6 +36,8 @@ import { PRINT_BRAND_CSS, printBrandLockup } from '../utils/printBrand';
 
 export const OwnerAdvancesPage: React.FC = () => {
   const { user: authUser } = useAuth();
+  const isOwnerUser = authUser?.role === 'OWNER';
+  const [searchParams, setSearchParams] = useSearchParams();
   const [advances, setAdvances] = useState<OwnerAdvance[]>([]);
   const [owners, setOwners] = useState<Owner[]>([]);
   const [managers, setManagers] = useState<User[]>([]);
@@ -87,6 +90,7 @@ export const OwnerAdvancesPage: React.FC = () => {
 
   // Screenshot Preview Modal
   const [previewImage, setPreviewImage] = useState<string | null>(null);
+  const [viewAdvance, setViewAdvance] = useState<OwnerAdvance | null>(null);
 
   useEffect(() => {
     loadLookups();
@@ -233,6 +237,22 @@ export const OwnerAdvancesPage: React.FC = () => {
     resetForm();
     setIsModalOpen(true);
   };
+
+  useEffect(() => {
+    if (searchParams.get('give') === '1') {
+      const ownerId = searchParams.get('owner_id') || '';
+      setSelectedAdvance(null);
+      resetForm();
+      if (ownerId) {
+        setFormData((prev) => ({ ...prev, owner_id: ownerId }));
+      }
+      setIsModalOpen(true);
+      const next = new URLSearchParams(searchParams);
+      next.delete('give');
+      next.delete('owner_id');
+      setSearchParams(next, { replace: true });
+    }
+  }, []);
 
   const openEditModal = (item: OwnerAdvance) => {
     setSelectedAdvance(item);
@@ -386,6 +406,7 @@ export const OwnerAdvancesPage: React.FC = () => {
           'Received By': recipientName,
           'Advance Amount (₹)': Number(item.amount) || 0,
           'Payment Mode': item.payment_mode || 'CASH',
+          'Recorded By': item.created_by_name || '—',
           'Notes / Remarks': item.notes || '—',
         };
       });
@@ -401,6 +422,7 @@ export const OwnerAdvancesPage: React.FC = () => {
         'Received By': '',
         'Advance Amount (₹)': '' as any,
         'Payment Mode': '',
+        'Recorded By': '',
         'Notes / Remarks': '',
       });
 
@@ -412,6 +434,7 @@ export const OwnerAdvancesPage: React.FC = () => {
         'Received By': '',
         'Advance Amount (₹)': sumAmount,
         'Payment Mode': '',
+        'Recorded By': '',
         'Notes / Remarks': '',
       });
 
@@ -424,6 +447,7 @@ export const OwnerAdvancesPage: React.FC = () => {
         { wch: 26 }, // Received By
         { wch: 20 }, // Advance Amount
         { wch: 22 }, // Payment Mode
+        { wch: 20 }, // Recorded By
         { wch: 35 }, // Notes
       ];
 
@@ -908,9 +932,18 @@ export const OwnerAdvancesPage: React.FC = () => {
       accessor: (r) => r.notes || <span style={{ color: 'var(--text-muted)', fontStyle: 'italic' }}>—</span>,
     },
     {
+      header: 'Recorded By',
+      accessor: (r) => (
+        <span style={{ fontSize: '12.5px', fontWeight: 600, color: '#334155' }}>
+          {r.created_by_name || '—'}
+        </span>
+      ),
+    },
+    {
       header: 'Actions',
       render: (r) => (
         <div style={{ display: 'flex', gap: '6px' }}>
+          <ViewButton onClick={() => setViewAdvance(r)} />
           <button
             onClick={() => handlePrintSingleAdvance(r)}
             className="btn btn-outline btn-sm"
@@ -954,9 +987,6 @@ export const OwnerAdvancesPage: React.FC = () => {
               <HandCoins size={24} color="var(--accent)" />
               Owner Advances Management
             </h2>
-            <button onClick={openCreateModal} className="btn btn-primary" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-              <Plus size={18} /> Record Owner Advance
-            </button>
             <Link
               to="/manager-advances"
               className="btn btn-outline"
@@ -975,9 +1005,47 @@ export const OwnerAdvancesPage: React.FC = () => {
             </Link>
           </div>
           <p style={{ color: 'var(--text-muted)', fontSize: '13.5px', marginTop: '6px', marginBottom: 0 }}>
-            Record cash & UPI advances given by owners and received by managers with automatic date & time tracking
+            Details of every advance given by owners to managers or drivers — amount, recipient, date, mode, and notes
           </p>
         </div>
+      </div>
+
+      <div
+        style={{
+          marginBottom: '16px',
+          padding: '14px 18px',
+          borderRadius: '12px',
+          background: 'linear-gradient(135deg, #fff7ed 0%, #ffedd5 100%)',
+          border: '1px solid #fdba74',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: '12px',
+          flexWrap: 'wrap',
+        }}
+      >
+        <div>
+          <div style={{ fontWeight: 800, color: '#9a3412', fontSize: '15px' }}>+ Give Advance</div>
+          <div style={{ fontSize: '12.5px', color: '#9a3412', opacity: 0.85 }}>
+            Record a new owner advance to a manager or driver
+          </div>
+        </div>
+        <button
+          onClick={openCreateModal}
+          className="btn btn-primary"
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '8px',
+            background: 'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)',
+            border: 'none',
+            fontWeight: 800,
+            padding: '12px 22px',
+            fontSize: '15px',
+          }}
+        >
+          <Plus size={20} /> Give Advance
+        </button>
       </div>
 
       {/* Filters Bar */}
@@ -1023,7 +1091,7 @@ export const OwnerAdvancesPage: React.FC = () => {
               }}
               style={{ width: '100%' }}
             >
-              <option value="">All Owners</option>
+              <option value="">{isOwnerUser ? 'My Trucks' : 'All Owners'}</option>
               {owners.map((o) => (
                 <option key={o.id} value={o.id}>
                   {o.name}
@@ -1212,7 +1280,7 @@ export const OwnerAdvancesPage: React.FC = () => {
           page={page}
           limit={10}
           onPageChange={setPage}
-          emptyMessage="No owner advances recorded yet. Click 'Record Owner Advance' to add one."
+          emptyMessage="No owner advances recorded yet. Click '+ Give Advance' to add one."
           footer={
             advances.length > 0 ? (
               <tr style={{ background: '#f8fafc', fontWeight: 800, borderTop: '2px solid var(--border-medium, #cbd5e1)' }}>
@@ -1596,6 +1664,21 @@ export const OwnerAdvancesPage: React.FC = () => {
           </div>
         </Modal>
       )}
+      <DetailsModal
+        isOpen={!!viewAdvance}
+        onClose={() => setViewAdvance(null)}
+        title={viewAdvance ? `Owner advance #${viewAdvance.id}` : 'Advance details'}
+        rows={viewAdvance ? [
+          { label: 'Owner', value: viewAdvance.owner_name },
+          { label: 'Given to', value: viewAdvance.recipient_type === 'DRIVER' ? (viewAdvance.driver_name || 'Driver') : (viewAdvance.manager_name || 'Manager') },
+          { label: 'Lorry', value: viewAdvance.lorry_number || '—' },
+          { label: 'Amount', value: formatCurrency(viewAdvance.amount) },
+          { label: 'Date', value: formatIST(viewAdvance.advance_date) },
+          { label: 'Mode', value: viewAdvance.payment_mode || '—' },
+          { label: 'Notes', value: viewAdvance.notes || '—' },
+          { label: 'Recorded by', value: viewAdvance.created_by_name || '—' },
+        ] : []}
+      />
     </div>
   );
 };

@@ -14,6 +14,9 @@ import { StatusBadge } from '../components/Common/StatusBadge';
 import { formatDateDMY } from '../utils/dateUtils';
 import { DateField } from '../components/Common/DateField';
 import { PRINT_BRAND_CSS, printBrandLockup } from '../utils/printBrand';
+import { formatExpenseType } from '../utils/expenseBreakdown';
+import { PdfPreviewModal } from '../components/Common/PdfPreviewModal';
+import { useAuth } from '../context/AuthContext';
 
 function getThisWeekRange() {
   const today = new Date();
@@ -31,6 +34,8 @@ function getThisWeekRange() {
 }
 
 export const SettlementsPage: React.FC = () => {
+  const { user } = useAuth();
+  const isOwnerUser = user?.role === 'OWNER';
   const [settlements, setSettlements] = useState<Settlement[]>([]);
   const [unsettledTrips, setUnsettledTrips] = useState<Trip[]>([]);
   const [total, setTotal] = useState(0);
@@ -54,6 +59,8 @@ export const SettlementsPage: React.FC = () => {
   const [isGenerateModalOpen, setIsGenerateModalOpen] = useState(false);
   const [isSlipModalOpen, setIsSlipModalOpen] = useState(false);
   const [selectedSettlement, setSelectedSettlement] = useState<Settlement | null>(null);
+  const [pdfHtml, setPdfHtml] = useState<string | null>(null);
+  const [pdfTitle, setPdfTitle] = useState('Settlement PDF');
   const [selectedTripToSettle, setSelectedTripToSettle] = useState<string>('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isDownloading, setIsDownloading] = useState(false);
@@ -523,7 +530,6 @@ export const SettlementsPage: React.FC = () => {
         <th style="width: 85px;">Lorry No</th>
         <th style="width: 95px;">Truck Owner</th>
         <th>Driver Name</th>
-        <th>Party Name</th>
         <th>Destination</th>
         <th class="num" style="width: 75px;">Freight (₹)</th>
         <th class="num" style="width: 70px;">Advance (₹)</th>
@@ -548,7 +554,6 @@ export const SettlementsPage: React.FC = () => {
           <td><strong>${s.lorry_number || '-'}</strong></td>
           <td>${s.owner_name || '-'}</td>
           <td>${s.driver_name || '-'}</td>
-          <td>${s.party_name || '-'}</td>
           <td>${s.to_location || s.from_location || '-'}</td>
           <td class="num">${Number(s.total_freight || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td>
           <td class="num">${(() => {
@@ -708,7 +713,7 @@ export const SettlementsPage: React.FC = () => {
     const tripAdvance = Math.round(Number(s.manager_advance ?? s.initial_trip_advance ?? 0));
     const ownerAdvance = Math.round(Number(s.owner_given || 0));
     const ownerApplied = Math.round(Number(s.owner_applied || 0));
-    const leftoverUsed = Math.round(Number(s.owner_leftover_used || 0));
+    const leftoverUsed = Math.round(Number(s.owner_leftover_used || s.previous_driver_balance || 0));
     const ownerBalance = Math.round(Number(s.owner_balance || 0));
     const priorDeficit = Math.round(Number(s.prior_deficit_deduction || 0));
     const effectiveAdvance = Math.max(0, tripAdvance - priorDeficit);
@@ -739,11 +744,14 @@ export const SettlementsPage: React.FC = () => {
       : Math.max(0, managerGiven - priorDeficit);
     const ownerGiven = Math.round(Number(s.owner_given || 0));
     const leftoverUsed = Math.round(Number(s.owner_leftover_used || 0));
+    const priorInHand = leftoverUsed > 0
+      ? leftoverUsed
+      : Math.round(Number(s.previous_driver_balance || 0));
     const ownerBal = Math.round(Number(s.owner_balance || 0));
     const cashPaid = s.payment_mode !== 'ADJUSTED_ADVANCE' ? Math.round(Number(s.paid_amount || 0)) : 0;
     if (s.owner_applied != null || s.owner_given != null || s.owner_balance != null || (s as any).effective_manager_advance != null) {
       if (ownerBal > 0) return -ownerBal;
-      return Math.max(0, expenses - manager - ownerGiven - leftoverUsed - cashPaid);
+      return Math.max(0, expenses - manager - ownerGiven - priorInHand - cashPaid);
     }
     if (s.net_balance_to_driver !== undefined && s.net_balance_to_driver !== null) {
       return parseFloat(String(s.net_balance_to_driver)) || 0;
@@ -890,7 +898,7 @@ export const SettlementsPage: React.FC = () => {
       ? s.expense_items.map((item, idx) => `
           <tr>
             <td style="text-align: center; padding: 6px 8px; border: 1px solid #cbd5e1; font-size: 11px;">${idx + 1}</td>
-            <td style="padding: 6px 8px; border: 1px solid #cbd5e1; font-weight: 700; font-size: 11.5px; color: #0f172a;">${item.expense_type}</td>
+            <td style="padding: 6px 8px; border: 1px solid #cbd5e1; font-weight: 700; font-size: 11.5px; color: #0f172a;">${formatExpenseType(item.expense_type)}</td>
             <td style="padding: 6px 8px; border: 1px solid #cbd5e1; font-size: 11px; color: #475569;">${item.description || '—'}</td>
             <td style="text-align: right; padding: 6px 8px; border: 1px solid #cbd5e1; font-weight: 700; font-size: 11.5px;">${formatCurrency(item.amount)}</td>
           </tr>
@@ -1185,20 +1193,20 @@ export const SettlementsPage: React.FC = () => {
           <span class="plate-box">${s.lorry_number}</span>
           ${s.owner_name ? `<div style="font-size: 10px; color: #4338ca; font-weight: 700; margin-top: 3px;">👤 ${s.owner_name}${s.owner_mobile ? ` (${s.owner_mobile})` : ''}</div>` : ''}
         </td>
-        <td class="info-label">Party / Consignor</td>
-        <td class="info-val">${s.party_name}</td>
-      </tr>
-      <tr>
         <td class="info-label">Driver Name</td>
         <td class="info-val">${s.driver_name}</td>
-        <td class="info-label">Destination / Unit</td>
-        <td class="info-val">${s.to_location || s.from_location || '—'}</td>
       </tr>
       <tr>
+        <td class="info-label">Destination / Unit</td>
+        <td class="info-val">${s.to_location || s.from_location || '—'}</td>
         <td class="info-label">Trip Dispatch Date</td>
         <td class="info-val">${tripDate}</td>
+      </tr>
+      <tr>
         <td class="info-label">Settlement Mode</td>
         <td class="info-val">${s.payment_mode || (isSettled ? 'CASH' : 'PENDING')}</td>
+        <td class="info-label"></td>
+        <td class="info-val"></td>
       </tr>
       ${getSlipCalc(s).advanceGivenBy || getSlipCalc(s).settledBy ? `
       <tr>
@@ -1449,12 +1457,18 @@ export const SettlementsPage: React.FC = () => {
       ),
     },
     { header: 'Freight', width: '100px', render: (s) => <span style={{ whiteSpace: 'nowrap' }}>{formatCurrency(s.total_freight)}</span> },
-    { header: 'Expenses', width: '100px', render: (s) => <span style={{ whiteSpace: 'nowrap' }}>{formatCurrency(s.total_expenses)}</span> },
+    {
+      header: 'Expenses',
+      width: '110px',
+      render: (s) => (
+        <span style={{ whiteSpace: 'nowrap', fontWeight: 800, color: '#b45309' }}>{formatCurrency(s.total_expenses)}</span>
+      ),
+    },
     {
       header: 'Advance',
       render: (s) => {
         const manager = Math.round(parseFloat(String(s.manager_advance ?? s.initial_trip_advance ?? 0)) || 0);
-        const leftoverUsed = Math.round(parseFloat(String(s.owner_leftover_used ?? 0)) || 0);
+        const leftoverUsed = Math.round(parseFloat(String(s.owner_leftover_used ?? s.previous_driver_balance ?? 0)) || 0);
         const ownerAdvance = Math.round(Number(s.owner_given || 0));
         const ownerAdvanceBal = Math.round(parseFloat(String(s.owner_balance ?? 0)) || 0);
         const isOwnerLeftover = leftoverUsed > 0 && ownerAdvance <= 0 && manager <= 0;
@@ -1478,6 +1492,9 @@ export const SettlementsPage: React.FC = () => {
         }
         if (ownerAdvanceBal > 0) {
           rows.push({ label: ownBalLabel, value: ownerAdvanceBal, color: '#047857', bg: '#ecfdf5' });
+        }
+        if (leftoverUsed > 0 && !isOwnerLeftover) {
+          rows.push({ label: 'Prior advance', value: leftoverUsed, color: '#047857', bg: '#ecfdf5' });
         }
         if (isOwnerLeftover) {
           rows.push({ label: ownBalLabel, value: leftoverUsed, color: '#047857', bg: '#ecfdf5' });
@@ -1630,8 +1647,8 @@ export const SettlementsPage: React.FC = () => {
       className: 'actions-cell',
       render: (s) => (
         <div className="table-actions">
-          <button onClick={() => openSlipModal(s)} className="btn btn-outline btn-sm" title="View Settlement Slip">
-            <Eye size={13} />
+          <button onClick={() => { setPdfTitle(`Settlement SETTLE-${s.id}`); setPdfHtml(buildChallanHtml(s)); }} className="btn btn-outline btn-sm" title="View Settlement PDF" style={{ display: 'inline-flex', alignItems: 'center', gap: 4, color: '#1d4ed8', borderColor: '#93c5fd', background: '#eff6ff', fontWeight: 700 }}>
+            <Eye size={13} /> View
           </button>
           {(s.settlement_status === 'PENDING' || s.settlement_status === 'VERIFIED') && (() => {
             const netBal = getNetBalance(s);
@@ -1769,7 +1786,7 @@ export const SettlementsPage: React.FC = () => {
                 setPage(1);
               }}
             >
-              <option value="">All Truck Owners</option>
+              <option value="">{isOwnerUser ? 'My Trucks' : 'All Truck Owners'}</option>
               {owners.map((o) => (
                 <option key={o.id} value={o.id}>{o.name} {o.mobile_number ? `(${o.mobile_number})` : ''}</option>
               ))}
@@ -2298,39 +2315,35 @@ export const SettlementsPage: React.FC = () => {
                       )}
                     </td>
                     <td style={{ padding: '6px 10px', fontSize: '10.5px', fontWeight: 700, background: '#f8fafc', color: '#475569', textTransform: 'uppercase', width: '20%', border: '1px solid #cbd5e1' }}>
-                      Party / Consignor
+                      Driver Name
                     </td>
                     <td style={{ padding: '6px 10px', fontSize: '11.5px', fontWeight: 700, color: '#0f172a', width: '30%', border: '1px solid #cbd5e1' }}>
-                      {selectedSettlement.party_name}
+                      {selectedSettlement.driver_name}
                     </td>
                   </tr>
                   <tr>
-                    <td style={{ padding: '6px 10px', fontSize: '10.5px', fontWeight: 700, background: '#f8fafc', color: '#475569', textTransform: 'uppercase', border: '1px solid #cbd5e1' }}>
-                      Driver Name
-                    </td>
-                    <td style={{ padding: '6px 10px', fontSize: '11.5px', fontWeight: 700, color: '#0f172a', border: '1px solid #cbd5e1' }}>
-                      {selectedSettlement.driver_name}
-                    </td>
                     <td style={{ padding: '6px 10px', fontSize: '10.5px', fontWeight: 700, background: '#f8fafc', color: '#475569', textTransform: 'uppercase', border: '1px solid #cbd5e1' }}>
                       Destination / Unit
                     </td>
                     <td style={{ padding: '6px 10px', fontSize: '11.5px', fontWeight: 700, color: '#0f172a', border: '1px solid #cbd5e1' }}>
                       {selectedSettlement.to_location || selectedSettlement.from_location || '—'}
                     </td>
-                  </tr>
-                  <tr>
                     <td style={{ padding: '6px 10px', fontSize: '10.5px', fontWeight: 700, background: '#f8fafc', color: '#475569', textTransform: 'uppercase', border: '1px solid #cbd5e1' }}>
                       Trip Dispatch Date
                     </td>
                     <td style={{ padding: '6px 10px', fontSize: '11.5px', fontWeight: 700, color: '#0f172a', border: '1px solid #cbd5e1' }}>
                       {selectedSettlement.trip_date ? formatDateDMY(selectedSettlement.trip_date) : '—'}
                     </td>
+                  </tr>
+                  <tr>
                     <td style={{ padding: '6px 10px', fontSize: '10.5px', fontWeight: 700, background: '#f8fafc', color: '#475569', textTransform: 'uppercase', border: '1px solid #cbd5e1' }}>
                       Settlement Mode
                     </td>
                     <td style={{ padding: '6px 10px', fontSize: '11.5px', fontWeight: 700, color: '#0f172a', border: '1px solid #cbd5e1' }}>
                       {selectedSettlement.payment_mode || (selectedSettlement.settlement_status === 'SETTLED' ? 'CASH' : 'PENDING')}
                     </td>
+                    <td style={{ padding: '6px 10px', fontSize: '10.5px', fontWeight: 700, background: '#f8fafc', color: '#475569', textTransform: 'uppercase', border: '1px solid #cbd5e1' }} />
+                    <td style={{ padding: '6px 10px', fontSize: '11.5px', fontWeight: 700, color: '#0f172a', border: '1px solid #cbd5e1' }} />
                   </tr>
                   {(getSlipCalc(selectedSettlement).advanceGivenBy || getSlipCalc(selectedSettlement).settledBy) && (
                     <tr>
@@ -2369,7 +2382,7 @@ export const SettlementsPage: React.FC = () => {
                     selectedSettlement.expense_items.map((it, idx) => (
                       <tr key={idx}>
                         <td style={{ textAlign: 'center', padding: '6px 8px', border: '1px solid #cbd5e1', fontSize: '11px' }}>{idx + 1}</td>
-                        <td style={{ padding: '6px 8px', border: '1px solid #cbd5e1', fontWeight: 700, fontSize: '11.5px', color: '#0f172a' }}>{it.expense_type}</td>
+                        <td style={{ padding: '6px 8px', border: '1px solid #cbd5e1', fontWeight: 700, fontSize: '11.5px', color: '#0f172a' }}>{formatExpenseType(it.expense_type)}</td>
                         <td style={{ padding: '6px 8px', border: '1px solid #cbd5e1', fontSize: '11px', color: '#475569' }}>{it.description || '—'}</td>
                         <td style={{ textAlign: 'right', padding: '6px 8px', border: '1px solid #cbd5e1', fontWeight: 700, fontSize: '11.5px' }}>{formatCurrency(it.amount)}</td>
                       </tr>
@@ -2716,6 +2729,12 @@ export const SettlementsPage: React.FC = () => {
           </div>
         </div>
       </Modal>
+      <PdfPreviewModal
+        isOpen={!!pdfHtml}
+        title={pdfTitle}
+        html={pdfHtml}
+        onClose={() => setPdfHtml(null)}
+      />
     </div>
   );
 };

@@ -4,6 +4,7 @@ import { driverBataRateService } from '../services/adminService';
 import { DriverBataRate } from '../types';
 import { DataTable, Column } from '../components/Common/DataTable';
 import { Modal } from '../components/Common/Modal';
+import { ViewButton, DetailsModal } from '../components/Common/ViewDetails';
 import { StatusBadge } from '../components/Common/StatusBadge';
 
 export const DriverBataPage: React.FC = () => {
@@ -21,6 +22,7 @@ export const DriverBataPage: React.FC = () => {
   });
   const [formError, setFormError] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [viewRate, setViewRate] = useState<DriverBataRate | null>(null);
 
   useEffect(() => {
     loadRates();
@@ -219,6 +221,7 @@ export const DriverBataPage: React.FC = () => {
       header: 'Actions',
       accessor: (rate) => (
         <div style={{ display: 'flex', gap: '8px' }}>
+          <ViewButton onClick={() => setViewRate(rate)} />
           <button
             onClick={() => openEditModal(rate)}
             className="btn btn-outline btn-sm"
@@ -421,6 +424,18 @@ export const DriverBataPage: React.FC = () => {
           </div>
         </form>
       </Modal>
+      <DetailsModal
+        isOpen={!!viewRate}
+        onClose={() => setViewRate(null)}
+        title="Driver bata rate"
+        rows={viewRate ? [
+          { label: 'Party', value: viewRate.party_name || 'All parties' },
+          { label: 'Percentage', value: `${viewRate.rate_percentage}%` },
+          { label: 'Multiplier', value: String(viewRate.rate_multiplier) },
+          { label: 'Note', value: viewRate.description || '—' },
+          { label: 'Status', value: viewRate.status },
+        ] : []}
+      />
     </div>
   );
 };

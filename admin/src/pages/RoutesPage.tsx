@@ -4,6 +4,7 @@ import { routeService, partyService } from '../services/adminService';
 import { Route, Party } from '../types';
 import { DataTable, Column } from '../components/Common/DataTable';
 import { Modal } from '../components/Common/Modal';
+import { ViewButton, DetailsModal } from '../components/Common/ViewDetails';
 import { StatusBadge } from '../components/Common/StatusBadge';
 
 export const RoutesPage: React.FC = () => {
@@ -21,6 +22,7 @@ export const RoutesPage: React.FC = () => {
   const [formData, setFormData] = useState({ from_location: 'Erode', to_location: '', distance_km: '', status: 'ACTIVE' as 'ACTIVE' | 'INACTIVE' });
   const [formError, setFormError] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [viewRoute, setViewRoute] = useState<Route | null>(null);
 
   useEffect(() => {
     loadParties();
@@ -170,6 +172,7 @@ export const RoutesPage: React.FC = () => {
       header: 'Actions',
       render: (r) => (
         <div style={{ display: 'flex', gap: '6px' }}>
+          <ViewButton onClick={() => setViewRoute(r)} />
           <button onClick={() => openEditModal(r)} className="btn btn-outline btn-sm" title="Edit">
             <Edit2 size={14} />
           </button>
@@ -358,6 +361,18 @@ export const RoutesPage: React.FC = () => {
           </div>
         </form>
       </Modal>
+      <DetailsModal
+        isOpen={!!viewRoute}
+        onClose={() => setViewRoute(null)}
+        title={viewRoute ? `Route — ${viewRoute.from_location} → ${viewRoute.to_location}` : 'Route details'}
+        rows={viewRoute ? [
+          { label: 'From', value: viewRoute.from_location },
+          { label: 'To', value: viewRoute.to_location },
+          { label: 'Party', value: viewRoute.party_name || 'All parties' },
+          { label: 'Distance', value: viewRoute.distance_km ? `${viewRoute.distance_km} KM` : '—' },
+          { label: 'Status', value: viewRoute.status },
+        ] : []}
+      />
     </div>
   );
 };

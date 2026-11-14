@@ -2,7 +2,7 @@ import { Response } from 'express';
 import { query, getClient } from '../config/database';
 import { AppError, asyncHandler } from '../middleware/errorHandler';
 import { AuthRequest } from '../middleware/auth';
-import { applyVehicleScope, assertOwnerOwner, assertOwnerVehicle, hasFleetWideAccess, isFleetScoped } from '../utils/ownerScope';
+import { applyOwnerScope, applyVehicleScope, assertOwnerOwner, assertOwnerVehicle, hasFleetWideAccess, isCompanyOperatorUserId, isFleetScoped, sqlManagerVisibleTrip } from '../utils/ownerScope';
 import { createAuditLog } from '../utils/auditLog';
 
 /**
@@ -195,9 +195,19 @@ export const attachAdvanceBreakdown = async (rows: any[]): Promise<any[]> => {
 
   const tripsRes = await query(
     `SELECT t.id, t.driver_id, t.trip_date, t.created_at,
-            GREATEST(
-              COALESCE((SELECT SUM(ta.amount) FROM truck_advances ta WHERE ta.trip_id = t.id), 0),
-              COALESCE(t.advance_paid, 0)
+            (
+              COALESCE((SELECT SUM(ta.amount) FROM truck_advances ta WHERE ta.trip_id = t.id), 0)
+              + COALESCE((
+                  SELECT SUM(da.amount) FROM driver_advances da
+                  WHERE da.trip_id = t.id
+                    AND NOT EXISTS (SELECT 1 FROM truck_advances ta2 WHERE ta2.trip_id = t.id)
+                ), 0)
+              + CASE
+                  WHEN NOT EXISTS (SELECT 1 FROM truck_advances ta3 WHERE ta3.trip_id = t.id)
+                   AND NOT EXISTS (SELECT 1 FROM driver_advances da3 WHERE da3.trip_id = t.id)
+                  THEN COALESCE(t.advance_paid, 0)
+                  ELSE 0
+                END
             ) as trip_advance,
             COALESCE(s.total_expenses, (SELECT COALESCE(SUM(de.amount), 0) FROM driver_expenses de WHERE de.trip_id = t.id), 0) as expenses
      FROM trips t
@@ -207,6 +217,28 @@ export const attachAdvanceBreakdown = async (rows: any[]): Promise<any[]> => {
      ORDER BY t.driver_id, t.trip_date ASC, t.id ASC`,
     [driverIds]
   );
+
+  const unmatchedAdvRes = await query(
+    `SELECT driver_id, COALESCE(SUM(amount), 0) as amount
+     FROM (
+       SELECT da.driver_id, da.amount
+       FROM driver_advances da
+       WHERE da.driver_id = ANY($1::int[])
+         AND da.trip_id IS NULL
+       UNION ALL
+       SELECT ta.driver_id, ta.amount
+       FROM truck_advances ta
+       WHERE ta.driver_id = ANY($1::int[])
+         AND ta.driver_id IS NOT NULL
+         AND ta.trip_id IS NULL
+     ) u
+     GROUP BY driver_id`,
+    [driverIds]
+  );
+  const unmatchedByDriver = new Map<number, number>();
+  for (const row of unmatchedAdvRes.rows) {
+    unmatchedByDriver.set(Number(row.driver_id), numAmt(row.amount));
+  }
 
   const ownerRes = await query(
     `SELECT oa.driver_id, oa.amount, oa.advance_date, oa.created_at, oa.owner_id, o.name as owner_name
@@ -315,9 +347,9 @@ export const attachAdvanceBreakdown = async (rows: any[]): Promise<any[]> => {
       }
     }
 
-    // Same sequential cash as Driver Balance Master: new advance first pays oldest dues, leftover vs this trip.
+    // Same sequential cash as Driver Balance Master: leftover prior advances first, then this trip's advance.
     const dues: Array<{ id: number; remaining: number }> = [];
-    let carry = 0;
+    let carry = unmatchedByDriver.get(driverId) || 0;
     for (const t of trips) {
       const rec = ensure(Number(t.id));
       const ownAdv = Math.round(rec.manager_advance + rec.owner_given);
@@ -460,8 +492,11 @@ export const getSettlements = asyncHandler(async (req: AuthRequest, res: Respons
 
   if (isFleetScoped(req)) {
     paramIdx = applyVehicleScope(req, conditions, params, paramIdx, 't.vehicle_id');
+    paramIdx = applyOwnerScope(req, conditions, params, paramIdx, 'v.owner_id');
   } else if (!hasFleetWideAccess(req) && req.user?.id) {
-    conditions.push(`t.created_by = $${paramIdx}`); params.push(req.user.id); paramIdx++;
+    conditions.push(sqlManagerVisibleTrip('t.created_by', 't.vehicle_id', `$${paramIdx}`));
+    params.push(req.user.id);
+    paramIdx++;
   }
   if (status) { conditions.push(`s.settlement_status = $${paramIdx}`); params.push(status); paramIdx++; }
   if (from_date) { conditions.push(`t.trip_date >= $${paramIdx}`); params.push(from_date); paramIdx++; }
@@ -500,6 +535,20 @@ export const getSettlements = asyncHandler(async (req: AuthRequest, res: Respons
             d.name as driver_name, d.mobile_number as driver_mobile,
             p.name as party_name, r.from_location, r.to_location,
             u.name as settled_by_name,
+            (
+              SELECT COALESCE(
+                json_agg(
+                  json_build_object(
+                    'expense_type', de.expense_type,
+                    'description', de.description,
+                    'amount', de.amount
+                  ) ORDER BY de.id ASC
+                ),
+                '[]'::json
+              )
+              FROM driver_expenses de
+              WHERE de.trip_id = t.id
+            ) as expense_items,
             (
               COALESCE((SELECT SUM(da.amount) FROM driver_advances da WHERE da.driver_id = d.id), 0) +
               COALESCE((SELECT SUM(oa.amount) FROM owner_advances oa WHERE oa.driver_id = d.id), 0) +
@@ -659,7 +708,7 @@ export const generateSettlement = asyncHandler(async (req: AuthRequest, res: Res
 
     // Get trip with expense totals
     const tripResult = await client.query(
-      `SELECT t.*, v.lorry_number, d.name as driver_name, d.id as d_id, p.name as party_name, r.from_location, r.to_location
+      `SELECT t.*, v.lorry_number, v.owner_id, d.name as driver_name, d.id as d_id, p.name as party_name, r.from_location, r.to_location
        FROM trips t
        JOIN vehicles v ON t.vehicle_id = v.id
        JOIN drivers d ON t.driver_id = d.id
@@ -676,7 +725,14 @@ export const generateSettlement = asyncHandler(async (req: AuthRequest, res: Res
     if (isFleetScoped(req)) {
       assertOwnerVehicle(req, trip.vehicle_id);
     } else if (!hasFleetWideAccess(req) && req.user?.id && trip.created_by !== req.user.id) {
-      throw new AppError('You do not have permission to settle this trip.', 403);
+      const companyTrip = await isCompanyOperatorUserId(trip.created_by);
+      const linkedOwnerTrip =
+        req.user.ownerIds?.length &&
+        trip.owner_id &&
+        req.user.ownerIds.includes(parseInt(String(trip.owner_id), 10));
+      if (!companyTrip && !linkedOwnerTrip) {
+        throw new AppError('You do not have permission to settle this trip.', 403);
+      }
     }
 
     // Check for existing settlement

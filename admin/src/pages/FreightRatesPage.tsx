@@ -7,6 +7,7 @@ import { Modal } from '../components/Common/Modal';
 import { StatusBadge } from '../components/Common/StatusBadge';
 import { formatDateDMY } from '../utils/dateUtils';
 import { DateField } from '../components/Common/DateField';
+import { ViewButton, DetailsModal } from '../components/Common/ViewDetails';
 
 export const FreightRatesPage: React.FC = () => {
   const [rates, setRates] = useState<FreightRate[]>([]);
@@ -33,6 +34,7 @@ export const FreightRatesPage: React.FC = () => {
   });
   const [formError, setFormError] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [viewRate, setViewRate] = useState<FreightRate | null>(null);
 
   useEffect(() => {
     loadLookups();
@@ -198,6 +200,7 @@ export const FreightRatesPage: React.FC = () => {
       header: 'Actions',
       render: (r) => (
         <div style={{ display: 'flex', gap: '6px' }}>
+          <ViewButton onClick={() => setViewRate(r)} />
           <button onClick={() => openEditModal(r)} className="btn btn-outline btn-sm" title="Edit">
             <Edit2 size={14} />
           </button>
@@ -375,6 +378,18 @@ export const FreightRatesPage: React.FC = () => {
           </div>
         </form>
       </Modal>
+      <DetailsModal
+        isOpen={!!viewRate}
+        onClose={() => setViewRate(null)}
+        title="Freight rate details"
+        rows={viewRate ? [
+          { label: 'Party', value: viewRate.party_name || 'All parties' },
+          { label: 'Unit', value: viewRate.unit_name || '—' },
+          { label: 'Rate', value: `₹${Number(viewRate.rate_per_unit || 0).toLocaleString('en-IN')}` },
+          { label: 'Effective from', value: formatDateDMY(viewRate.effective_from) },
+          { label: 'Status', value: viewRate.status },
+        ] : []}
+      />
     </div>
   );
 };

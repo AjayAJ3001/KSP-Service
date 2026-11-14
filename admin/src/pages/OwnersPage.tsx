@@ -1,5 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { Briefcase, Plus, Edit2, Trash2, Printer, Download, Loader2 } from 'lucide-react';
+import { Link } from 'react-router-dom';
+import { Briefcase, Plus, Edit2, Trash2, Printer, Download, Loader2, HandCoins } from 'lucide-react';
+import { ViewButton, DetailsModal } from '../components/Common/ViewDetails';
 import { ownerService } from '../services/adminService';
 import { Owner } from '../types';
 import { DataTable, Column } from '../components/Common/DataTable';
@@ -23,6 +25,7 @@ export const OwnersPage: React.FC = () => {
   const [formData, setFormData] = useState({ name: '', mobile_number: '' });
   const [formError, setFormError] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [viewOwner, setViewOwner] = useState<Owner | null>(null);
 
   const LIMIT = 10;
 
@@ -307,6 +310,24 @@ export const OwnersPage: React.FC = () => {
       header: 'Actions',
       render: (o) => (
         <div style={{ display: 'flex', gap: '6px' }}>
+          <ViewButton onClick={() => setViewOwner(o)} />
+          <Link
+            to={`/owner-advances?give=1&owner_id=${o.id}`}
+            className="btn btn-sm"
+            title="Give Advance"
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '4px',
+              background: '#fff7ed',
+              color: '#c2410c',
+              border: '1px solid #fdba74',
+              fontWeight: 700,
+              textDecoration: 'none',
+            }}
+          >
+            <HandCoins size={14} /> Give Advance
+          </Link>
           <button onClick={() => openEditModal(o)} className="btn btn-outline btn-sm" title="Edit Owner">
             <Edit2 size={14} />
           </button>
@@ -327,9 +348,27 @@ export const OwnersPage: React.FC = () => {
             Manage vehicle and asset owners for KSP Transport
           </p>
         </div>
-        <button onClick={openCreateModal} className="btn btn-primary">
-          <Plus size={18} /> Add New Owner
-        </button>
+        <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+          <Link
+            to="/owner-advances?give=1"
+            className="btn btn-primary"
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '8px',
+              background: 'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)',
+              border: 'none',
+              fontWeight: 800,
+              padding: '10px 16px',
+              textDecoration: 'none',
+            }}
+          >
+            <HandCoins size={18} /> + Give Advance
+          </Link>
+          <button onClick={openCreateModal} className="btn btn-outline">
+            <Plus size={18} /> Add New Owner
+          </button>
+        </div>
       </div>
 
       {/* Table Card */}
@@ -484,6 +523,16 @@ export const OwnersPage: React.FC = () => {
           </div>
         </form>
       </Modal>
+      <DetailsModal
+        isOpen={!!viewOwner}
+        onClose={() => setViewOwner(null)}
+        title={viewOwner ? `Owner — ${viewOwner.name}` : 'Owner details'}
+        rows={viewOwner ? [
+          { label: 'Name', value: viewOwner.name },
+          { label: 'Mobile', value: viewOwner.mobile_number || '—' },
+          { label: 'Created', value: viewOwner.created_at ? formatDateDMY(viewOwner.created_at) : '—' },
+        ] : []}
+      />
     </div>
   );
 };

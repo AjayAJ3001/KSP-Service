@@ -4,6 +4,7 @@ import { unloadingRateService, partyService, routeService } from '../services/ad
 import { UnloadingRate, Party, Route } from '../types';
 import { DataTable, Column } from '../components/Common/DataTable';
 import { Modal } from '../components/Common/Modal';
+import { ViewButton, DetailsModal } from '../components/Common/ViewDetails';
 import { StatusBadge } from '../components/Common/StatusBadge';
 
 export const UnloadingRatesPage: React.FC = () => {
@@ -34,6 +35,7 @@ export const UnloadingRatesPage: React.FC = () => {
   });
   const [formError, setFormError] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [viewRate, setViewRate] = useState<UnloadingRate | null>(null);
 
   useEffect(() => {
     loadLookups();
@@ -325,6 +327,7 @@ export const UnloadingRatesPage: React.FC = () => {
       header: 'Actions',
       accessor: (rate) => (
         <div style={{ display: 'flex', gap: '8px' }}>
+          <ViewButton onClick={() => setViewRate(rate)} />
           <button
             onClick={() => openEditModal(rate)}
             className="btn btn-outline btn-sm"
@@ -671,6 +674,18 @@ export const UnloadingRatesPage: React.FC = () => {
           </div>
         </form>
       </Modal>
+      <DetailsModal
+        isOpen={!!viewRate}
+        onClose={() => setViewRate(null)}
+        title={viewRate ? `Unloading — ${viewRate.unit_name}` : 'Unloading rate'}
+        rows={viewRate ? [
+          { label: 'Party', value: viewRate.party_name || `Party #${viewRate.party_id}` },
+          { label: 'Unit', value: viewRate.unit_name },
+          { label: 'Rate / ton', value: `₹${Number(viewRate.rate_per_ton || 0).toLocaleString('en-IN')}` },
+          { label: 'Note', value: viewRate.description || '—' },
+          { label: 'Status', value: viewRate.status },
+        ] : []}
+      />
     </div>
   );
 };

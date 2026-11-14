@@ -7,6 +7,7 @@ import { Settlement, Trip } from '../types';
 import { formatDateDMY } from './dateUtils';
 import { PRINT_BRAND_CSS, printBrandLockup } from './pdfBrand';
 import { buildDriverTripStories, getSettlementBreakdown, storyBalanceAdvance, storyCashSettlements } from './driverTripStories';
+import { expenseLinesFromItems, formatExpenseType } from './expenseBreakdown';
 
 export const generateSettlementHtml = (trip: Trip, settlement: Settlement) => {
   const formatCurrency = (val: number | string) => {
@@ -45,7 +46,7 @@ export const generateSettlementHtml = (trip: Trip, settlement: Settlement) => {
     ? items.map((item, idx) => `
         <tr>
           <td style="text-align: center; padding: 6px 8px; border: 1px solid #cbd5e1; font-size: 11px;">${idx + 1}</td>
-          <td style="padding: 6px 8px; border: 1px solid #cbd5e1; font-weight: 700; font-size: 11.5px; color: #0f172a;">${item.expense_type}</td>
+          <td style="padding: 6px 8px; border: 1px solid #cbd5e1; font-weight: 700; font-size: 11.5px; color: #0f172a;">${formatExpenseType(item.expense_type)}</td>
           <td style="padding: 6px 8px; border: 1px solid #cbd5e1; font-size: 11px; color: #475569;">${item.description || '—'}</td>
           <td style="text-align: right; padding: 6px 8px; border: 1px solid #cbd5e1; font-weight: 700; font-size: 11.5px;">${formatCurrency(item.amount)}</td>
         </tr>
@@ -336,26 +337,20 @@ export const generateSettlementHtml = (trip: Trip, settlement: Settlement) => {
       <tr>
         <td class="info-label">Lorry Number</td>
         <td class="info-val"><span class="plate-box">${trip.lorry_number || settlement.lorry_number}</span></td>
-        <td class="info-label">Party / Consignor</td>
-        <td class="info-val">${trip.party_name || settlement.party_name}</td>
-      </tr>
-      <tr>
         <td class="info-label">Driver Name</td>
         <td class="info-val">${trip.driver_name || settlement.driver_name}</td>
-        <td class="info-label">Destination / Unit</td>
-        <td class="info-val">${trip.to_location || settlement.to_location || settlement.from_location || '—'}</td>
       </tr>
       <tr>
-        <td class="info-label">Truck Owner</td>
-        <td class="info-val" style="color:#6d28d9;font-weight:700">${trip.owner_name || settlement.owner_name || '—'}</td>
+        <td class="info-label">Destination / Unit</td>
+        <td class="info-val">${trip.to_location || settlement.to_location || settlement.from_location || '—'}</td>
         <td class="info-label">Trip Dispatch Date</td>
         <td class="info-val">${tripDate}</td>
       </tr>
       <tr>
+        <td class="info-label">Truck Owner</td>
+        <td class="info-val" style="color:#6d28d9;font-weight:700">${trip.owner_name || settlement.owner_name || '—'}</td>
         <td class="info-label">Settlement Mode</td>
         <td class="info-val">${settlement.payment_mode || (isFullySettled ? 'CASH' : 'PENDING')}</td>
-        <td class="info-label"></td>
-        <td class="info-val"></td>
       </tr>
       ${((settlement as any).advance_given_by_name || settlement.settled_by_name) ? `
       <tr>
@@ -1768,7 +1763,6 @@ export const generateReportsPdfHtml = (data: ReportsPdfData): string => {
       `<strong style="color:#1e40af">${s.lorry_number || '—'}</strong>`,
       s.owner_name ? `<span style="color:#6d28d9;font-weight:700">🏢 ${s.owner_name}</span>` : '—',
       `<strong>${s.driver_name || '—'}</strong>`,
-      `<span>${s.party_name || '—'}</span>`,
       `<span>${inr(s.total_freight)}</span>`,
       `<span style="color:#b45309">${inr(s.total_expenses)}</span>`,
       `<span>${inr(s.advance_paid)}</span>`,
@@ -1785,7 +1779,6 @@ export const generateReportsPdfHtml = (data: ReportsPdfData): string => {
       '',
       '',
       '',
-      '',
       `<strong>${inr(sumFreight)}</strong>`,
       `<strong>${inr(sumExp)}</strong>`,
       `<strong>${inr(sumAdv)}</strong>`,
@@ -1795,7 +1788,7 @@ export const generateReportsPdfHtml = (data: ReportsPdfData): string => {
     ];
 
     bodyContent = tableWrap(
-      ['#', 'Settlement ID', 'Trip ID', 'Trip Date', 'Lorry Number', 'Truck Owner', 'Driver Name', 'Party', 'Freight', 'Expenses', 'Advance', 'Need to Pay', 'Balance in Hand', 'Status'],
+      ['#', 'Settlement ID', 'Trip ID', 'Trip Date', 'Lorry Number', 'Truck Owner', 'Driver Name', 'Freight', 'Expenses', 'Advance', 'Need to Pay', 'Balance in Hand', 'Status'],
       rows,
       'No settlement records found for selected filters.',
       footer
@@ -2322,6 +2315,9 @@ export const generateDriverStatementHtml = (data: DriverStatementPdfData): strin
     `<div style="font-size:11px;font-weight:700;color:#5b21b6;padding:2px 0;">${esc(name)} - ${formatCurrency(amt)}</div>`
   ).join('') || `<div style="font-size:11px;color:#64748b;">No owner advances</div>`;
 
+  const tripExpenseItemsById = new Map<number, any[]>(
+    (data.trips_and_expenses || []).map((t: any) => [Number(t.trip_id || t.id), Array.isArray(t.expense_items) ? t.expense_items : []])
+  );
   const tripStories = buildDriverTripStories(timeline);
   let tripNo = 0;
   const storiesHtml = tripStories.length > 0
@@ -2410,6 +2406,9 @@ export const generateDriverStatementHtml = (data: DriverStatementPdfData): strin
           <tr><td colspan="2" style="padding:6px 8px 2px;font-size:10px;font-weight:800;color:#1d4ed8;">1. ADVANCE GIVEN</td></tr>
           ${advRows}
           <tr><td colspan="2" style="padding:6px 8px 2px;font-size:10px;font-weight:800;color:#c2410c;">2. TRIP EXPENSES</td></tr>
+          ${expenseLinesFromItems(story.tripId ? tripExpenseItemsById.get(Number(story.tripId)) : []).map((l) =>
+            `<tr><td style="padding:2px 8px;font-size:11px;font-weight:700;color:#92400e;">${esc(l.label)}</td><td style="padding:2px 8px;font-size:11px;font-weight:800;color:#b45309;text-align:right;">${formatCurrency(l.amount)}</td></tr>`
+          ).join('')}
           <tr><td colspan="2" style="padding:2px 8px 6px;font-size:13px;font-weight:800;color:#9a3412;">${formatCurrency(story.totalExpenses)}</td></tr>
           <tr><td colspan="2" style="padding:6px 8px;background:#f8fafc;font-size:10px;font-weight:800;color:#475569;">3. CALCULATION</td></tr>
           ${story.broughtForward > 0 ? `<tr><td colspan="2" style="padding:2px 8px;font-size:11px;color:#047857;font-weight:700;">Previous in hand ${formatCurrency(story.broughtForward)}</td></tr>` : ''}

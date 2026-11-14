@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef, useLayoutEffect } from 'react';
 import {
   View,
   Text,
@@ -48,11 +48,18 @@ import { useAuth } from '../../context/AuthContext';
 import { DashboardData, Trip } from '../../types';
 import { COLORS, SPACING, RADIUS, SHADOWS } from '../../constants/theme';
 import { formatDateDMY } from '../../utils/dateUtils';
+import { ViewChip } from '../../components/ViewChip';
 
 export const AdminDashboardScreen: React.FC<{ navigation: any }> = ({ navigation }) => {
   const { user } = useAuth();
   const isFullAdmin = user?.role === 'ADMIN';
   const isOwnerUser = user?.role === 'OWNER';
+
+  useLayoutEffect(() => {
+    navigation.setOptions({
+      title: isOwnerUser ? 'Owner Control Center' : 'Admin Control Center',
+    });
+  }, [navigation, isOwnerUser]);
   const [data, setData] = useState<DashboardData | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -235,6 +242,31 @@ export const AdminDashboardScreen: React.FC<{ navigation: any }> = ({ navigation
         </View>
       )}
 
+      <TouchableOpacity
+        style={styles.givenAdvanceCard}
+        onPress={() => navigation.navigate('AdminOwnerAdvances')}
+        activeOpacity={0.85}
+      >
+        <View style={styles.givenAdvanceHeader}>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.givenAdvanceTitle}>Given Owner Advances</Text>
+            <Text style={styles.givenAdvanceSub}>Tap to view given advance details</Text>
+          </View>
+          <TouchableOpacity
+            style={styles.giveAdvanceDashBtn}
+            onPress={() => navigation.navigate('AdminOwnerAdvances', { openGive: true })}
+            activeOpacity={0.85}
+          >
+            <PlusCircle size={16} color={COLORS.white} />
+            <Text style={styles.giveAdvanceDashBtnText}>Give Advance</Text>
+          </TouchableOpacity>
+        </View>
+        <View style={styles.viewAllAdvances}>
+          <Text style={styles.viewAllAdvancesText}>Open given advances</Text>
+          <ChevronRight size={16} color="#c2410c" />
+        </View>
+      </TouchableOpacity>
+
       {/* ── Animated KPI Stats Grid ── */}
       <Animated.View style={[styles.kpiGrid, { opacity: kpiFade, transform: [{ scale: kpiScale }] }]}>
         <View style={[styles.kpiCard, { borderLeftColor: '#f59e0b' }]}>
@@ -299,7 +331,7 @@ export const AdminDashboardScreen: React.FC<{ navigation: any }> = ({ navigation
         <Text style={styles.sectionHeading}>Operations</Text>
       </View>
       <View style={styles.navGrid}>
-        {user?.role === 'ADMIN' ? (
+        {user?.role === 'ADMIN' || user?.role === 'OWNER' ? (
           <TouchableOpacity style={styles.navItem} onPress={() => navigation.navigate('GiveTruckAdvance')} activeOpacity={0.7}>
             <View style={[styles.navIconBox, { backgroundColor: '#eef2ff' }]}>
               <PlusCircle size={20} color="#4338ca" />
@@ -325,11 +357,11 @@ export const AdminDashboardScreen: React.FC<{ navigation: any }> = ({ navigation
         </TouchableOpacity>
 
         <TouchableOpacity style={styles.navItem} onPress={() => navigation.navigate('AdminOwnerAdvances')} activeOpacity={0.7}>
-          <View style={[styles.navIconBox, { backgroundColor: '#fef3c7' }]}>
+          <View style={[styles.navIconBox, { backgroundColor: '#fff7ed' }]}>
             <HandCoins size={20} color="#b45309" />
           </View>
           <Text style={styles.navItemTitle}>Owner Advances</Text>
-          <Text style={styles.navItemSub}>To Manager & Driver</Text>
+          <Text style={styles.navItemSub}>Advance given details</Text>
         </TouchableOpacity>
 
         <TouchableOpacity style={styles.navItem} onPress={() => navigation.navigate('AdminManagerLedger')} activeOpacity={0.7}>
@@ -384,9 +416,7 @@ export const AdminDashboardScreen: React.FC<{ navigation: any }> = ({ navigation
             <Users size={20} color="#047857" />
           </View>
           <Text style={styles.navItemTitle}>{isFullAdmin ? 'User Management' : 'Managers'}</Text>
-          {isFullAdmin ? (
-            <Text style={styles.navItemSub}>{stats?.total_users || 0} Accounts</Text>
-          ) : null}
+          <Text style={styles.navItemSub}>{stats?.total_users || 0} Accounts</Text>
         </TouchableOpacity>
 
         <TouchableOpacity
@@ -556,11 +586,9 @@ export const AdminDashboardScreen: React.FC<{ navigation: any }> = ({ navigation
           </View>
         ) : (
           data.recent_trips.slice(0, 5).map((trip: Trip) => (
-            <TouchableOpacity
+            <View
               key={trip.id}
               style={styles.tripCard}
-              activeOpacity={0.75}
-              onPress={() => setSelectedTrip(trip)}
             >
               <View style={styles.tripRow}>
                 <View style={styles.tripLorryBadge}>
@@ -599,12 +627,15 @@ export const AdminDashboardScreen: React.FC<{ navigation: any }> = ({ navigation
 
               <View style={styles.tripFooter}>
                 <Text style={styles.tripDate}>{formatDateDMY(trip.trip_date)}</Text>
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
                   <Text style={styles.tripFreight}>Freight: {formatCurrency(trip.total_freight)}</Text>
-                  <ChevronRight size={13} color={COLORS.accent} />
+                  <ViewChip
+                    compact
+                    onPress={() => setSelectedTrip(trip)}
+                  />
                 </View>
               </View>
-            </TouchableOpacity>
+            </View>
           ))
         )}
       </View>
@@ -914,6 +945,56 @@ const styles = StyleSheet.create({
     paddingVertical: 3,
     borderRadius: RADIUS.sm,
     borderWidth: 1,
+  },
+  givenAdvanceCard: {
+    backgroundColor: '#fff7ed',
+    borderWidth: 1,
+    borderColor: '#fdba74',
+    borderRadius: RADIUS.lg,
+    padding: SPACING.md,
+    marginBottom: SPACING.md,
+  },
+  givenAdvanceHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    marginBottom: 10,
+  },
+  givenAdvanceTitle: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: '#9a3412',
+  },
+  givenAdvanceSub: {
+    fontSize: 11.5,
+    color: '#c2410c',
+    marginTop: 2,
+  },
+  giveAdvanceDashBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: '#d97706',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: RADIUS.md,
+  },
+  giveAdvanceDashBtnText: {
+    color: COLORS.white,
+    fontSize: 12,
+    fontWeight: '800',
+  },
+  viewAllAdvances: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    gap: 2,
+    paddingTop: 2,
+  },
+  viewAllAdvancesText: {
+    fontSize: 12,
+    fontWeight: '800',
+    color: '#c2410c',
   },
   docBadgeText: {
     fontSize: 11,

@@ -312,10 +312,6 @@ export const SettlementReceiptScreen: React.FC<{ route: any; navigation: any }> 
             </Text>
           </View>
           <View style={styles.gridRow}>
-            <Text style={styles.gridLabel}>Party:</Text>
-            <Text style={styles.gridValueBold}>{trip.party_name || '—'}</Text>
-          </View>
-          <View style={styles.gridRow}>
             <Text style={styles.gridLabel}>Unit:</Text>
             <Text style={styles.gridValue}>
               {trip.to_location || trip.from_location}

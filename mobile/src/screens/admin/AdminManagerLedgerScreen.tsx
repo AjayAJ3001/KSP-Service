@@ -9,6 +9,8 @@ import {
   Alert,
 } from 'react-native';
 import { BookOpen, Wallet, TrendingDown, TrendingUp } from 'lucide-react-native';
+import { DetailsSheet } from '../../components/DetailsSheet';
+import { ViewChip } from '../../components/ViewChip';
 import { adminTruckAdvanceService } from '../../services/adminService';
 import { COLORS, SPACING, RADIUS, SHADOWS } from '../../constants/theme';
 
@@ -22,6 +24,7 @@ export const AdminManagerLedgerScreen: React.FC = () => {
   const [totals, setTotals] = useState({ total_received: 0, total_given: 0, total_available: 0 });
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [viewManager, setViewManager] = useState<any | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -49,8 +52,9 @@ export const AdminManagerLedgerScreen: React.FC = () => {
   }
 
   return (
+    <View style={styles.container}>
     <ScrollView
-      style={styles.container}
+      style={{ flex: 1 }}
       contentContainerStyle={styles.content}
       refreshControl={<RefreshControl refreshing={isRefreshing} onRefresh={() => { setIsRefreshing(true); load(); }} />}
     >
@@ -87,10 +91,25 @@ export const AdminManagerLedgerScreen: React.FC = () => {
               <Text style={styles.cell}>Out {formatCurrency(m.total_given)}</Text>
               <Text style={[styles.cell, { fontWeight: '800' }]}>Bal {formatCurrency(m.available_balance)}</Text>
             </View>
+            <ViewChip compact onPress={() => setViewManager(m)} />
           </View>
         ))
       )}
     </ScrollView>
+      <DetailsSheet
+        visible={!!viewManager}
+        title={viewManager ? `Manager — ${viewManager.manager_name}` : 'Manager details'}
+        rows={viewManager ? [
+          { label: 'Name', value: viewManager.manager_name },
+          { label: 'Role', value: viewManager.role },
+          { label: 'Mobile', value: viewManager.manager_mobile || '—' },
+          { label: 'Received', value: formatCurrency(viewManager.total_received) },
+          { label: 'Given', value: formatCurrency(viewManager.total_given) },
+          { label: 'In hand', value: formatCurrency(viewManager.available_balance) },
+        ] : []}
+        onClose={() => setViewManager(null)}
+      />
+    </View>
   );
 };
 
@@ -109,4 +128,18 @@ const styles = StyleSheet.create({
   sub: { fontSize: 12, color: COLORS.textMuted, marginBottom: 8 },
   row: { flexDirection: 'row', justifyContent: 'space-between' },
   cell: { fontSize: 12, color: COLORS.text, fontWeight: '600' },
+  viewBtn: {
+    marginTop: 10,
+    alignSelf: 'flex-start',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: '#eff6ff',
+    borderWidth: 1,
+    borderColor: '#93c5fd',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: RADIUS.md,
+  },
+  viewBtnText: { fontSize: 12, fontWeight: '800', color: '#1d4ed8' },
 });

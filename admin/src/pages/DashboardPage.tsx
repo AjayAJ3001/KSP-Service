@@ -17,6 +17,7 @@ import {
   HandCoins,
 } from 'lucide-react';
 import { dashboardService } from '../services/adminService';
+import { useAuth } from '../context/AuthContext';
 import { DashboardData, Trip } from '../types';
 import { StatCard } from '../components/Common/StatCard';
 import { StatusBadge } from '../components/Common/StatusBadge';
@@ -24,6 +25,8 @@ import { Modal } from '../components/Common/Modal';
 import { formatDateDMY } from '../utils/dateUtils';
 
 export const DashboardPage: React.FC = () => {
+  const { user } = useAuth();
+  const isOwnerUser = user?.role === 'OWNER';
   const [data, setData] = useState<DashboardData | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [selectedTrip, setSelectedTrip] = useState<Trip | null>(null);
@@ -83,9 +86,13 @@ export const DashboardPage: React.FC = () => {
         }}
       >
         <div>
-          <h2 style={{ fontSize: '24px', fontWeight: 800 }}>Welcome to KSP Transport Dashboard</h2>
+          <h2 style={{ fontSize: '24px', fontWeight: 800 }}>
+            {isOwnerUser ? 'Welcome to KSP Owner Dashboard' : 'Welcome to KSP Transport Dashboard'}
+          </h2>
           <p style={{ color: 'var(--text-muted)', fontSize: '14px' }}>
-            Real-time overview of fleet operations, logistics, freight collections & driver settlements
+            {isOwnerUser
+              ? 'Your trucks, driver settlements, advances and fleet masters'
+              : 'Real-time overview of fleet operations, logistics, freight collections & driver settlements'}
           </p>
         </div>
         <div style={{ display: 'flex', gap: '12px' }}>
@@ -163,6 +170,50 @@ export const DashboardPage: React.FC = () => {
           </div>
         );
       })()}
+
+      <div
+        onClick={() => navigate('/owner-advances')}
+        role="button"
+        tabIndex={0}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === ' ') navigate('/owner-advances');
+        }}
+        style={{
+          marginBottom: '24px',
+          padding: '16px 20px',
+          borderRadius: '12px',
+          background: 'linear-gradient(135deg, #fff7ed 0%, #ffedd5 100%)',
+          border: '1px solid #fdba74',
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          gap: '12px',
+          flexWrap: 'wrap',
+          cursor: 'pointer',
+        }}
+      >
+        <div>
+          <div style={{ fontWeight: 800, color: '#9a3412', fontSize: '15px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <HandCoins size={18} /> Given Owner Advances
+          </div>
+          <div style={{ fontSize: '12.5px', color: '#9a3412', opacity: 0.85, marginTop: '2px' }}>
+            Click to view given advance details
+          </div>
+        </div>
+        <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }} onClick={(e) => e.stopPropagation()}>
+          <button
+            onClick={() => navigate('/owner-advances?give=1')}
+            className="btn btn-primary"
+            style={{
+              background: 'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)',
+              border: 'none',
+              fontWeight: 800,
+            }}
+          >
+            <PlusCircle size={16} /> Give Advance
+          </button>
+        </div>
+      </div>
 
       {/* Primary KPI Stats Grid */}
 
@@ -271,7 +322,10 @@ export const DashboardPage: React.FC = () => {
               <HandCoins size={16} /> Owner Advances
             </button>
             <button onClick={() => navigate('/settlements')} className="btn btn-outline" style={{ justifyContent: 'flex-start' }}>
-              <FileCheck size={16} /> Generate Settlement Slip
+              <FileCheck size={16} /> Settlements
+            </button>
+            <button onClick={() => navigate('/driver-balance-master')} className="btn btn-outline" style={{ justifyContent: 'flex-start' }}>
+              <Scale size={16} /> Driver Balance Master
             </button>
             <button onClick={() => navigate('/reports')} className="btn btn-outline" style={{ justifyContent: 'flex-start' }}>
               <TrendingUp size={16} /> View Analytical Reports

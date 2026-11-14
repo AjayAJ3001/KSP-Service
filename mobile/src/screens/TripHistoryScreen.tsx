@@ -164,7 +164,18 @@ export const TripHistoryScreen: React.FC<{ navigation: any }> = ({ navigation })
                   </View>
 
                   <View style={styles.tripCardFooter}>
-                    <Text style={styles.driverText}>Driver: {trip.driver_name}</Text>
+                    <Text style={styles.driverText}>
+                      Driver: {trip.driver_name}
+                      {trip.created_by_name
+                        ? ` · Started by ${trip.created_by_name}${
+                            trip.created_by_role === 'OWNER'
+                              ? ' (Owner)'
+                              : trip.created_by_role === 'ADMIN'
+                                ? ' (Admin)'
+                                : ''
+                          }`
+                        : ''}
+                    </Text>
                     <View style={{ flexDirection: 'row', alignItems: 'center' }}>
                       <Text style={styles.actionText}>Manage Trip</Text>
                       <ChevronRight size={14} color={COLORS.accent} />

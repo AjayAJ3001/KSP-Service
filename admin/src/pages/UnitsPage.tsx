@@ -4,6 +4,7 @@ import { unitService } from '../services/adminService';
 import { Unit } from '../types';
 import { DataTable, Column } from '../components/Common/DataTable';
 import { Modal } from '../components/Common/Modal';
+import { ViewButton, DetailsModal } from '../components/Common/ViewDetails';
 import { StatusBadge } from '../components/Common/StatusBadge';
 import { formatDateDMY } from '../utils/dateUtils';
 
@@ -15,6 +16,7 @@ export const UnitsPage: React.FC = () => {
   const [formData, setFormData] = useState({ name: '', abbreviation: '', status: 'ACTIVE' as 'ACTIVE' | 'INACTIVE' });
   const [formError, setFormError] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [viewUnit, setViewUnit] = useState<Unit | null>(null);
 
   useEffect(() => {
     loadUnits();
@@ -95,6 +97,7 @@ export const UnitsPage: React.FC = () => {
       header: 'Actions',
       render: (u) => (
         <div style={{ display: 'flex', gap: '6px' }}>
+          <ViewButton onClick={() => setViewUnit(u)} />
           <button onClick={() => openEditModal(u)} className="btn btn-outline btn-sm" title="Edit">
             <Edit2 size={14} />
           </button>
@@ -191,6 +194,17 @@ export const UnitsPage: React.FC = () => {
           </div>
         </form>
       </Modal>
+      <DetailsModal
+        isOpen={!!viewUnit}
+        onClose={() => setViewUnit(null)}
+        title={viewUnit ? `Unit — ${viewUnit.name}` : 'Unit details'}
+        rows={viewUnit ? [
+          { label: 'Name', value: viewUnit.name },
+          { label: 'Abbreviation', value: viewUnit.abbreviation || '—' },
+          { label: 'Status', value: viewUnit.status },
+          { label: 'Created', value: formatDateDMY(viewUnit.created_at) },
+        ] : []}
+      />
     </div>
   );
 };

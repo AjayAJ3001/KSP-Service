@@ -3,7 +3,7 @@ import { query } from '../config/database';
 import { AppError, asyncHandler } from '../middleware/errorHandler';
 import { AuthRequest } from '../middleware/auth';
 import { createAuditLog } from '../utils/auditLog';
-import { applyOwnerScope, assertOwnerOwner, assertOwnerVehicle, assertTripInOwnerScope, hasFleetWideAccess, isFleetScoped, isLinkedManager, isOwnerUser } from '../utils/ownerScope';
+import { applyOwnerScope, assertOwnerOwner, assertOwnerVehicle, assertTripInOwnerScope, hasFleetWideAccess, isFleetScoped, isLinkedManager, isOwnerUser, sqlIsCompanyOperator, sqlSelfOrCompany } from '../utils/ownerScope';
 import { reconcileDriverPendingSettlements } from './settlement.controller';
 
 // Helper to resolve advance date preserving local time
@@ -136,8 +136,8 @@ export const getDriverAdvances = asyncHandler(async (req: AuthRequest, res: Resp
       'COALESCE(da.direct_owner_id, v.owner_id, tr_v.owner_id, d_lt_v.owner_id)'
     );
 
-    if (!hasFleetWideAccess(req) && req.user?.id && !manager_id) {
-      conditions.push(`(da.given_by_role = 'OWNER' OR da.manager_id = $${paramIdx})`);
+    if (!isFleetScoped(req) && !hasFleetWideAccess(req) && req.user?.id && !manager_id) {
+      conditions.push(`(da.given_by_role = 'OWNER' OR ${sqlSelfOrCompany('da.manager_id', `$${paramIdx}`)} OR ${sqlIsCompanyOperator('da.created_by')})`);
       params.push(req.user.id);
       paramIdx++;
     }
@@ -406,11 +406,11 @@ export const getDriverAdvancesSummary = asyncHandler(async (req: AuthRequest, re
     params.push(req.user.id);
     params.push(req.user.ownerIds?.length ? req.user.ownerIds : [0]);
     paramIdx += 2;
-  } else if (!hasFleetWideAccess(req) && req.user?.id) {
+  } else if (!isFleetScoped(req) && !hasFleetWideAccess(req) && req.user?.id) {
     driverWhere += ` AND (
-      EXISTS (SELECT 1 FROM driver_advances da0 WHERE da0.driver_id = d.id AND da0.manager_id = $${paramIdx})
-      OR EXISTS (SELECT 1 FROM truck_advances ta0 WHERE ta0.driver_id = d.id AND ta0.manager_id = $${paramIdx})
-      OR EXISTS (SELECT 1 FROM trips tr0 WHERE tr0.driver_id = d.id AND tr0.created_by = $${paramIdx} AND tr0.status NOT IN ('CANCELLED', 'DRAFT'))
+      EXISTS (SELECT 1 FROM driver_advances da0 WHERE da0.driver_id = d.id AND (${sqlSelfOrCompany('da0.manager_id', `$${paramIdx}`)} OR ${sqlIsCompanyOperator('da0.created_by')}))
+      OR EXISTS (SELECT 1 FROM truck_advances ta0 WHERE ta0.driver_id = d.id AND (${sqlSelfOrCompany('ta0.manager_id', `$${paramIdx}`)} OR ${sqlIsCompanyOperator('ta0.created_by')}))
+      OR EXISTS (SELECT 1 FROM trips tr0 WHERE tr0.driver_id = d.id AND ${sqlSelfOrCompany('tr0.created_by', `$${paramIdx}`)} AND tr0.status NOT IN ('CANCELLED', 'DRAFT'))
     )`;
     params.push(req.user.id);
     paramIdx++;
@@ -534,9 +534,10 @@ export const getDriverAdvancesSummary = asyncHandler(async (req: AuthRequest, re
         de.trip_id,
         COALESCE(SUM(de.amount), 0) as total_expenses,
         COALESCE(SUM(CASE WHEN de.expense_type = 'LOADING' THEN de.amount ELSE 0 END), 0) as loading_expense,
-        COALESCE(SUM(CASE WHEN de.expense_type = 'DRIVER_BATA' THEN de.amount ELSE 0 END), 0) as bata_expense,
+        COALESCE(SUM(CASE WHEN de.expense_type = 'UNLOADING' THEN de.amount ELSE 0 END), 0) as unloading_expense,
+        COALESCE(SUM(CASE WHEN de.expense_type IN ('DRIVER_BATA', 'DRIVER_BETA') THEN de.amount ELSE 0 END), 0) as bata_expense,
         COALESCE(SUM(CASE WHEN de.expense_type = 'CLEANING_CHARGE' THEN de.amount ELSE 0 END), 0) as cleaning_expense,
-        COALESCE(SUM(CASE WHEN de.expense_type NOT IN ('LOADING', 'DRIVER_BATA', 'CLEANING_CHARGE') THEN de.amount ELSE 0 END), 0) as other_expense
+        COALESCE(SUM(CASE WHEN de.expense_type NOT IN ('LOADING', 'UNLOADING', 'DRIVER_BATA', 'DRIVER_BETA', 'CLEANING_CHARGE') THEN de.amount ELSE 0 END), 0) as other_expense
       FROM driver_expenses de
       GROUP BY de.trip_id
     ),
@@ -641,6 +642,7 @@ export const getDriverAdvancesSummary = asyncHandler(async (req: AuthRequest, re
         1 as trip_count,
         COALESCE(s.total_expenses, exp.total_expenses, 0) as total_expenses_reported,
         COALESCE(exp.loading_expense, 0) as loading_expense,
+        COALESCE(exp.unloading_expense, 0) as unloading_expense,
         COALESCE(exp.bata_expense, 0) as bata_expense,
         COALESCE(exp.cleaning_expense, 0) as cleaning_expense,
         COALESCE(exp.other_expense, 0) as other_expense,
@@ -701,6 +703,7 @@ export const getDriverAdvancesSummary = asyncHandler(async (req: AuthRequest, re
         0 as trip_count,
         0::numeric as total_expenses_reported,
         0::numeric as loading_expense,
+        0::numeric as unloading_expense,
         0::numeric as bata_expense,
         0::numeric as cleaning_expense,
         0::numeric as other_expense,
@@ -764,6 +767,7 @@ export const getDriverAdvancesSummary = asyncHandler(async (req: AuthRequest, re
         0 as trip_count,
         0::numeric as total_expenses_reported,
         0::numeric as loading_expense,
+        0::numeric as unloading_expense,
         0::numeric as bata_expense,
         0::numeric as cleaning_expense,
         0::numeric as other_expense,
@@ -883,6 +887,7 @@ export const getDriverAdvancesSummary = asyncHandler(async (req: AuthRequest, re
     const totalAdvCount       = sorted.reduce((s: number, r: any) => s + (parseInt(r.advance_count) || 0), 0);
     const totalTripCount      = tripRows.length;
     const loadingExp          = sorted.reduce((s: number, r: any) => s + (parseFloat(r.loading_expense) || 0), 0);
+    const unloadingExp        = sorted.reduce((s: number, r: any) => s + (parseFloat(r.unloading_expense) || 0), 0);
     const bataExp             = sorted.reduce((s: number, r: any) => s + (parseFloat(r.bata_expense) || 0), 0);
     const cleaningExp         = sorted.reduce((s: number, r: any) => s + (parseFloat(r.cleaning_expense) || 0), 0);
     const otherExp            = sorted.reduce((s: number, r: any) => s + (parseFloat(r.other_expense) || 0), 0);
@@ -945,8 +950,10 @@ export const getDriverAdvancesSummary = asyncHandler(async (req: AuthRequest, re
       trip_count:                totalTripCount,
       total_expenses_reported:   Math.round(totalExpenses * 100) / 100,
       loading_expense:           Math.round(loadingExp * 100) / 100,
+      unloading_expense:         Math.round(unloadingExp * 100) / 100,
       bata_expense:              Math.round(bataExp * 100) / 100,
       cleaning_expense:          Math.round(cleaningExp * 100) / 100,
+      other_expense:             Math.round(otherExp * 100) / 100,
       balance_in_hand:           Math.max(0, finalNetBalInHand),
       need_to_pay:               Math.max(0, finalNetNeedToPay),
       previous_balance_in_hand:  0,
@@ -1288,58 +1295,70 @@ export const getDriverStatement = asyncHandler(async (req: AuthRequest, res: Res
     throw new AppError('Driver not found.', 404);
   }
   const driver = driverRes.rows[0];
+  const ownerScoped = isFleetScoped(req);
   const linked = isLinkedManager(req);
-  const scopeToManager = !hasFleetWideAccess(req) && !linked;
-  const statementParams: any[] = linked
-    ? [
-        driverId,
-        req.user?.id,
-        req.user?.ownerIds?.length ? req.user.ownerIds : [0],
-        req.user?.vehicleIds?.length ? req.user.vehicleIds : [0],
-      ]
-    : scopeToManager
-      ? [driverId, req.user?.id]
-      : [driverId];
-  const mgrDa = linked
-    ? `AND (da.manager_id = $2::int OR EXISTS (SELECT 1 FROM vehicles dav WHERE dav.id = da.vehicle_id AND dav.owner_id = ANY($3::int[])))`
-    : scopeToManager
-      ? 'AND da.manager_id = $2::int'
-      : '';
-  const mgrTa = linked
-    ? 'AND (ta.manager_id = $2::int OR ta.vehicle_id = ANY($4::int[]))'
-    : scopeToManager
-      ? 'AND ta.manager_id = $2::int'
-      : '';
-  const mgrTr = linked
-    ? 'AND (tr.created_by = $2::int OR tr.vehicle_id = ANY($4::int[]))'
-    : scopeToManager
-      ? 'AND tr.created_by = $2::int'
-      : '';
-  const mgrTrip = linked
+  const scopeToManager = !isFleetScoped(req) && !hasFleetWideAccess(req) && !linked;
+  const ownerIds = req.user?.ownerIds?.length ? req.user.ownerIds : [0];
+  const vehicleIds = req.user?.vehicleIds?.length ? req.user.vehicleIds : [0];
+  const statementParams: any[] = ownerScoped
+    ? [driverId, ownerIds, vehicleIds]
+    : linked
+      ? [driverId, req.user?.id, ownerIds, vehicleIds]
+      : scopeToManager
+        ? [driverId, req.user?.id]
+        : [driverId];
+  const mgrDa = ownerScoped
+    ? `AND (
+        EXISTS (SELECT 1 FROM vehicles dav WHERE dav.id = da.vehicle_id AND dav.owner_id = ANY($2::int[]))
+        OR EXISTS (SELECT 1 FROM trips tda JOIN vehicles vda ON tda.vehicle_id = vda.id WHERE tda.id = da.trip_id AND vda.owner_id = ANY($2::int[]))
+        OR da.direct_owner_id = ANY($2::int[])
+      )`
+    : linked
+      ? `AND (da.manager_id = $2::int OR EXISTS (SELECT 1 FROM vehicles dav WHERE dav.id = da.vehicle_id AND dav.owner_id = ANY($3::int[])))`
+      : scopeToManager
+        ? `AND (${sqlSelfOrCompany('da.manager_id', '$2::int')} OR ${sqlIsCompanyOperator('da.created_by')})`
+        : '';
+  const mgrTa = ownerScoped
+    ? 'AND ta.vehicle_id = ANY($3::int[])'
+    : linked
+      ? 'AND (ta.manager_id = $2::int OR ta.vehicle_id = ANY($4::int[]))'
+      : scopeToManager
+        ? `AND (${sqlSelfOrCompany('ta.manager_id', '$2::int')} OR ${sqlIsCompanyOperator('ta.created_by')})`
+        : '';
+  const mgrTr = ownerScoped
+    ? 'AND tr.vehicle_id = ANY($3::int[])'
+    : linked
+      ? 'AND (tr.created_by = $2::int OR tr.vehicle_id = ANY($4::int[]))'
+      : scopeToManager
+        ? `AND ${sqlSelfOrCompany('tr.created_by', '$2::int')}`
+        : '';
+  const mgrTrip = ownerScoped || linked
     ? 'AND t.vehicle_id = ANY($2::int[])'
     : scopeToManager
       ? `AND (
-         t.created_by = $2::int
-         OR EXISTS (SELECT 1 FROM driver_advances x WHERE x.trip_id = t.id AND x.manager_id = $2::int)
-         OR EXISTS (SELECT 1 FROM truck_advances x WHERE x.trip_id = t.id AND x.manager_id = $2::int)
+         ${sqlSelfOrCompany('t.created_by', '$2::int')}
+         OR EXISTS (SELECT 1 FROM driver_advances x WHERE x.trip_id = t.id AND (${sqlSelfOrCompany('x.manager_id', '$2::int')} OR ${sqlIsCompanyOperator('x.created_by')}))
+         OR EXISTS (SELECT 1 FROM truck_advances x WHERE x.trip_id = t.id AND (${sqlSelfOrCompany('x.manager_id', '$2::int')} OR ${sqlIsCompanyOperator('x.created_by')}))
        )`
       : '';
-  const oaFilter = linked
-    ? 'AND oa.owner_id = ANY($3::int[])'
-    : scopeToManager
-      ? `AND (
-           EXISTS (SELECT 1 FROM driver_advances x WHERE x.driver_id = oa.driver_id AND x.manager_id = $2::int)
-           OR EXISTS (SELECT 1 FROM truck_advances x WHERE x.driver_id = oa.driver_id AND x.manager_id = $2::int)
+  const oaFilter = ownerScoped
+    ? 'AND oa.owner_id = ANY($2::int[])'
+    : linked
+      ? 'AND oa.owner_id = ANY($3::int[])'
+      : scopeToManager
+        ? `AND (
+           EXISTS (SELECT 1 FROM driver_advances x WHERE x.driver_id = oa.driver_id AND (${sqlSelfOrCompany('x.manager_id', '$2::int')} OR ${sqlIsCompanyOperator('x.created_by')}))
+           OR EXISTS (SELECT 1 FROM truck_advances x WHERE x.driver_id = oa.driver_id AND (${sqlSelfOrCompany('x.manager_id', '$2::int')} OR ${sqlIsCompanyOperator('x.created_by')}))
            OR EXISTS (
              SELECT 1 FROM trips x
              WHERE x.driver_id = oa.driver_id
-               AND x.created_by = $2::int
+               AND ${sqlSelfOrCompany('x.created_by', '$2::int')}
                AND x.status NOT IN ('CANCELLED', 'DRAFT')
            )
          )`
-      : '';
-  const tripStatementParams: any[] = linked
-    ? [driverId, req.user?.vehicleIds?.length ? req.user.vehicleIds : [0]]
+        : '';
+  const tripStatementParams: any[] = ownerScoped || linked
+    ? [driverId, vehicleIds]
     : scopeToManager
       ? [driverId, req.user?.id]
       : [driverId];
@@ -1469,6 +1488,20 @@ export const getDriverStatement = asyncHandler(async (req: AuthRequest, res: Res
        r.from_location,
        r.to_location,
        COALESCE(s.total_expenses, (SELECT SUM(de.amount) FROM driver_expenses de WHERE de.trip_id = t.id), 0) as total_expenses,
+       (
+         SELECT COALESCE(
+           json_agg(
+             json_build_object(
+               'expense_type', de.expense_type,
+               'description', de.description,
+               'amount', de.amount
+             ) ORDER BY de.id ASC
+           ),
+           '[]'::json
+         )
+         FROM driver_expenses de
+         WHERE de.trip_id = t.id
+       ) as expense_items,
        s.id as settlement_id,
        COALESCE(s.settlement_status, 'PENDING') as settlement_status,
        s.balance_to_driver,

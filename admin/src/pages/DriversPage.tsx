@@ -1893,7 +1893,7 @@ export const DriversPage: React.FC = () => {
             title="View Details & Download"
             style={{ color: '#2563eb', borderColor: '#bfdbfe' }}
           >
-            <Eye size={14} />
+            <Eye size={14} /> View
           </button>
           <button
             onClick={() => openEdit(d)}

@@ -31,6 +31,8 @@ import {
   Banknote,
   Wallet,
   Truck,
+  PlusCircle,
+  ChevronRight,
 } from 'lucide-react-native';
 import { printMastersPdf, downloadMastersPdf, MastersPdfData } from '../../utils/pdfGenerator';
 import {
@@ -67,6 +69,8 @@ import {
 } from '../../types';
 import { COLORS, SPACING, RADIUS, SHADOWS } from '../../constants/theme';
 import { formatDateDMY } from '../../utils/dateUtils';
+import { DetailsSheet } from '../../components/DetailsSheet';
+import { ViewChip } from '../../components/ViewChip';
 
 type MasterTab =
   | 'UNITS'
@@ -84,6 +88,7 @@ export const AdminMastersScreen: React.FC<{ navigation: any; route: any }> = ({ 
   const initial = route.params?.initialTab as MasterTab | undefined;
   const [activeTab, setActiveTab] = useState<MasterTab>(initial || 'UNITS');
   const [isLoading, setIsLoading] = useState(false);
+  const [viewDetails, setViewDetails] = useState<{ title: string; rows: { label: string; value?: string | number | null }[] } | null>(null);
   const [pdfLoading, setPdfLoading] = useState<'print' | 'download' | null>(null);
 
   // Data states
@@ -919,7 +924,7 @@ export const AdminMastersScreen: React.FC<{ navigation: any; route: any }> = ({ 
             }}
           >
             <Plus size={15} color={COLORS.white} />
-            <Text style={styles.addBtnText}>Add New</Text>
+            <Text style={styles.addBtnText}>{activeTab === 'ADVANCES' ? 'Give Advance' : activeTab === 'OWNERS' ? 'Add Owner' : 'Add New'}</Text>
           </TouchableOpacity>
         </View>
       </View>
@@ -946,6 +951,7 @@ export const AdminMastersScreen: React.FC<{ navigation: any; route: any }> = ({ 
                     ) : null}
                   </View>
                   <View style={styles.cardActionsRow}>
+                    <ViewChip compact onPress={() => setViewDetails({ title: `Unit — ${u.name}`, rows: [{ label: 'Name', value: u.name }, { label: 'Abbreviation', value: u.abbreviation || '—' }, { label: 'Status', value: u.status }] })} />
                     <TouchableOpacity style={styles.actionIconBtn} onPress={() => openEditUnit(u)}>
                       <Edit2 size={16} color="#2563eb" />
                     </TouchableOpacity>
@@ -974,6 +980,7 @@ export const AdminMastersScreen: React.FC<{ navigation: any; route: any }> = ({ 
                     ) : null}
                   </View>
                   <View style={styles.cardActionsRow}>
+                    <ViewChip compact onPress={() => setViewDetails({ title: `${r.from_location} → ${r.to_location}`, rows: [{ label: 'From', value: r.from_location }, { label: 'To', value: r.to_location }, { label: 'Party', value: r.party_name || 'All parties' }, { label: 'Rate', value: r.rate_per_unit ? `₹${Number(r.rate_per_unit).toLocaleString('en-IN')}` : '—' }] })} />
                     <TouchableOpacity style={styles.actionIconBtn} onPress={() => openEditRoute(r)}>
                       <Edit2 size={16} color="#2563eb" />
                     </TouchableOpacity>
@@ -1002,6 +1009,7 @@ export const AdminMastersScreen: React.FC<{ navigation: any; route: any }> = ({ 
                     </Text>
                   </View>
                   <View style={styles.cardActionsRow}>
+                    <ViewChip compact onPress={() => setViewDetails({ title: `Cleaning — ${c.unit_name}`, rows: [{ label: 'Unit', value: c.unit_name }, { label: 'Party', value: c.party_name || 'All parties' }, { label: 'Truck', value: c.lorry_number || 'All trucks' }, { label: 'Charge', value: `₹${Number(c.cleaning_charge || 0).toLocaleString('en-IN')}` }] })} />
                     <TouchableOpacity style={styles.actionIconBtn} onPress={() => openEditCleaning(c)}>
                       <Edit2 size={16} color="#2563eb" />
                     </TouchableOpacity>
@@ -1031,6 +1039,7 @@ export const AdminMastersScreen: React.FC<{ navigation: any; route: any }> = ({ 
                     {ul.description ? <Text style={styles.itemSub}>{ul.description}</Text> : null}
                   </View>
                   <View style={styles.cardActionsRow}>
+                    <ViewChip compact onPress={() => setViewDetails({ title: `Unloading — ${ul.unit_name}`, rows: [{ label: 'Party', value: ul.party_name || `Party #${ul.party_id}` }, { label: 'Unit', value: ul.unit_name }, { label: 'Rate / ton', value: `₹${Number(ul.rate_per_ton || 0).toLocaleString('en-IN')}` }, { label: 'Note', value: ul.description || '—' }] })} />
                     <TouchableOpacity style={styles.actionIconBtn} onPress={() => openEditUnloading(ul)}>
                       <Edit2 size={16} color="#2563eb" />
                     </TouchableOpacity>
@@ -1059,6 +1068,7 @@ export const AdminMastersScreen: React.FC<{ navigation: any; route: any }> = ({ 
                     {b.description ? <Text style={styles.itemSub}>{b.description}</Text> : null}
                   </View>
                   <View style={styles.cardActionsRow}>
+                    <ViewChip compact onPress={() => setViewDetails({ title: 'Driver bata', rows: [{ label: 'Percentage', value: `${b.rate_percentage}%` }, { label: 'Multiplier', value: String(b.rate_multiplier) }, { label: 'Party', value: b.party_name || 'Default' }, { label: 'Note', value: b.description || '—' }] })} />
                     <TouchableOpacity style={styles.actionIconBtn} onPress={() => openEditBata(b)}>
                       <Edit2 size={16} color="#2563eb" />
                     </TouchableOpacity>
@@ -1083,6 +1093,7 @@ export const AdminMastersScreen: React.FC<{ navigation: any; route: any }> = ({ 
                     {l.party_name ? <Text style={styles.itemSub}>Party: {l.party_name}</Text> : null}
                   </View>
                   <View style={styles.cardActionsRow}>
+                    <ViewChip compact onPress={() => setViewDetails({ title: 'Expense limit', rows: [{ label: 'Max amount', value: `₹${Number(l.max_amount || 0).toLocaleString('en-IN')}` }, { label: 'Party', value: l.party_name || 'Default' }, { label: 'Note', value: l.description || '—' }] })} />
                     <TouchableOpacity style={styles.actionIconBtn} onPress={() => openEditLimit(l)}>
                       <Edit2 size={16} color="#2563eb" />
                     </TouchableOpacity>
@@ -1095,29 +1106,57 @@ export const AdminMastersScreen: React.FC<{ navigation: any; route: any }> = ({ 
             ))}
 
           {/* OWNERS */}
-          {activeTab === 'OWNERS' &&
-            (owners.length === 0 ? (
-              <View style={styles.centerBox}><Text style={styles.centerText}>No owners registered</Text></View>
-            ) : (
-              owners.map((o) => (
-                <View key={o.id} style={styles.itemCard}>
+          {activeTab === 'OWNERS' && (
+            <>
+              <TouchableOpacity
+                style={styles.givenAdvanceCard}
+                onPress={() => navigation.navigate('AdminOwnerAdvances')}
+                activeOpacity={0.85}
+              >
+                <View style={styles.givenAdvanceHeader}>
                   <View style={{ flex: 1 }}>
-                    <Text style={styles.itemTitle}>{o.name}</Text>
-                    {o.mobile_number ? (
-                      <Text style={styles.itemSub}>Phone: {o.mobile_number}</Text>
-                    ) : null}
+                    <Text style={styles.givenAdvanceTitle}>Given Owner Advances</Text>
+                    <Text style={styles.givenAdvanceSub}>Tap to view given advance details</Text>
                   </View>
-                  <View style={styles.cardActionsRow}>
-                    <TouchableOpacity style={styles.actionIconBtn} onPress={() => openEditOwner(o)}>
-                      <Edit2 size={16} color="#2563eb" />
-                    </TouchableOpacity>
-                    <TouchableOpacity style={[styles.actionIconBtn, { backgroundColor: '#fef2f2' }]} onPress={() => handleDeleteOwner(o)}>
-                      <Trash2 size={16} color="#ef4444" />
-                    </TouchableOpacity>
-                  </View>
+                  <TouchableOpacity
+                    style={styles.giveAdvanceDashBtn}
+                    onPress={() => navigation.navigate('AdminOwnerAdvances', { openGive: true })}
+                    activeOpacity={0.85}
+                  >
+                    <PlusCircle size={16} color={COLORS.white} />
+                    <Text style={styles.giveAdvanceDashBtnText}>Give Advance</Text>
+                  </TouchableOpacity>
                 </View>
-              ))
-            ))}
+                <View style={styles.viewAllAdvances}>
+                  <Text style={styles.viewAllAdvancesText}>Open given advances</Text>
+                  <ChevronRight size={16} color="#c2410c" />
+                </View>
+              </TouchableOpacity>
+              {owners.length === 0 ? (
+                <View style={styles.centerBox}><Text style={styles.centerText}>No owners registered</Text></View>
+              ) : (
+                owners.map((o) => (
+                  <View key={o.id} style={styles.itemCard}>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.itemTitle}>{o.name}</Text>
+                      {o.mobile_number ? (
+                        <Text style={styles.itemSub}>Phone: {o.mobile_number}</Text>
+                      ) : null}
+                    </View>
+                    <View style={styles.cardActionsRow}>
+                      <ViewChip compact onPress={() => setViewDetails({ title: `Owner — ${o.name}`, rows: [{ label: 'Name', value: o.name }, { label: 'Mobile', value: o.mobile_number || '—' }] })} />
+                      <TouchableOpacity style={styles.actionIconBtn} onPress={() => openEditOwner(o)}>
+                        <Edit2 size={16} color="#2563eb" />
+                      </TouchableOpacity>
+                      <TouchableOpacity style={[styles.actionIconBtn, { backgroundColor: '#fef2f2' }]} onPress={() => handleDeleteOwner(o)}>
+                        <Trash2 size={16} color="#ef4444" />
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+                ))
+              )}
+            </>
+          )}
 
           {/* ADVANCES */}
           {activeTab === 'ADVANCES' &&
@@ -1134,15 +1173,23 @@ export const AdminMastersScreen: React.FC<{ navigation: any; route: any }> = ({ 
                       Amount: ₹{parseFloat(String(adv.amount)).toLocaleString('en-IN')}
                     </Text>
                     <Text style={styles.itemSub}>
-                      {isDriver ? (
-                        <>To Driver: <Text style={{ fontWeight: '700', color: '#7c3aed' }}>{adv.driver_name || `Driver #${adv.driver_id}`}</Text>{adv.lorry_number ? ` (${adv.lorry_number})` : ''}</>
-                      ) : (
-                        <>To Manager: <Text style={{ fontWeight: '700', color: '#0284c7' }}>{adv.manager_name || `Manager #${adv.manager_id}`}</Text></>
-                      )} • {formatDateDMY(adv.advance_date)} ({adv.payment_mode || 'CASH'})
+                      Given by: <Text style={{ fontWeight: '700', color: COLORS.text }}>{adv.owner_name || `Owner #${adv.owner_id}`}</Text>
                     </Text>
-                    {adv.notes ? <Text style={styles.itemSub}>Note: {adv.notes}</Text> : null}
+                    <Text style={styles.itemSub}>
+                      {isDriver ? (
+                        <>Received by driver: <Text style={{ fontWeight: '700', color: '#7c3aed' }}>{adv.driver_name || `Driver #${adv.driver_id}`}</Text>{adv.lorry_number ? ` (${adv.lorry_number})` : ''}</>
+                      ) : (
+                        <>Received by manager: <Text style={{ fontWeight: '700', color: '#0284c7' }}>{adv.manager_name || `Manager #${adv.manager_id}`}</Text></>
+                      )}
+                    </Text>
+                    <Text style={styles.itemSub}>
+                      Date: {formatDateDMY(adv.advance_date)} · Mode: {adv.payment_mode || 'CASH'}
+                      {adv.created_by_name ? ` · Recorded by: ${adv.created_by_name}` : ''}
+                    </Text>
+                    {adv.notes ? <Text style={styles.itemSub}>Notes: {adv.notes}</Text> : null}
                   </View>
                   <View style={styles.cardActionsRow}>
+                    <ViewChip compact onPress={() => setViewDetails({ title: `Owner advance #${adv.id}`, rows: [{ label: 'Owner', value: adv.owner_name }, { label: 'Amount', value: `₹${Number(adv.amount || 0).toLocaleString('en-IN')}` }, { label: 'Given to', value: isDriver ? (adv.driver_name || 'Driver') : (adv.manager_name || 'Manager') }, { label: 'Date', value: formatDateDMY(adv.advance_date) }, { label: 'Mode', value: adv.payment_mode || 'CASH' }, { label: 'Notes', value: adv.notes || '—' }] })} />
                     <TouchableOpacity style={styles.actionIconBtn} onPress={() => openEditAdvance(adv)}>
                       <Edit2 size={16} color="#2563eb" />
                     </TouchableOpacity>
@@ -1173,6 +1220,7 @@ export const AdminMastersScreen: React.FC<{ navigation: any; route: any }> = ({ 
                     {t.notes ? <Text style={styles.itemSub}>Note: {t.notes}</Text> : null}
                   </View>
                   <View style={styles.cardActionsRow}>
+                    <ViewChip compact onPress={() => setViewDetails({ title: `Trip advance — ${t.lorry_number}`, rows: [{ label: 'Lorry', value: t.lorry_number }, { label: 'Amount', value: `₹${Number(t.amount || 0).toLocaleString('en-IN')}` }, { label: 'Driver', value: t.driver_name || '—' }, { label: 'Manager', value: t.manager_name || '—' }, { label: 'Date', value: formatDateDMY(t.advance_date) }, { label: 'Notes', value: t.notes || '—' }] })} />
                     <TouchableOpacity
                       style={[styles.actionIconBtn, { backgroundColor: '#fef2f2' }]}
                       onPress={() => {
@@ -1280,6 +1328,7 @@ export const AdminMastersScreen: React.FC<{ navigation: any; route: any }> = ({ 
                     {d.notes ? <Text style={styles.itemSub}>Note: {d.notes}</Text> : null}
                   </View>
                   <View style={styles.cardActionsRow}>
+                    <ViewChip compact onPress={() => setViewDetails({ title: `Driver advance — ${d.driver_name}`, rows: [{ label: 'Driver', value: d.driver_name }, { label: 'Amount', value: `₹${Number(d.amount || 0).toLocaleString('en-IN')}` }, { label: 'Lorry', value: d.lorry_number || '—' }, { label: 'Date', value: formatDateDMY(d.advance_date) }, { label: 'Notes', value: d.notes || '—' }] })} />
                     <TouchableOpacity
                       style={[styles.actionIconBtn, { backgroundColor: '#fef2f2' }]}
                       onPress={() => {
@@ -1611,6 +1660,12 @@ export const AdminMastersScreen: React.FC<{ navigation: any; route: any }> = ({ 
           </ScrollView>
         </View>
       </Modal>
+      <DetailsSheet
+        visible={!!viewDetails}
+        title={viewDetails?.title || 'Details'}
+        rows={viewDetails?.rows}
+        onClose={() => setViewDetails(null)}
+      />
     </View>
   );
 };
@@ -1666,6 +1721,56 @@ const styles = StyleSheet.create({
     borderRadius: RADIUS.md,
     backgroundColor: '#f1f5f9',
   },
+  givenAdvanceCard: {
+    backgroundColor: '#fff7ed',
+    borderWidth: 1,
+    borderColor: '#fdba74',
+    borderRadius: RADIUS.lg,
+    padding: SPACING.md,
+    marginBottom: SPACING.sm,
+  },
+  givenAdvanceHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    marginBottom: 8,
+  },
+  givenAdvanceTitle: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: '#9a3412',
+  },
+  givenAdvanceSub: {
+    fontSize: 11.5,
+    color: '#c2410c',
+    marginTop: 2,
+  },
+  giveAdvanceDashBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: '#d97706',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: RADIUS.md,
+  },
+  giveAdvanceDashBtnText: {
+    color: COLORS.white,
+    fontSize: 12,
+    fontWeight: '800',
+  },
+  viewAllAdvances: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    gap: 2,
+    paddingTop: 2,
+  },
+  viewAllAdvancesText: {
+    fontSize: 12,
+    fontWeight: '800',
+    color: '#c2410c',
+  },
   addBtn: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1689,9 +1794,8 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.white,
     borderRadius: RADIUS.md,
     padding: SPACING.md,
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
+    flexDirection: 'column',
+    gap: 10,
     borderWidth: 1,
     borderColor: COLORS.border,
     ...SHADOWS.sm,
@@ -1709,13 +1813,27 @@ const styles = StyleSheet.create({
   cardActionsRow: {
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'flex-end',
     gap: 8,
+    flexShrink: 0,
   },
   actionIconBtn: {
     padding: 7,
     borderRadius: RADIUS.sm,
     backgroundColor: '#eff6ff',
   },
+  viewChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: '#eff6ff',
+    borderWidth: 1,
+    borderColor: '#93c5fd',
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+    borderRadius: RADIUS.sm,
+  },
+  viewChipText: { fontSize: 11, fontWeight: '800', color: '#1d4ed8' },
   partySelectChip: {
     paddingHorizontal: 12,
     paddingVertical: 6,

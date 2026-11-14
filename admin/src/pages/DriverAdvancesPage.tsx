@@ -38,6 +38,7 @@ import {
   tripService,
 } from '../services/adminService';
 import { Driver, Vehicle, Owner, User, DriverAdvance, DriverAdvanceSummary, Trip } from '../types';
+import { useAuth } from '../context/AuthContext';
 import { DataTable, Column } from '../components/Common/DataTable';
 import { Modal } from '../components/Common/Modal';
 import { DateField } from '../components/Common/DateField';
@@ -115,6 +116,8 @@ export const DriverAdvancesPage: React.FC<{ embedded?: boolean; initialView?: 'l
   embedded = false,
   initialView = 'transactions',
 }) => {
+  const { user } = useAuth();
+  const isOwnerUser = user?.role === 'OWNER';
   // Main active view: 'ledger' (per-driver summary) or 'transactions' (all advance records)
   const [activeView, setActiveView] = useState<'ledger' | 'transactions'>(embedded ? 'transactions' : initialView);
 
@@ -2551,7 +2554,7 @@ export const DriverAdvancesPage: React.FC<{ embedded?: boolean; initialView?: 'l
             className="form-control"
             style={{ height: '36px', width: '160px', fontSize: '12.5px' }}
           >
-            <option value="">All Truck Owners</option>
+            <option value="">{isOwnerUser ? 'My Trucks' : 'All Truck Owners'}</option>
             {owners.map((o) => (
               <option key={o.id} value={o.id}>
                 {o.name} {o.mobile_number ? `(${o.mobile_number})` : ''}
@@ -3849,7 +3852,7 @@ export const DriverAdvancesPage: React.FC<{ embedded?: boolean; initialView?: 'l
                 }
               }}
             >
-              <option value="">— All Owners / Any Truck —</option>
+              <option value="">{isOwnerUser ? '— My Trucks —' : '— All Owners / Any Truck —'}</option>
               {owners.map((o) => (
                 <option key={o.id} value={o.id}>
                   {o.name} {o.mobile_number ? `(${o.mobile_number})` : ''}

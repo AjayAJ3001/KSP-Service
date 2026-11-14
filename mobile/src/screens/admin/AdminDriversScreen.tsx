@@ -39,6 +39,8 @@ import { Driver } from '../../types';
 import { COLORS, SPACING, RADIUS, SHADOWS } from '../../constants/theme';
 import { formatDateDMY } from '../../utils/dateUtils';
 import { parseLicenseDocument } from '../../utils/docParsers';
+import { DetailsSheet } from '../../components/DetailsSheet';
+import { ViewChip } from '../../components/ViewChip';
 
 type DriverFilter = 'ALL' | 'EXPIRING' | 'ACTIVE' | 'INACTIVE';
 type LicenseType = 'HEAVY' | 'REGULAR';
@@ -178,6 +180,7 @@ export const AdminDriversScreen: React.FC<{ navigation: any }> = ({ navigation }
   // Modal state
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingDriver, setEditingDriver] = useState<Driver | null>(null);
+  const [viewDriver, setViewDriver] = useState<Driver | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [formTab, setFormTab] = useState(0); // 0 = Basic Info, 1 = Documents
 
@@ -610,6 +613,7 @@ export const AdminDriversScreen: React.FC<{ navigation: any }> = ({ navigation }
 
                 {/* Toggle Status */}
                 <View style={styles.cardActions}>
+                  <ViewChip compact onPress={() => setViewDriver(d)} />
                   <TouchableOpacity
                     style={[styles.toggleBtn, { backgroundColor: isActive ? '#fef2f2' : '#ecfdf5' }]}
                     onPress={() => handleToggleStatus(d)}
@@ -866,6 +870,19 @@ export const AdminDriversScreen: React.FC<{ navigation: any }> = ({ navigation }
           </View>
         </View>
       </Modal>
+      <DetailsSheet
+        visible={!!viewDriver}
+        title={viewDriver ? viewDriver.name : 'Driver details'}
+        rows={viewDriver ? [
+          { label: 'Name', value: viewDriver.name },
+          { label: 'Mobile', value: viewDriver.mobile_number || '—' },
+          { label: 'License', value: viewDriver.license_number || '—' },
+          { label: 'License type', value: viewDriver.license_type || '—' },
+          { label: 'Expiry', value: viewDriver.license_expiry_date ? formatDateDMY(viewDriver.license_expiry_date) : '—' },
+          { label: 'Status', value: viewDriver.status },
+        ] : []}
+        onClose={() => setViewDriver(null)}
+      />
     </View>
   );
 };

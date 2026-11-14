@@ -10,8 +10,11 @@ import { StatusBadge } from '../components/Common/StatusBadge';
 import { formatDateDMY } from '../utils/dateUtils';
 import { DateField } from '../components/Common/DateField';
 import { PRINT_BRAND_CSS, printBrandLockup } from '../utils/printBrand';
+import { useAuth } from '../context/AuthContext';
 
 export const TripsPage: React.FC = () => {
+  const { user } = useAuth();
+  const isOwnerUser = user?.role === 'OWNER';
   const [searchParams, setSearchParams] = useSearchParams();
   const [trips, setTrips] = useState<Trip[]>([]);
   const [total, setTotal] = useState(0);
@@ -38,6 +41,8 @@ export const TripsPage: React.FC = () => {
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [isViewModalOpen, setIsViewModalOpen] = useState(false);
   const [selectedTrip, setSelectedTrip] = useState<Trip | null>(null);
+  const [editTripDate, setEditTripDate] = useState('');
+  const [isSavingTripDate, setIsSavingTripDate] = useState(false);
 
   // Form
   const [formData, setFormData] = useState({
@@ -386,7 +391,28 @@ export const TripsPage: React.FC = () => {
 
   const openViewModal = (trip: Trip) => {
     setSelectedTrip(trip);
+    setEditTripDate(String(trip.trip_date || '').slice(0, 10));
     setIsViewModalOpen(true);
+  };
+
+  const handleSaveTripDate = async () => {
+    if (!selectedTrip || !editTripDate) {
+      alert('Please select a trip date.');
+      return;
+    }
+    try {
+      setIsSavingTripDate(true);
+      const res = await tripService.updateTrip(selectedTrip.id, { trip_date: editTripDate });
+      if (res.success) {
+        const updated = { ...selectedTrip, trip_date: editTripDate };
+        setSelectedTrip(updated);
+        setTrips((prev) => prev.map((t) => (t.id === selectedTrip.id ? { ...t, trip_date: editTripDate } : t)));
+      }
+    } catch (err: any) {
+      alert(err.message || 'Failed to update trip date.');
+    } finally {
+      setIsSavingTripDate(false);
+    }
   };
 
   const formatCurrency = (val: number | string) => {
@@ -810,6 +836,18 @@ export const TripsPage: React.FC = () => {
     {
       header: 'Trip Date',
       accessor: (t) => formatDateDMY(t.trip_date),
+      render: (t) => (
+        <button
+          type="button"
+          onClick={() => openViewModal(t)}
+          className="btn btn-outline btn-sm"
+          title="Edit trip date"
+          style={{ fontWeight: 700, display: 'inline-flex', alignItems: 'center', gap: '6px' }}
+        >
+          <Calendar size={13} />
+          {formatDateDMY(t.trip_date)}
+        </button>
+      ),
     },
     {
       header: 'Lorry Number',
@@ -865,8 +903,8 @@ export const TripsPage: React.FC = () => {
       header: 'Actions',
       render: (t) => (
         <div style={{ display: 'flex', gap: '6px' }}>
-          <button onClick={() => openViewModal(t)} className="btn btn-outline btn-sm" title="View Details">
-            <Eye size={14} />
+          <button onClick={() => openViewModal(t)} className="btn btn-outline btn-sm" title="View Details" style={{ display: 'inline-flex', alignItems: 'center', gap: 4, color: '#1d4ed8', borderColor: '#93c5fd', background: '#eff6ff', fontWeight: 700 }}>
+            <Eye size={14} /> View
           </button>
           <button
             onClick={() => handlePrintSingleTrip(t)}
@@ -985,7 +1023,7 @@ export const TripsPage: React.FC = () => {
                 setPage(1);
               }}
             >
-              <option value="">All Owners</option>
+              <option value="">{isOwnerUser ? 'My Trucks' : 'All Owners'}</option>
               {owners.map((o) => (
                 <option key={o.id} value={o.id}>
                   {o.name}
@@ -1612,8 +1650,22 @@ export const TripsPage: React.FC = () => {
                 <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Status: </span>
                 <StatusBadge status={selectedTrip.status} />
               </div>
-              <div style={{ fontSize: '13px', color: 'var(--text-muted)' }}>
-                Date: <strong>{formatDateDMY(selectedTrip.trip_date)}</strong>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                <span style={{ fontSize: '13px', color: 'var(--text-muted)', fontWeight: 600 }}>Trip Date:</span>
+                <div style={{ minWidth: '160px' }}>
+                  <DateField
+                    value={editTripDate}
+                    onChange={(e) => setEditTripDate(e.target.value)}
+                  />
+                </div>
+                <button
+                  type="button"
+                  className="btn btn-primary btn-sm"
+                  onClick={handleSaveTripDate}
+                  disabled={isSavingTripDate}
+                >
+                  {isSavingTripDate ? 'Saving...' : 'Save Date'}
+                </button>
               </div>
             </div>
 
@@ -1670,6 +1722,18 @@ export const TripsPage: React.FC = () => {
                 <strong style={{ color: 'var(--danger-700)', fontSize: '15px' }}>{formatCurrency(selectedTrip.balance_due || 0)}</strong>
               </div>
             </div>
+
+            {selectedTrip.expense_items && selectedTrip.expense_items.length > 0 ? (
+              <div style={{ marginBottom: 16 }}>
+                <div style={{ fontSize: 12, fontWeight: 800, color: '#92400e', marginBottom: 8 }}>Driver Expenses</div>
+                {selectedTrip.expense_items.map((it, idx) => (
+                  <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', borderBottom: '1px solid #fde68a', fontSize: 13 }}>
+                    <span style={{ fontWeight: 700, color: '#78350f' }}>{String(it.expense_type || 'Expense').replace(/_/g, ' ')}</span>
+                    <strong style={{ color: '#b45309' }}>{formatCurrency(it.amount)}</strong>
+                  </div>
+                ))}
+              </div>
+            ) : null}
 
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '20px' }}>
               <button

@@ -533,6 +533,7 @@ export interface DriverAdvanceSummary {
   trip_count: number;
   total_expenses_reported: number;
   loading_expense?: number | string;
+  unloading_expense?: number | string;
   bata_expense?: number | string;
   cleaning_expense?: number | string;
   other_expense?: number | string;

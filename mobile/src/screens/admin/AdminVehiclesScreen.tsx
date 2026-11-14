@@ -42,6 +42,8 @@ import { adminVehicleService, adminOwnerService } from '../../services/adminServ
 import { Vehicle, Owner } from '../../types';
 import { COLORS, SPACING, RADIUS, SHADOWS } from '../../constants/theme';
 import { formatDateDMY } from '../../utils/dateUtils';
+import { DetailsSheet } from '../../components/DetailsSheet';
+import { ViewChip } from '../../components/ViewChip';
 import {
   parseRcDocument,
   parseFcDocument,
@@ -239,6 +241,7 @@ export const AdminVehiclesScreen: React.FC<{ navigation: any }> = ({ navigation 
 
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingVehicle, setEditingVehicle] = useState<Vehicle | null>(null);
+  const [viewVehicle, setViewVehicle] = useState<Vehicle | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [formTab, setFormTab] = useState(0);
   const [formData, setFormData] = useState<VehicleFormData>(emptyVehicleForm());
@@ -792,6 +795,7 @@ export const AdminVehiclesScreen: React.FC<{ navigation: any }> = ({ navigation 
                 )}
 
                 <View style={styles.cardActions}>
+                  <ViewChip compact onPress={() => setViewVehicle(v)} />
                   <TouchableOpacity
                     style={[styles.toggleBtn, { backgroundColor: isActive ? '#fef2f2' : '#ecfdf5' }]}
                     onPress={() => handleToggleStatus(v)}
@@ -1106,6 +1110,22 @@ export const AdminVehiclesScreen: React.FC<{ navigation: any }> = ({ navigation 
           </View>
         </TouchableOpacity>
       </Modal>
+      <DetailsSheet
+        visible={!!viewVehicle}
+        title={viewVehicle ? viewVehicle.lorry_number : 'Vehicle details'}
+        rows={viewVehicle ? [
+          { label: 'Lorry', value: viewVehicle.lorry_number },
+          { label: 'Type', value: viewVehicle.vehicle_type || '—' },
+          { label: 'Owner', value: viewVehicle.owner_name || '—' },
+          { label: 'Capacity', value: viewVehicle.capacity_tons ? `${viewVehicle.capacity_tons} T` : '—' },
+          { label: 'FC expiry', value: viewVehicle.fc_expiry_date ? formatDateDMY(viewVehicle.fc_expiry_date) : '—' },
+          { label: 'Insurance', value: viewVehicle.insurance_expiry_date ? formatDateDMY(viewVehicle.insurance_expiry_date) : '—' },
+          { label: 'Permit', value: viewVehicle.permit_expiry_date ? formatDateDMY(viewVehicle.permit_expiry_date) : '—' },
+          { label: 'Tax', value: viewVehicle.tax_expiry_date ? formatDateDMY(viewVehicle.tax_expiry_date) : '—' },
+          { label: 'Status', value: viewVehicle.status },
+        ] : []}
+        onClose={() => setViewVehicle(null)}
+      />
     </View>
   );
 };

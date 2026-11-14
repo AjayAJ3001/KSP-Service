@@ -23,6 +23,7 @@ import { truckAdvanceService, ownerAdvanceService } from '../services/adminServi
 import { formatISTDate } from '../utils/dateUtils';
 import { Link } from 'react-router-dom';
 import { PRINT_BRAND_CSS, printBrandLockup } from '../utils/printBrand';
+import { ViewButton, DetailsModal } from '../components/Common/ViewDetails';
 
 interface ManagerRow {
   manager_id: number;
@@ -61,6 +62,7 @@ export const ManagerAdvanceLedgerPage: React.FC = () => {
     };
   }>({});
   const [detailTabs, setDetailTabs] = useState<{ [managerId: number]: 'trucks' | 'owners' }>({});
+  const [viewManager, setViewManager] = useState<ManagerRow | null>(null);
 
   const handleToggleExpand = async (managerId: number) => {
     if (expandedManager === managerId) {
@@ -521,6 +523,7 @@ export const ManagerAdvanceLedgerPage: React.FC = () => {
                   <th style={{ padding: '8px 12px', fontWeight: 700, textAlign: 'center', width: '85px', fontSize: '11.5px' }}>Given Count</th>
                   <th style={{ padding: '8px 12px', fontWeight: 700, textAlign: 'right', fontSize: '11.5px', width: '170px' }}>Available Balance in Hand</th>
                   <th style={{ padding: '8px 12px', fontWeight: 700, textAlign: 'center', width: '110px', fontSize: '11.5px' }}>Status</th>
+                  <th style={{ padding: '8px 12px', fontWeight: 700, textAlign: 'center', width: '90px', fontSize: '11.5px' }}>Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -572,6 +575,9 @@ export const ManagerAdvanceLedgerPage: React.FC = () => {
                             {bal >= 0 ? '✓ In Hand' : '⚠ Deficit'}
                           </span>
                         </td>
+                        <td style={{ padding: '8px 12px', textAlign: 'center' }} onClick={(e) => e.stopPropagation()}>
+                          <ViewButton onClick={() => setViewManager(m)} />
+                        </td>
                       </tr>
                       {isExpanded && (() => {
                         const activeTab = detailTabs[m.manager_id] || 'owners';
@@ -582,7 +588,7 @@ export const ManagerAdvanceLedgerPage: React.FC = () => {
 
                         return (
                           <tr>
-                            <td colSpan={8} style={{ padding: '14px 20px', background: '#f8fafc', borderBottom: '2px solid #cbd5e1' }}>
+                            <td colSpan={9} style={{ padding: '14px 20px', background: '#f8fafc', borderBottom: '2px solid #cbd5e1' }}>
                               {/* Compact Drilldown Balance Strip */}
                               <div
                                 style={{
@@ -819,12 +825,29 @@ export const ManagerAdvanceLedgerPage: React.FC = () => {
                       {grandTotals.total_available >= 0 ? '✓ Net In Hand' : '⚠ Deficit'}
                     </span>
                   </td>
+                  <td />
                 </tr>
               </tfoot>
             </table>
           </div>
         )}
       </div>
+      <DetailsModal
+        isOpen={!!viewManager}
+        onClose={() => setViewManager(null)}
+        title={viewManager ? `Manager — ${viewManager.manager_name}` : 'Manager details'}
+        rows={viewManager ? [
+          { label: 'Name', value: viewManager.manager_name },
+          { label: 'Role', value: viewManager.role },
+          { label: 'Mobile', value: viewManager.manager_mobile || '—' },
+          { label: 'Email', value: viewManager.manager_email || '—' },
+          { label: 'Received from owners', value: formatCurrency(viewManager.total_received) },
+          { label: 'Received count', value: viewManager.received_count },
+          { label: 'Given to trucks/drivers', value: formatCurrency(viewManager.total_given) },
+          { label: 'Given count', value: viewManager.given_count },
+          { label: 'Available in hand', value: formatCurrency(viewManager.available_balance) },
+        ] : []}
+      />
     </div>
   );
 };

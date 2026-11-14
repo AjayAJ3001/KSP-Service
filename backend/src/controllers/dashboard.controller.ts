@@ -2,17 +2,17 @@ import { Response } from 'express';
 import { query } from '../config/database';
 import { asyncHandler } from '../middleware/errorHandler';
 import { AuthRequest } from '../middleware/auth';
-import { isFleetScoped, isLinkedManager } from '../utils/ownerScope';
+import { hasFleetWideAccess, isFleetScoped, sqlIsCompanyOperator, sqlManagerVisibleTrip, sqlOwnerVehicleIn, sqlSelfOrCompany } from '../utils/ownerScope';
 
 export const getDashboard = asyncHandler(async (req: AuthRequest, res: Response): Promise<void> => {
   const today = new Date().toISOString().split('T')[0];
   const ownerFleet = isFleetScoped(req);
-  const vids = req.user?.vehicleIds?.length ? req.user.vehicleIds : [0];
-  const tripScope = ownerFleet ? 'AND t.vehicle_id = ANY($2::int[])' : '';
-  const tripScope1 = ownerFleet ? 'AND t.vehicle_id = ANY($1::int[])' : '';
-  const vehScope = ownerFleet ? 'AND id = ANY($1::int[])' : '';
-  const tripParams1 = ownerFleet ? [vids] : [];
-  const tripParamsToday = ownerFleet ? [today, vids] : [today];
+  const ownerUserId = req.user?.id || 0;
+  const tripScope = ownerFleet ? `AND ${sqlOwnerVehicleIn('t.vehicle_id', '$2')}` : '';
+  const tripScope1 = ownerFleet ? `AND ${sqlOwnerVehicleIn('t.vehicle_id', '$1')}` : '';
+  const vehScope = ownerFleet ? `AND ${sqlOwnerVehicleIn('id', '$1')}` : '';
+  const tripParams1 = ownerFleet ? [ownerUserId] : [];
+  const tripParamsToday = ownerFleet ? [today, ownerUserId] : [today];
 
   const [
     usersResult, driversResult, vehiclesResult, partiesResult,
@@ -26,8 +26,8 @@ export const getDashboard = asyncHandler(async (req: AuthRequest, res: Response)
     ownerFleet
       ? query(
           `SELECT COUNT(DISTINCT t.driver_id) as total FROM trips t
-           WHERE t.status NOT IN ('CANCELLED', 'DRAFT') AND t.vehicle_id = ANY($1::int[])`,
-          [vids]
+           WHERE t.status NOT IN ('CANCELLED', 'DRAFT') AND ${sqlOwnerVehicleIn('t.vehicle_id', '$1')}`,
+          [ownerUserId]
         )
       : query(`SELECT COUNT(*) as total FROM drivers WHERE status = 'ACTIVE'`),
     query(
@@ -37,8 +37,8 @@ export const getDashboard = asyncHandler(async (req: AuthRequest, res: Response)
     ownerFleet
       ? query(
           `SELECT COUNT(DISTINCT t.party_id) as total FROM trips t
-           WHERE t.status NOT IN ('CANCELLED', 'DRAFT') AND t.vehicle_id = ANY($1::int[])`,
-          [vids]
+           WHERE t.status NOT IN ('CANCELLED', 'DRAFT') AND ${sqlOwnerVehicleIn('t.vehicle_id', '$1')}`,
+          [ownerUserId]
         )
       : query(`SELECT COUNT(*) as total FROM parties WHERE status = 'ACTIVE'`),
     query(
@@ -138,62 +138,59 @@ export const getDashboard = asyncHandler(async (req: AuthRequest, res: Response)
 export const getMobileDashboard = asyncHandler(async (req: AuthRequest, res: Response): Promise<void> => {
   const today = new Date().toISOString().split('T')[0];
   const userId = req.user?.id;
-  const isNonAdmin = req.user?.role !== 'ADMIN' && req.user?.role !== 'OWNER';
-  const isOwner = req.user?.role === 'OWNER';
-  const linked = isLinkedManager(req);
-  const managerOnly = isNonAdmin && !linked;
-  const fleet = isOwner || linked;
+  const managerOnly = !hasFleetWideAccess(req) && !isFleetScoped(req);
+  const fleet = isFleetScoped(req);
   const vids = req.user?.vehicleIds?.length ? req.user.vehicleIds : [0];
   const oids = req.user?.ownerIds?.length ? req.user.ownerIds : [0];
   const fleetParams = [userId, oids, vids];
   const tripCountSql = managerOnly
-    ? `SELECT COUNT(*) as total FROM trips WHERE created_by = $1 AND trip_date = $2`
+    ? `SELECT COUNT(*) as total FROM trips WHERE ${sqlManagerVisibleTrip('created_by', 'vehicle_id', '$1')} AND trip_date = $2`
     : fleet
-      ? `SELECT COUNT(*) as total FROM trips WHERE trip_date = $1 AND vehicle_id = ANY($2::int[])`
+      ? `SELECT COUNT(*) as total FROM trips WHERE trip_date = $1 AND ${sqlOwnerVehicleIn('vehicle_id', '$2')}`
       : `SELECT COUNT(*) as total FROM trips WHERE trip_date = $1`;
-  const tripCountParams = managerOnly ? [userId, today] : fleet ? [today, vids] : [today];
+  const tripCountParams = managerOnly ? [userId, today] : fleet ? [today, userId] : [today];
   const recentTripFilter = managerOnly
-    ? 'AND t.created_by = $1'
+    ? `AND ${sqlManagerVisibleTrip('t.created_by', 't.vehicle_id', '$1')}`
     : fleet
-      ? 'AND t.vehicle_id = ANY($1::int[])'
+      ? `AND ${sqlOwnerVehicleIn('t.vehicle_id', '$1')}`
       : '';
-  const recentTripParams = managerOnly ? [userId] : fleet ? [vids] : [];
+  const recentTripParams = managerOnly ? [userId] : fleet ? [userId] : [];
   const daFilter = managerOnly
-    ? 'da.manager_id = $1'
+    ? `(${sqlSelfOrCompany('da.manager_id', '$1')} OR ${sqlIsCompanyOperator('da.created_by')})`
     : fleet
-      ? `(da.manager_id = $1 OR EXISTS (SELECT 1 FROM vehicles dav WHERE dav.id = da.vehicle_id AND dav.owner_id = ANY($2::int[])))`
+      ? `EXISTS (SELECT 1 FROM vehicles dav WHERE dav.id = da.vehicle_id AND dav.owner_id IN (SELECT uo.owner_id FROM user_owners uo WHERE uo.user_id = $1))`
       : '1=1';
   const taFilter = managerOnly
-    ? 'AND ta.manager_id = $1'
+    ? `AND (${sqlSelfOrCompany('ta.manager_id', '$1')} OR ${sqlIsCompanyOperator('ta.created_by')})`
     : fleet
-      ? 'AND (ta.manager_id = $1 OR ta.vehicle_id = ANY($3::int[]))'
+      ? `AND ${sqlOwnerVehicleIn('ta.vehicle_id', '$1')}`
       : '';
   const tripAdvFilter = managerOnly
-    ? 'AND tr.created_by = $1'
+    ? `AND ${sqlManagerVisibleTrip('tr.created_by', 'tr.vehicle_id', '$1')}`
     : fleet
-      ? 'AND tr.vehicle_id = ANY($3::int[])'
+      ? `AND ${sqlOwnerVehicleIn('tr.vehicle_id', '$1')}`
       : '';
   const oaFilter = managerOnly
     ? `AND (
-         EXISTS (SELECT 1 FROM driver_advances x WHERE x.driver_id = oa.driver_id AND x.manager_id = $1)
-         OR EXISTS (SELECT 1 FROM truck_advances x WHERE x.driver_id = oa.driver_id AND x.manager_id = $1)
+         EXISTS (SELECT 1 FROM driver_advances x WHERE x.driver_id = oa.driver_id AND (${sqlSelfOrCompany('x.manager_id', '$1')} OR ${sqlIsCompanyOperator('x.created_by')}))
+         OR EXISTS (SELECT 1 FROM truck_advances x WHERE x.driver_id = oa.driver_id AND (${sqlSelfOrCompany('x.manager_id', '$1')} OR ${sqlIsCompanyOperator('x.created_by')}))
          OR EXISTS (
            SELECT 1 FROM trips x
            WHERE x.driver_id = oa.driver_id
-             AND x.created_by = $1
+             AND ${sqlManagerVisibleTrip('x.created_by', 'x.vehicle_id', '$1')}
              AND x.status NOT IN ('CANCELLED', 'DRAFT')
          )
        )`
     : fleet
-      ? 'AND oa.owner_id = ANY($2::int[])'
+      ? 'AND oa.owner_id IN (SELECT uo.owner_id FROM user_owners uo WHERE uo.user_id = $1)'
       : '';
   const expenseFilter = managerOnly
     ? `AND (
-                 t.created_by = $1
+                 ${sqlManagerVisibleTrip('t.created_by', 't.vehicle_id', '$1')}
                  OR EXISTS (SELECT 1 FROM manager_driver_advances mda WHERE mda.trip_id = t.id)
                )`
     : fleet
-      ? 'AND t.vehicle_id = ANY($3::int[])'
+      ? `AND ${sqlOwnerVehicleIn('t.vehicle_id', '$1')}`
       : '';
   const driverExists = managerOnly
     ? `AND EXISTS (SELECT 1 FROM manager_driver_advances mda WHERE mda.driver_id = d.id)`
@@ -203,15 +200,15 @@ export const getMobileDashboard = asyncHandler(async (req: AuthRequest, res: Res
   const [todayTripsResult, balanceDueResult, recentTripsResult, advanceCreditSummaryResult, truckAdvanceUsedResult, advanceCreditResult, driverBalancesResult] = await Promise.all([
     query(tripCountSql, tripCountParams),
     query(
-      isNonAdmin
+      managerOnly
         ? `SELECT 0::numeric as balance_due`
         : `SELECT COALESCE(SUM(t.total_freight - COALESCE(tp.received, 0)), 0) as balance_due
            FROM trips t
            LEFT JOIN (SELECT trip_id, SUM(received_amount) as received FROM trip_payments GROUP BY trip_id) tp
            ON t.id = tp.trip_id
            WHERE t.status NOT IN ('SETTLED', 'CANCELLED')
-             ${isOwner ? 'AND t.vehicle_id = ANY($1::int[])' : ''}`,
-      isOwner ? [vids] : []
+             ${fleet ? `AND ${sqlOwnerVehicleIn('t.vehicle_id', '$1')}` : ''}`,
+      fleet ? [userId] : []
     ),
     query(
       `SELECT t.id, t.trip_date, t.total_freight, t.status, t.advance_paid,
@@ -219,6 +216,7 @@ export const getMobileDashboard = asyncHandler(async (req: AuthRequest, res: Res
               v.lorry_number, d.name as driver_name, p.name as party_name,
               r.from_location, r.to_location,
               u.name as unit_name, u.abbreviation as unit_abbreviation,
+              cu.name as created_by_name, cu.role as created_by_role,
               COALESCE((SELECT SUM(received_amount) FROM trip_payments WHERE trip_id = t.id), 0) as total_received,
               (t.total_freight - COALESCE((SELECT SUM(received_amount) FROM trip_payments WHERE trip_id = t.id), 0)) as balance_due
        FROM trips t
@@ -227,6 +225,7 @@ export const getMobileDashboard = asyncHandler(async (req: AuthRequest, res: Res
        JOIN parties p ON t.party_id = p.id
        JOIN routes r ON t.route_id = r.id
        LEFT JOIN units u ON t.unit_id = u.id
+       LEFT JOIN users cu ON t.created_by = cu.id
        WHERE t.status != 'DRAFT' ${recentTripFilter}
        ORDER BY t.created_at DESC LIMIT 10`,
       recentTripParams
@@ -333,7 +332,7 @@ export const getMobileDashboard = asyncHandler(async (req: AuthRequest, res: Res
          total_settled_cash_paid,
          (total_advance_given + total_settled_cash_paid - total_expenses) as balance_in_manager_hand
        FROM driver_totals
-       ${isNonAdmin ? `WHERE (
+       ${managerOnly ? `WHERE (
          total_advance_given > 0
          OR total_expenses > 0
          OR EXISTS (SELECT 1 FROM manager_driver_advances mda WHERE mda.driver_id = driver_totals.driver_id)

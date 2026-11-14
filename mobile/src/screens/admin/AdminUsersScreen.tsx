@@ -15,12 +15,11 @@ import {
   Users,
   UserPlus,
   Search,
-  Key,
-  CheckCircle,
-  XCircle,
   Trash2,
   Edit2,
   X,
+  Eye,
+  EyeOff,
   Phone,
   Mail,
   Shield,
@@ -34,6 +33,8 @@ import { adminUserService } from '../../services/adminService';
 import { User } from '../../types';
 import { useAuth } from '../../context/AuthContext';
 import { COLORS, SPACING, RADIUS, SHADOWS } from '../../constants/theme';
+import { DetailsSheet } from '../../components/DetailsSheet';
+import { ViewChip } from '../../components/ViewChip';
 
 export const AdminUsersScreen: React.FC<{ navigation: any }> = ({ navigation }) => {
   const { user: authUser } = useAuth();
@@ -55,18 +56,18 @@ export const AdminUsersScreen: React.FC<{ navigation: any }> = ({ navigation }) 
 
   // Modals
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
-  const [isResetModalOpen, setIsResetModalOpen] = useState(false);
-  const [selectedUser, setSelectedUser] = useState<User | null>(null);
+  const [viewUser, setViewUser] = useState<User | null>(null);
   const [editingUser, setEditingUser] = useState<User | null>(null);
 
   // Form State
   const [username, setUsername] = useState('');
   const [name, setName] = useState('');
   const [password, setPassword] = useState('');
+  const [passwordTouched, setPasswordTouched] = useState(false);
   const [email, setEmail] = useState('');
   const [mobileNumber, setMobileNumber] = useState('');
   const [role, setRole] = useState<'ADMIN' | 'MANAGER' | 'TRANSPORT_USER' | 'OWNER'>('MANAGER');
-  const [resetNewPassword, setResetNewPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const loadUsers = useCallback(async () => {
@@ -95,18 +96,32 @@ export const AdminUsersScreen: React.FC<{ navigation: any }> = ({ navigation }) 
   const openAddModal = () => {
     setEditingUser(null);
     resetForm();
+    setShowPassword(false);
+    setPasswordTouched(false);
     setIsAddModalOpen(true);
   };
 
-  const openEditModal = (u: User) => {
+  const openEditModal = async (u: User) => {
     setEditingUser(u);
     setUsername(u.username);
     setName(u.name);
     setPassword('');
+    setPasswordTouched(false);
+    setShowPassword(false);
     setEmail(u.email || '');
     setMobileNumber(u.mobile_number || '');
     setRole(u.role as any);
     setIsAddModalOpen(true);
+    try {
+      const res = await adminUserService.getUserById(u.id);
+      const stored = String(res.data?.current_password || '').trim();
+      if (stored) {
+        setPassword(stored);
+        setPasswordTouched(false);
+      }
+    } catch {
+      // keep masked empty field if password is not stored yet
+    }
   };
 
   const handleSaveUser = async () => {
@@ -127,6 +142,9 @@ export const AdminUsersScreen: React.FC<{ navigation: any }> = ({ navigation }) 
         Alert.alert('Invalid Password', 'Password must be at least 6 characters.');
         return;
       }
+    } else if (passwordTouched && password.trim() && password.trim().length < 6) {
+      Alert.alert('Invalid Password', 'New password must be at least 6 characters.');
+      return;
     }
 
     try {
@@ -138,6 +156,9 @@ export const AdminUsersScreen: React.FC<{ navigation: any }> = ({ navigation }) 
           mobile_number: mobileNumber.trim() || undefined,
           role,
         });
+        if (passwordTouched && password.trim()) {
+          await adminUserService.resetPassword(editingUser.id, password.trim());
+        }
         Alert.alert('Success', `User ${editingUser.username} updated successfully.`);
       } else {
         await adminUserService.createUser({
@@ -179,51 +200,12 @@ export const AdminUsersScreen: React.FC<{ navigation: any }> = ({ navigation }) 
     ]);
   };
 
-  const handleToggleStatus = (user: User) => {
-    const nextStatus = user.status === 'ACTIVE' ? 'INACTIVE' : 'ACTIVE';
-    Alert.alert(
-      'Confirm Status Change',
-      `Are you sure you want to mark ${user.name} as ${nextStatus}?`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Confirm',
-          onPress: async () => {
-            try {
-              await adminUserService.updateStatus(user.id, nextStatus);
-              loadUsers();
-            } catch (err: any) {
-              Alert.alert('Error', err.message);
-            }
-          },
-        },
-      ]
-    );
-  };
-
-  const handleResetPassword = async () => {
-    if (!selectedUser || !resetNewPassword || resetNewPassword.length < 6) {
-      Alert.alert('Validation', 'New password must be at least 6 characters.');
-      return;
-    }
-    try {
-      setIsSubmitting(true);
-      await adminUserService.resetPassword(selectedUser.id, resetNewPassword);
-      Alert.alert('Success', `Password reset for ${selectedUser.username}.`);
-      setIsResetModalOpen(false);
-      setResetNewPassword('');
-      setSelectedUser(null);
-    } catch (err: any) {
-      Alert.alert('Reset Failed', err.message);
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
-
   const resetForm = () => {
     setUsername('');
     setName('');
     setPassword('');
+    setPasswordTouched(false);
+    setShowPassword(false);
     setEmail('');
     setMobileNumber('');
     setRole('MANAGER');
@@ -419,34 +401,13 @@ export const AdminUsersScreen: React.FC<{ navigation: any }> = ({ navigation }) 
 
                 {/* Action Buttons */}
                 <View style={styles.cardActions}>
+                  <ViewChip compact onPress={() => setViewUser(u)} />
                   <TouchableOpacity
                     style={[styles.actionBtn, { backgroundColor: '#eff6ff' }]}
                     onPress={() => openEditModal(u)}
                   >
                     <Edit2 size={13} color="#2563eb" />
                     <Text style={[styles.actionBtnText, { color: '#2563eb' }]}>Edit</Text>
-                  </TouchableOpacity>
-
-                  <TouchableOpacity
-                    style={[styles.actionBtn, { backgroundColor: isActive ? '#fff7ed' : '#ecfdf5' }]}
-                    onPress={() => handleToggleStatus(u)}
-                  >
-                    {isActive ? <XCircle size={13} color="#ea580c" /> : <CheckCircle size={13} color="#16a34a" />}
-                    <Text style={[styles.actionBtnText, { color: isActive ? '#ea580c' : '#16a34a' }]}>
-                      {isActive ? 'Deactivate' : 'Activate'}
-                    </Text>
-                  </TouchableOpacity>
-
-                  <TouchableOpacity
-                    style={[styles.actionBtn, { backgroundColor: '#f1f5f9' }]}
-                    onPress={() => {
-                      setSelectedUser(u);
-                      setResetNewPassword('');
-                      setIsResetModalOpen(true);
-                    }}
-                  >
-                    <Key size={13} color="#475569" />
-                    <Text style={[styles.actionBtnText, { color: '#475569' }]}>Reset</Text>
                   </TouchableOpacity>
 
                   <TouchableOpacity
@@ -518,22 +479,58 @@ export const AdminUsersScreen: React.FC<{ navigation: any }> = ({ navigation }) 
               placeholder="e.g. Ramesh Kumar"
             />
 
-            {!editingUser && (
-              <>
-                <Text style={styles.inputLabel}>Initial Password (min 6 chars) *</Text>
-                <TextInput
-                  style={styles.formInput}
-                  value={password}
-                  onChangeText={setPassword}
-                  placeholder="••••••••"
-                  secureTextEntry
-                  autoCorrect={false}
-                  autoComplete="off"
-                  textContentType="oneTimeCode"
-                  importantForAutofill="no"
-                />
-              </>
-            )}
+            <View style={styles.passwordLabelRow}>
+              <Text style={[styles.inputLabel, { marginTop: 8, marginBottom: 0 }]}>
+                {editingUser ? 'Password' : 'Password * (Min 6 characters)'}
+              </Text>
+              {editingUser ? (
+                <Text style={styles.passwordHint}>
+                  {password ? 'Tap eye to view' : 'Set a password to view it later'}
+                </Text>
+              ) : null}
+            </View>
+            <View style={styles.passwordInputWrap}>
+              <TextInput
+                style={[styles.formInput, styles.passwordInput]}
+                value={password}
+                onChangeText={(text) => {
+                  setPasswordTouched(true);
+                  setPassword(text);
+                }}
+                placeholder={
+                  editingUser
+                    ? 'No stored password yet — type a new one'
+                    : 'Enter secure initial password'
+                }
+                placeholderTextColor={COLORS.textLight}
+                secureTextEntry={!showPassword}
+                autoCapitalize="none"
+                autoCorrect={false}
+                autoComplete="off"
+                textContentType="oneTimeCode"
+                importantForAutofill="no"
+              />
+              <TouchableOpacity
+                style={styles.eyeBtn}
+                onPress={() => {
+                  if (editingUser && !password) {
+                    Alert.alert(
+                      'Password not stored yet',
+                      'This account was created before password viewing was enabled. Save a new password once, then the eye icon can show it.'
+                    );
+                    return;
+                  }
+                  setShowPassword((v) => !v);
+                }}
+                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+              >
+                {showPassword ? (
+                  <EyeOff size={18} color={COLORS.textMuted} />
+                ) : (
+                  <Eye size={18} color={COLORS.textMuted} />
+                )}
+              </TouchableOpacity>
+            </View>
 
             <Text style={styles.inputLabel}>Mobile Phone</Text>
             <TextInput
@@ -583,63 +580,19 @@ export const AdminUsersScreen: React.FC<{ navigation: any }> = ({ navigation }) 
           </ScrollView>
         </View>
       </Modal>
-
-      {/* Reset Password Modal */}
-      <Modal
-        visible={isResetModalOpen}
-        animationType="slide"
-        transparent={true}
-        onRequestClose={() => setIsResetModalOpen(false)}
-      >
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Reset Password</Text>
-              <TouchableOpacity onPress={() => setIsResetModalOpen(false)}>
-                <X size={20} color={COLORS.text} />
-              </TouchableOpacity>
-            </View>
-
-            <Text style={styles.modalSubtitle}>
-              Setting new password for {selectedUser?.name} (@{selectedUser?.username})
-            </Text>
-
-            <Text style={styles.inputLabel}>New Password *</Text>
-            <TextInput
-              style={styles.formInput}
-              value={resetNewPassword}
-              onChangeText={setResetNewPassword}
-              placeholder="Enter new 6+ char password"
-              secureTextEntry
-              autoCorrect={false}
-              autoComplete="off"
-              textContentType="oneTimeCode"
-              importantForAutofill="no"
-            />
-
-            <View style={styles.modalActions}>
-              <TouchableOpacity
-                style={styles.modalCancelBtn}
-                onPress={() => setIsResetModalOpen(false)}
-              >
-                <Text style={styles.modalCancelText}>Cancel</Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={styles.modalSubmitBtn}
-                onPress={handleResetPassword}
-                disabled={isSubmitting}
-              >
-                {isSubmitting ? (
-                  <ActivityIndicator size="small" color={COLORS.white} />
-                ) : (
-                  <Text style={styles.modalSubmitText}>Save Password</Text>
-                )}
-              </TouchableOpacity>
-            </View>
-          </View>
-        </View>
-      </Modal>
+      <DetailsSheet
+        visible={!!viewUser}
+        title={viewUser ? viewUser.name : 'User details'}
+        rows={viewUser ? [
+          { label: 'Name', value: viewUser.name },
+          { label: 'Username', value: viewUser.username },
+          { label: 'Role', value: viewUser.role },
+          { label: 'Mobile', value: viewUser.mobile_number || '—' },
+          { label: 'Email', value: viewUser.email || '—' },
+          { label: 'Status', value: viewUser.status },
+        ] : []}
+        onClose={() => setViewUser(null)}
+      />
     </View>
   );
 };
@@ -942,6 +895,35 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     fontSize: 13,
     color: COLORS.text,
+  },
+  passwordLabelRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
+    marginTop: 4,
+    marginBottom: 4,
+  },
+  passwordHint: {
+    flex: 1,
+    textAlign: 'right',
+    fontSize: 11,
+    fontWeight: '400',
+    color: COLORS.textMuted,
+  },
+  passwordInputWrap: {
+    position: 'relative',
+    justifyContent: 'center',
+  },
+  passwordInput: {
+    paddingRight: 42,
+  },
+  eyeBtn: {
+    position: 'absolute',
+    right: 10,
+    top: 0,
+    bottom: 0,
+    justifyContent: 'center',
   },
   modalActions: {
     flexDirection: 'row',

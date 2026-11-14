@@ -1,6 +1,7 @@
 import { formatDateDMY } from './dateUtils';
 import { buildDriverTripStories, getSettlementBreakdown, storyBalanceAdvance, storyCashSettlements } from './driverTripStories';
 import { PRINT_BRAND_CSS, printBrandLockup } from './printBrand';
+import { expenseLinesFromItems } from './expenseBreakdown';
 
 export interface DriverStatementPdfData {
   driver: {
@@ -107,6 +108,9 @@ export const generateDriverStatementHtml = (data: DriverStatementPdfData, option
       });
     }
   });
+  const tripExpenseItemsById = new Map<number, any[]>(
+    (data.trips_and_expenses || []).map((t: any) => [Number(t.trip_id || t.id), Array.isArray(t.expense_items) ? t.expense_items : []])
+  );
   const tripStories = options?.tripId
     ? allStories.filter((s) => Number(s.tripId) === Number(options.tripId))
     : allStories;
@@ -356,6 +360,9 @@ export const generateDriverStatementHtml = (data: DriverStatementPdfData, option
           <tr><td colspan="2" style="padding:6px 8px 2px;font-size:10px;font-weight:800;color:#1d4ed8;">1. ADVANCE GIVEN</td></tr>
           ${advRows}
           <tr><td colspan="2" style="padding:6px 8px 2px;font-size:10px;font-weight:800;color:#c2410c;">2. TRIP EXPENSES</td></tr>
+          ${expenseLinesFromItems(story.tripId ? tripExpenseItemsById.get(Number(story.tripId)) : []).map((l) =>
+            `<tr><td style="padding:2px 8px;font-size:11px;font-weight:700;color:#92400e;">${esc(l.label)}</td><td style="padding:2px 8px;font-size:11px;font-weight:800;color:#b45309;text-align:right;">${formatCurrency(l.amount)}</td></tr>`
+          ).join('')}
           <tr><td colspan="2" style="padding:2px 8px 6px;font-size:13px;font-weight:800;color:#9a3412;">${formatCurrency(story.totalExpenses)}</td></tr>
           <tr><td colspan="2" style="padding:6px 8px;background:#f8fafc;font-size:10px;font-weight:800;color:#475569;">3. CALCULATION</td></tr>
           <tr><td colspan="2" style="padding:2px 8px;font-size:11px;color:#334155;">Advance given ${formatCurrency(shownAdvance)}</td></tr>
