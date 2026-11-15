@@ -1676,6 +1676,7 @@ export const getDriverStatement = asyncHandler(async (req: AuthRequest, res: Res
         trip_id: tr.trip_id,
         from_location: tr.from_location,
         to_location: tr.to_location,
+        expense_items: tr.expense_items || [],
       });
     }
   }

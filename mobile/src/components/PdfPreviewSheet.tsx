@@ -12,7 +12,7 @@ import {
 import { X } from 'lucide-react-native';
 import { COLORS } from '../constants/theme';
 import { formatDateDMY } from '../utils/dateUtils';
-import { expenseLinesFromItems } from '../utils/expenseBreakdown';
+import { expenseDetailLines } from '../utils/expenseBreakdown';
 import { buildDriverTripStories } from '../utils/driverTripStories';
 import { Settlement, Trip } from '../types';
 
@@ -36,13 +36,17 @@ const Info = ({ label, value }: { label: string; value?: string | null }) => (
 );
 
 function SettlementChallan({ trip, settlement }: { trip: Trip; settlement: Settlement }) {
-  const expenses = Array.isArray(settlement.expense_items) ? settlement.expense_items : [];
-  const lines = expenseLinesFromItems(expenses);
+  const details = expenseDetailLines(settlement.expense_items);
   const totalExpenses = Math.round(parseFloat(String(settlement.total_expenses || 0)) || 0);
   const freight = Math.round(parseFloat(String(settlement.total_freight || 0)) || 0);
   const advance = Math.round(parseFloat(String(
     settlement.manager_advance ?? settlement.initial_trip_advance ?? settlement.advance_paid ?? 0
   )) || 0);
+  const ownerAdvance = Math.round(parseFloat(String(settlement.owner_given || 0)) || 0);
+  const alreadyInHand = Math.round(parseFloat(String(
+    settlement.previous_driver_balance || settlement.owner_leftover_used || 0
+  )) || 0);
+  const withoutTrip = Math.round(parseFloat(String(settlement.without_trip_advance || 0)) || 0);
   const paid = Math.round(parseFloat(String(settlement.paid_amount || 0)) || 0);
   const net = Math.round(parseFloat(String(settlement.net_balance_to_driver ?? 0)) || 0);
   const need = net > 0 ? net : 0;
@@ -71,8 +75,13 @@ function SettlementChallan({ trip, settlement }: { trip: Trip; settlement: Settl
         </View>
 
         <Text style={styles.sec}>1. Driver trip expenses</Text>
-        {lines.length > 0 ? lines.map((l) => (
-          <Row key={l.label} label={l.label} value={money(l.amount)} color="#b45309" />
+        {details.length > 0 ? details.map((l, idx) => (
+          <Row
+            key={`${l.type}-${idx}`}
+            label={l.description ? `${l.type} — ${l.description}` : l.type}
+            value={money(l.amount)}
+            color="#b45309"
+          />
         )) : (
           <Row label="Consolidated trip expenses" value={money(totalExpenses)} color="#b45309" />
         )}
@@ -80,8 +89,11 @@ function SettlementChallan({ trip, settlement }: { trip: Trip; settlement: Settl
 
         <Text style={styles.sec}>2. Settlement calculation</Text>
         <Row label="Total freight" value={money(freight)} />
-        <Row label="Advance given" value={money(advance)} color="#1d4ed8" />
         <Row label="Trip expenses" value={money(totalExpenses)} color="#b45309" />
+        <Row label="Advance given" value={money(advance)} color="#1d4ed8" />
+        {ownerAdvance > 0 ? <Row label="Owner advance" value={money(ownerAdvance)} color="#6d28d9" /> : null}
+        <Row label="Already amount in hand" value={money(alreadyInHand)} color="#047857" />
+        <Row label="Without trip (driver balance)" value={money(withoutTrip)} color="#b45309" />
         {paid > 0 ? <Row label="Paid to driver" value={money(paid)} color="#15803d" /> : null}
         {need > 0 ? <Row label="Need to pay" value={money(need)} color="#dc2626" /> : (
           <Row label="Balance in hand" value={money(inHand)} color="#16a34a" />
@@ -118,6 +130,8 @@ export const PdfPreviewSheet: React.FC<{
 
   const needToPay = Math.round(parseFloat(String(data?.summary?.deficit_amount || 0)) || 0);
   const inHand = Math.round(parseFloat(String(data?.summary?.surplus_amount || 0)) || 0);
+  const withoutTripTotal = Math.round(parseFloat(String(data?.summary?.without_trip_advance_total || 0)) || 0)
+    || stories.filter((s) => s.kind === 'DIRECT_ADVANCE').reduce((sum, s) => sum + Math.round(s.totalAdvance || 0), 0);
   const showChallan = !!(trip && settlement);
 
   return (
@@ -151,33 +165,39 @@ export const PdfPreviewSheet: React.FC<{
 
             <View style={styles.kpiRow}>
               <View style={[styles.kpi, { backgroundColor: '#f5f3ff' }]}>
-                <Text style={styles.kpiLbl}>Advance</Text>
+                <Text style={styles.kpiLbl}>Advance given</Text>
                 <Text style={[styles.kpiVal, { color: '#6d28d9' }]}>{money(data.summary?.total_advance_given)}</Text>
               </View>
+              <View style={[styles.kpi, { backgroundColor: '#fff7ed' }]}>
+                <Text style={styles.kpiLbl}>Without trip</Text>
+                <Text style={[styles.kpiVal, { color: '#c2410c' }]}>{money(withoutTripTotal)}</Text>
+              </View>
+              <View style={[styles.kpi, { backgroundColor: '#f0fdf4' }]}>
+                <Text style={styles.kpiLbl}>Balance in hand</Text>
+                <Text style={[styles.kpiVal, { color: '#16a34a' }]}>{money(inHand)}</Text>
+              </View>
+            </View>
+            <View style={styles.kpiRow}>
               <View style={[styles.kpi, { backgroundColor: '#fff7ed' }]}>
                 <Text style={styles.kpiLbl}>Expenses</Text>
                 <Text style={[styles.kpiVal, { color: '#c2410c' }]}>{money(data.summary?.total_expenses)}</Text>
               </View>
-            </View>
-            <View style={styles.kpiRow}>
               <View style={[styles.kpi, { backgroundColor: '#fef2f2' }]}>
                 <Text style={styles.kpiLbl}>Need to pay</Text>
                 <Text style={[styles.kpiVal, { color: '#dc2626' }]}>{money(needToPay)}</Text>
               </View>
-              <View style={[styles.kpi, { backgroundColor: '#f0fdf4' }]}>
-                <Text style={styles.kpiLbl}>In hand</Text>
-                <Text style={[styles.kpiVal, { color: '#16a34a' }]}>{money(inHand)}</Text>
-              </View>
             </View>
 
             {stories.map((story, idx) => {
-              const lines = expenseLinesFromItems(story.tripId ? expenseByTrip.get(Number(story.tripId)) : []);
+              const details = expenseDetailLines(story.tripId ? expenseByTrip.get(Number(story.tripId)) : []);
               const calcNeed = Math.round(story.needToPay || 0);
               const calcHand = calcNeed > 0.5 ? 0 : Math.max(0, Math.round(story.balanceInHand || 0));
               return (
                 <View key={story.key || idx} style={styles.tripCard}>
                   <Text style={styles.tripHead}>
-                    Trip {idx + 1}{story.tripId ? ` #${story.tripId}` : ''}{story.date ? ` · ${formatDateDMY(story.date)}` : ''}
+                    {story.kind === 'DIRECT_ADVANCE'
+                      ? `Without trip · Direct advance${story.date ? ` · ${formatDateDMY(story.date)}` : ''}`
+                      : `Trip ${idx + 1}${story.tripId ? ` #${story.tripId}` : ''}${story.date ? ` · ${formatDateDMY(story.date)}` : ''}`}
                   </Text>
                   {!!story.lorry && <Text style={styles.meta}>Truck: {story.lorry}</Text>}
                   {!!story.route && <Text style={styles.meta}>Route: {String(story.route)}</Text>}
@@ -195,18 +215,42 @@ export const PdfPreviewSheet: React.FC<{
                       />
                     ))
                   )}
+                  <Row label="Advance given" value={money(story.totalAdvance)} color="#1d4ed8" />
+                  <Row label="Without trip" value={money(story.kind === 'DIRECT_ADVANCE' ? story.totalAdvance : 0)} color="#b45309" />
+                  <Row label="Balance in hand" value={money(calcHand)} color="#16a34a" />
 
-                  <Text style={styles.sec}>2. Trip expenses</Text>
-                  {lines.map((l) => (
-                    <Row key={l.label} label={l.label} value={money(l.amount)} color="#b45309" />
-                  ))}
-                  <Row label="Total expenses" value={money(story.totalExpenses)} color="#9a3412" />
-
-                  <Text style={styles.sec}>3. Result</Text>
-                  {calcNeed > 0.5 ? (
-                    <Row label="Need to pay" value={money(calcNeed)} color="#dc2626" />
+                  {story.kind === 'DIRECT_ADVANCE' ? (
+                    <>
+                      <Text style={styles.sec}>2. Without trip balance</Text>
+                      <Row label="Already amount in hand" value={money(story.broughtForward || 0)} color="#047857" />
+                      <Row label="Without trip (driver balance)" value={money(story.totalAdvance)} color="#b45309" />
+                      <Row label="Balance in hand" value={money(calcHand || story.balanceInHand || story.totalAdvance)} color="#16a34a" />
+                    </>
                   ) : (
-                    <Row label="Balance in hand" value={money(calcHand)} color="#16a34a" />
+                    <>
+                      <Text style={styles.sec}>2. Trip expenses</Text>
+                      {details.length > 0 ? details.map((l, i) => (
+                        <Row
+                          key={`${l.type}-${i}`}
+                          label={l.description ? `${l.type} — ${l.description}` : l.type}
+                          value={money(l.amount)}
+                          color="#b45309"
+                        />
+                      )) : (
+                        <Row label="Trip expenses" value={money(story.totalExpenses)} color="#b45309" />
+                      )}
+                      <Row label="Total expenses" value={money(story.totalExpenses)} color="#9a3412" />
+                      {story.broughtForward > 0 ? (
+                        <Row label="Already amount in hand" value={money(story.broughtForward)} color="#047857" />
+                      ) : null}
+
+                      <Text style={styles.sec}>3. Result</Text>
+                      {calcNeed > 0.5 ? (
+                        <Row label="Need to pay" value={money(calcNeed)} color="#dc2626" />
+                      ) : (
+                        <Row label="Balance in hand" value={money(calcHand)} color="#16a34a" />
+                      )}
+                    </>
                   )}
                 </View>
               );

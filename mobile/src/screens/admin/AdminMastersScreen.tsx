@@ -168,7 +168,7 @@ export const AdminMastersScreen: React.FC<{ navigation: any; route: any }> = ({ 
   const [advVehicleId, setAdvVehicleId] = useState<number | null>(null);
   const [advAmount, setAdvAmount] = useState('');
   const [advDate, setAdvDate] = useState('');
-  const [advMode, setAdvMode] = useState<'CASH' | 'UPI' | 'BANK_TRANSFER' | 'CHEQUE'>('CASH');
+  const [advMode, setAdvMode] = useState<'CASH' | 'UPI' | 'BANK_TRANSFER' | 'ATM'>('CASH');
   const [advNotes, setAdvNotes] = useState('');
 
   useEffect(() => {
@@ -1639,7 +1639,7 @@ export const AdminMastersScreen: React.FC<{ navigation: any; route: any }> = ({ 
 
             <Text style={styles.label}>Payment Mode</Text>
             <View style={{ flexDirection: 'row', gap: 6, marginBottom: 8 }}>
-              {(['CASH', 'UPI', 'BANK_TRANSFER', 'CHEQUE'] as const).map((m) => (
+              {(['CASH', 'UPI', 'BANK_TRANSFER', 'ATM'] as const).map((m) => (
                 <TouchableOpacity
                   key={m}
                   style={[styles.partySelectChip, advMode === m && styles.partySelectChipActive, { flex: 1, alignItems: 'center' }]}

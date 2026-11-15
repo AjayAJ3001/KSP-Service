@@ -268,6 +268,7 @@ export interface Settlement {
   previous_driver_balance?: number;
   net_balance_to_driver?: number;
   driver_current_balance?: number;
+  without_trip_advance?: number;
   settlement_status: 'PENDING' | 'VERIFIED' | 'SETTLED';
   trip_date?: string;
   lorry_number?: string;

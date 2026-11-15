@@ -37,6 +37,7 @@ export const AdminLayout: React.FC = () => {
   const { user, logout } = useAuth();
   const location = useLocation();
   const isOwnerUser = user?.role === 'OWNER';
+  const isManagerUser = user?.role === 'MANAGER';
   const isFullAdmin = user?.role === 'ADMIN';
   const navigate = useNavigate();
   const [showExpiryModal, setShowExpiryModal] = useState(false);
@@ -109,7 +110,7 @@ export const AdminLayout: React.FC = () => {
             <div className="brand-icon-box">KSP</div>
             <div className="brand-text">
               <h1>KSP Transport</h1>
-              <span>{isOwnerUser ? 'Owner Portal' : 'Admin Portal'}</span>
+              <span>{isOwnerUser ? 'Owner Portal' : isManagerUser ? 'Manager Portal' : 'Admin Portal'}</span>
             </div>
           </div>
           <button
@@ -152,9 +153,11 @@ export const AdminLayout: React.FC = () => {
           </NavLink>
 
           <div className="nav-section-title">Master Data</div>
+          {!isManagerUser && (
           <NavLink to="/users" onClick={handleNavClick} className={({ isActive }) => `nav-item hue-indigo ${isActive ? 'active' : ''}`}>
             <Users /> {isOwnerUser ? 'Managers' : 'User Management'}
           </NavLink>
+          )}
           <NavLink to="/drivers" onClick={handleNavClick} className={({ isActive }) => `nav-item hue-emerald ${isActive ? 'active' : ''}`}>
             <UserCheck /> Drivers
           </NavLink>

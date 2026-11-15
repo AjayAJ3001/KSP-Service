@@ -411,12 +411,26 @@ export const SettlementReceiptScreen: React.FC<{ route: any; navigation: any }> 
             const tripAdvance = Math.round(Number((settlement as any).manager_advance ?? initialTripAdvance ?? advancePaid));
             const ownerAdvance = Math.round(Number((settlement as any).owner_given || 0));
             const leftoverUsed = Math.round(Number((settlement as any).owner_leftover_used || 0));
+            const alreadyInHand = Math.round(Number((settlement as any).previous_driver_balance || leftoverUsed || 0));
+            const withoutTrip = Math.round(Number((settlement as any).without_trip_advance || 0));
             const ownerName = String((settlement as any).advance_owner_name || '').trim();
             const mode = String(settlement.payment_mode || '').toUpperCase();
             const isCash = ['CASH', 'UPI', 'BANK_TRANSFER'].includes(mode);
             const laterAdj = paidAmount > 0 && !isCash;
             return (
               <>
+                <View style={styles.finRow}>
+                  <Text style={styles.finLabel}>Advance given</Text>
+                  <Text style={[styles.finVal, { color: '#1d4ed8' }]}>{formatCurrency(tripAdvance)}</Text>
+                </View>
+                <View style={[styles.finRow, { backgroundColor: '#ecfdf5' }]}>
+                  <Text style={[styles.finLabel, { color: '#047857' }]}>Already amount in hand</Text>
+                  <Text style={[styles.finVal, { color: '#047857' }]}>{formatCurrency(alreadyInHand)}</Text>
+                </View>
+                <View style={[styles.finRow, { backgroundColor: '#fff7ed' }]}>
+                  <Text style={[styles.finLabel, { color: '#c2410c' }]}>Without trip (driver balance)</Text>
+                  <Text style={[styles.finVal, { color: '#c2410c' }]}>{formatCurrency(withoutTrip)}</Text>
+                </View>
                 {tripAdvance > 0 && priorDeficitDeduction <= 0 ? (
                   <View style={styles.finRow}>
                     <Text style={styles.finLabel}>Less: Trip Advance</Text>

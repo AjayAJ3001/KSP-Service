@@ -421,6 +421,7 @@ export const attachAdvanceBreakdown = async (rows: any[]): Promise<any[]> => {
       owner_given: rec.owner_given,
       advance_given_total: Math.round(rec.manager_advance + rec.owner_given),
       advance_owner_name: ownerNames.filter(Boolean).join(' + '),
+      without_trip_advance: Math.round(unmatchedByDriver.get(Number(row.driver_id)) || 0),
     };
   });
 

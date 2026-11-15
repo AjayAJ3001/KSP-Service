@@ -14,7 +14,7 @@ import { StatusBadge } from '../components/Common/StatusBadge';
 import { formatDateDMY } from '../utils/dateUtils';
 import { DateField } from '../components/Common/DateField';
 import { PRINT_BRAND_CSS, printBrandLockup } from '../utils/printBrand';
-import { formatExpenseType } from '../utils/expenseBreakdown';
+import { formatExpenseType, normalizeExpenseItems } from '../utils/expenseBreakdown';
 import { PdfPreviewModal } from '../components/Common/PdfPreviewModal';
 import { useAuth } from '../context/AuthContext';
 
@@ -894,8 +894,9 @@ export const SettlementsPage: React.FC = () => {
     const totalExpenses = Math.round(parseFloat(String(s.total_expenses || 0)));
     const paidAmount = Math.round(parseFloat(String(s.paid_amount || 0)));
 
-    const expenseRows = (s.expense_items && s.expense_items.length > 0)
-      ? s.expense_items.map((item, idx) => `
+    const expenseItems = normalizeExpenseItems(s.expense_items);
+    const expenseRows = expenseItems.length > 0
+      ? expenseItems.map((item, idx) => `
           <tr>
             <td style="text-align: center; padding: 6px 8px; border: 1px solid #cbd5e1; font-size: 11px;">${idx + 1}</td>
             <td style="padding: 6px 8px; border: 1px solid #cbd5e1; font-weight: 700; font-size: 11.5px; color: #0f172a;">${formatExpenseType(item.expense_type)}</td>
@@ -1248,6 +1249,9 @@ export const SettlementsPage: React.FC = () => {
         const row = (label: string, valueHtml: string, extra = '') =>
           `<div class="calc-row"${extra}><span>${label}</span><strong>${valueHtml}</strong></div>`;
         let html = row('Total Driver Expenses Incurred:', `<span style="color:#b45309">${formatCurrency(c.expenses)}</span>`);
+        html += row('Advance Given:', `<span style="color:#1d4ed8">${formatCurrency(c.tripAdvance)}</span>`);
+        html += row('Already Amount in Hand:', `<span style="color:#047857">${formatCurrency(Math.max(0, Math.round(Number(s.previous_driver_balance || c.leftoverUsed || 0))))}</span>`, ' style="background:#ecfdf5"');
+        html += row('Without Trip (Driver Balance):', `<span style="color:#b45309">${formatCurrency(Math.max(0, Math.round(Number((s as any).without_trip_advance || 0))))}</span>`, ' style="background:#fff7ed"');
         if (c.tripAdvance > 0 && c.priorDeficit <= 0) {
           html += row(`Less: Trip Advance${c.advanceGivenBy ? ` (given by ${c.advanceGivenBy})` : ''}:`, `<span style="color:#1d4ed8">(-) ${formatCurrency(c.tripAdvance)}</span>`);
         } else if (c.tripAdvance > 0) {
@@ -2378,8 +2382,8 @@ export const SettlementsPage: React.FC = () => {
                   </tr>
                 </thead>
                 <tbody>
-                  {selectedSettlement.expense_items && selectedSettlement.expense_items.length > 0 ? (
-                    selectedSettlement.expense_items.map((it, idx) => (
+                  {normalizeExpenseItems(selectedSettlement.expense_items).length > 0 ? (
+                    normalizeExpenseItems(selectedSettlement.expense_items).map((it, idx) => (
                       <tr key={idx}>
                         <td style={{ textAlign: 'center', padding: '6px 8px', border: '1px solid #cbd5e1', fontSize: '11px' }}>{idx + 1}</td>
                         <td style={{ padding: '6px 8px', border: '1px solid #cbd5e1', fontWeight: 700, fontSize: '11.5px', color: '#0f172a' }}>{formatExpenseType(it.expense_type)}</td>

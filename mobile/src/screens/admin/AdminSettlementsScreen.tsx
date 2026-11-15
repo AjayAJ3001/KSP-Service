@@ -392,9 +392,17 @@ export const AdminSettlementsScreen: React.FC<{ navigation: any }> = ({ navigati
     const ownerAdvance = Math.round(Number(s.owner_given || 0));
     const ownerAdvanceBal = Math.round(parseFloat(String(s.owner_balance ?? 0)) || 0);
     const isOwnerLeftover = leftoverUsed > 0 && ownerAdvance <= 0 && manager <= 0;
+    const alreadyInHand = Math.round(parseFloat(String(s.previous_driver_balance ?? leftoverUsed)) || 0);
+    const withoutTrip = Math.round(parseFloat(String(s.without_trip_advance ?? 0)) || 0);
     const rows: { label: string; value: number; color: string; bg: string }[] = [
-      { label: 'Advance', value: manager, color: '#1d4ed8', bg: '#eff6ff' },
+      { label: 'Advance given', value: manager, color: '#1d4ed8', bg: '#eff6ff' },
     ];
+    if (alreadyInHand > 0) {
+      rows.push({ label: 'Already in hand', value: alreadyInHand, color: '#047857', bg: '#ecfdf5' });
+    }
+    if (withoutTrip > 0) {
+      rows.push({ label: 'Without trip', value: withoutTrip, color: '#b45309', bg: '#fff7ed' });
+    }
     const ownName = String(s.advance_owner_name || '').trim();
     const ownAdvLabel = ownName ? `Owner Advance (${ownName})` : 'Owner Advance';
     const ownBalLabel = ownName ? `Advance Balance in Hand (${ownName})` : 'Advance Balance in Hand';

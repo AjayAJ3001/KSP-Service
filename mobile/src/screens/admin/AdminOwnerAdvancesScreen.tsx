@@ -67,7 +67,7 @@ export const AdminOwnerAdvancesScreen: React.FC<{ navigation: any; route?: any }
   const [selectedVehicleId, setSelectedVehicleId] = useState<number | null>(null);
   const [amount, setAmount] = useState('');
   const [advanceDate, setAdvanceDate] = useState('');
-  const [paymentMode, setPaymentMode] = useState<'CASH' | 'UPI' | 'BANK_TRANSFER' | 'CHEQUE'>('CASH');
+  const [paymentMode, setPaymentMode] = useState<'CASH' | 'UPI' | 'BANK_TRANSFER' | 'ATM'>('CASH');
   const [notes, setNotes] = useState('');
 
   const loadLookups = useCallback(async () => {
@@ -687,7 +687,7 @@ export const AdminOwnerAdvancesScreen: React.FC<{ navigation: any; route?: any }
             {/* Payment Mode */}
             <Text style={styles.label}>Payment Mode</Text>
             <View style={styles.modePickerRow}>
-              {(['CASH', 'UPI', 'BANK_TRANSFER', 'CHEQUE'] as const).map((m) => (
+              {(['CASH', 'UPI', 'BANK_TRANSFER', 'ATM'] as const).map((m) => (
                 <TouchableOpacity
                   key={m}
                   style={[styles.modeBtn, paymentMode === m && styles.modeBtnActive]}

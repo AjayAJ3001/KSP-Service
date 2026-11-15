@@ -54,12 +54,13 @@ export const AdminDashboardScreen: React.FC<{ navigation: any }> = ({ navigation
   const { user } = useAuth();
   const isFullAdmin = user?.role === 'ADMIN';
   const isOwnerUser = user?.role === 'OWNER';
+  const isManagerUser = user?.role === 'MANAGER';
 
   useLayoutEffect(() => {
     navigation.setOptions({
-      title: isOwnerUser ? 'Owner Control Center' : 'Admin Control Center',
+      title: isOwnerUser ? 'Owner Control Center' : isManagerUser ? 'Manager Control Center' : 'Admin Control Center',
     });
-  }, [navigation, isOwnerUser]);
+  }, [navigation, isOwnerUser, isManagerUser]);
   const [data, setData] = useState<DashboardData | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -169,9 +170,13 @@ export const AdminDashboardScreen: React.FC<{ navigation: any }> = ({ navigation
             <Crown size={22} color={COLORS.accent} />
           </Animated.View>
           <View>
-            <Text style={styles.adminBannerTitle}>{isOwnerUser ? 'KSP Owner Portal' : 'KSP Administrator Portal'}</Text>
+            <Text style={styles.adminBannerTitle}>{isOwnerUser ? 'KSP Owner Portal' : isManagerUser ? 'KSP Manager Portal' : 'KSP Administrator Portal'}</Text>
             <Text style={styles.adminBannerSubtitle}>
-              {isOwnerUser ? 'Your trucks, advances, settlements & masters' : 'Full access to operations, finances & masters'}
+              {isOwnerUser
+                ? 'Your trucks, advances, settlements & masters'
+                : isManagerUser
+                  ? 'Trips, settlements, driver advance balance & masters'
+                  : 'Full access to operations, finances & masters'}
             </Text>
           </View>
         </View>
@@ -407,6 +412,7 @@ export const AdminDashboardScreen: React.FC<{ navigation: any }> = ({ navigation
         <Text style={styles.sectionHeadingBadge}>Web Admin Parity</Text>
       </View>
       <View style={styles.navGrid}>
+        {!isManagerUser && (
         <TouchableOpacity
           style={styles.navItem}
           onPress={() => navigation.navigate('AdminUsers')}
@@ -418,6 +424,7 @@ export const AdminDashboardScreen: React.FC<{ navigation: any }> = ({ navigation
           <Text style={styles.navItemTitle}>{isFullAdmin ? 'User Management' : 'Managers'}</Text>
           <Text style={styles.navItemSub}>{stats?.total_users || 0} Accounts</Text>
         </TouchableOpacity>
+        )}
 
         <TouchableOpacity
           style={styles.navItem}

@@ -53,7 +53,7 @@ import { formatIST, formatISTDate } from '../utils/dateUtils';
 import { useAuth } from '../context/AuthContext';
 import { generateDriverStatementHtml, openStatementWindow } from '../utils/driverStatementPdf';
 import { PRINT_BRAND_CSS, printBrandLockup } from '../utils/printBrand';
-import { expenseLinesFromItems, formatExpenseType } from '../utils/expenseBreakdown';
+import { expenseDetailLines, formatExpenseType, normalizeExpenseItems } from '../utils/expenseBreakdown';
 import { ViewButton } from '../components/Common/ViewDetails';
 import { PdfPreviewModal } from '../components/Common/PdfPreviewModal';
 
@@ -371,7 +371,7 @@ const tripDetailRowHtml = (tr: Trip, advances: DriverAdvance[], settlements: Set
     <td>${tr.party_name || '—'}<div style="font-size:10px;color:#64748b">${tr.from_location || '—'} → ${tr.to_location || '—'}</div></td>
     <td>${tr.lorry_number || '—'}${tr.owner_name ? `<div style="font-size:10px;color:#64748b">${tr.owner_name}</div>` : ''}</td>
     <td>${advancePaidHtml(paid.chips) || '—'}</td>
-    <td class="num" style="color:#b45309">${formatCurrency(tripExpenseTotal(tr))}${expenseLinesFromItems(tr.expense_items).map((l) => `<div style="font-size:9px;font-weight:700;color:#92400e">${l.label} ${formatCurrency(l.amount)}</div>`).join('')}</td>
+    <td class="num" style="color:#b45309">${formatCurrency(tripExpenseTotal(tr))}${expenseDetailLines(tr.expense_items).map((l) => `<div style="font-size:9px;font-weight:700;color:#92400e">${l.type}${l.description ? ` — ${l.description}` : ''} ${formatCurrency(l.amount)}</div>`).join('')}</td>
     ${cashCellsHtml(paid, pay)}
     <td style="font-weight:800;color:${paymentStatusColor(pay.driverKind)}">${pay.driverLabel}${adjNotes.map((n) => `<div style="font-size:10px;font-weight:700;color:#c2410c">${n}</div>`).join('')}</td>
   </tr>`;
@@ -646,7 +646,7 @@ const buildTripSlipHtml = (trip: Trip, ctx: SlipContext = {}) => {
   const fromWhomRows = lines.length
     ? lines.map((l) => `<tr><td>${l.givenBy}</td><td class="num">${formatCurrency(l.amount)}</td></tr>`).join('')
     : `<tr><td colspan="2" class="center">No advance recorded</td></tr>`;
-  const expenseItems = trip.expense_items || [];
+  const expenseItems = normalizeExpenseItems(trip.expense_items);
   const expenseRows = expenseItems.length
     ? expenseItems.map((item, idx) => `<tr><td>${idx + 1}</td><td>${formatExpenseType(item.expense_type)}</td><td>${item.description || '—'}</td><td class="num">${formatCurrency(item.amount)}</td></tr>`).join('')
     : `<tr><td>1</td><td>Trip expenses</td><td>—</td><td class="num">${formatCurrency(pay.expenses)}</td></tr>`;
@@ -2482,7 +2482,7 @@ export const DriverBalanceMasterPage: React.FC = () => {
                   <option value="CASH">Cash</option>
                   <option value="UPI">UPI / GPay / PhonePe</option>
                   <option value="BANK_TRANSFER">Bank Transfer / NEFT</option>
-                  <option value="CHEQUE">Cheque</option>
+                  <option value="ATM">ATM</option>
                 </select>
               </div>
             </div>

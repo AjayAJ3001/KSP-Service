@@ -1156,6 +1156,7 @@ export const OwnerAdvancesPage: React.FC = () => {
               <option value="CASH">CASH</option>
               <option value="UPI / GPAY / PHONEPE">UPI / GPAY / PHONEPE</option>
               <option value="BANK TRANSFER (NEFT/RTGS)">BANK TRANSFER (NEFT/RTGS)</option>
+              <option value="ATM">ATM</option>
             </select>
           </div>
         </div>
@@ -1516,6 +1517,7 @@ export const OwnerAdvancesPage: React.FC = () => {
                 <option value="CASH">CASH</option>
                 <option value="UPI / GPAY / PHONEPE">UPI / GPAY / PHONEPE</option>
                 <option value="BANK TRANSFER (NEFT/RTGS)">BANK TRANSFER (NEFT/RTGS)</option>
+                <option value="ATM">ATM</option>
               </select>
             </div>
           </div>

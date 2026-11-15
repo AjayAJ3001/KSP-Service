@@ -1,4 +1,27 @@
 export type ExpenseLine = { label: string; amount: number };
+export type ExpenseDetail = { type: string; description: string; amount: number };
+
+export function normalizeExpenseItems(items?: any): any[] {
+  let list = items;
+  if (typeof list === 'string') {
+    try {
+      list = JSON.parse(list);
+    } catch {
+      return [];
+    }
+  }
+  return Array.isArray(list) ? list : [];
+}
+
+export function expenseDetailLines(items?: any): ExpenseDetail[] {
+  return normalizeExpenseItems(items)
+    .map((it) => ({
+      type: formatExpenseType(it.expense_type),
+      description: String(it.description || '').trim(),
+      amount: Number(it.amount || 0),
+    }))
+    .filter((it) => it.amount > 0);
+}
 
 const EXPENSE_TYPE_LABELS: Record<string, string> = {
   LOADING: 'Loading',
@@ -26,15 +49,8 @@ export function formatExpenseType(type?: string | null): string {
 export function expenseLinesFromItems(
   items?: { expense_type?: string; amount?: number | string }[] | string | null
 ): ExpenseLine[] {
-  let list = items;
-  if (typeof list === 'string') {
-    try {
-      list = JSON.parse(list);
-    } catch {
-      return [];
-    }
-  }
-  if (!Array.isArray(list) || !list.length) return [];
+  const list = normalizeExpenseItems(items);
+  if (!list.length) return [];
   const grouped = new Map<string, number>();
   for (const it of list) {
     const amt = Number(it.amount || 0);

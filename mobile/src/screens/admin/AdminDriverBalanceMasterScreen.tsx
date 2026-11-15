@@ -146,7 +146,7 @@ export const AdminDriverBalanceMasterScreen: React.FC<{ navigation: any }> = ({ 
   const [driverTrips, setDriverTrips] = useState<Trip[]>([]);
   const [amount, setAmount] = useState('');
   const [advanceDate, setAdvanceDate] = useState('');
-  const [paymentMode, setPaymentMode] = useState<'CASH' | 'UPI' | 'BANK_TRANSFER' | 'CHEQUE'>('CASH');
+  const [paymentMode, setPaymentMode] = useState<'CASH' | 'UPI' | 'BANK_TRANSFER' | 'ATM'>('CASH');
   const [notes, setNotes] = useState('');
   const [datePickerTarget, setDatePickerTarget] = useState<'form' | null>(null);
 
@@ -1281,7 +1281,7 @@ export const AdminDriverBalanceMasterScreen: React.FC<{ navigation: any }> = ({ 
             {/* Payment Mode */}
             <Text style={styles.label}>Payment Mode</Text>
             <View style={styles.modePickerRow}>
-              {(['CASH', 'UPI', 'BANK_TRANSFER', 'CHEQUE'] as const).map((m) => (
+              {(['CASH', 'UPI', 'BANK_TRANSFER', 'ATM'] as const).map((m) => (
                 <TouchableOpacity
                   key={m}
                   style={[styles.modeBtn, paymentMode === m && styles.modeBtnActive]}

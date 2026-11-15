@@ -60,6 +60,7 @@ import {
   shareDriverStatementPdf,
 } from '../utils/pdfGenerator';
 import { buildDriverTripStories, getSettlementBreakdown } from '../utils/driverTripStories';
+import { expenseDetailLines } from '../utils/expenseBreakdown';
 
 /* ─── helpers ──────────────────────────────────────────────── */
 const getDaysDifference = (expiryDateStr?: string) => {
@@ -336,27 +337,31 @@ const DriverAdvanceModal: React.FC<DriverAdvanceModalProps> = ({
   });
 
   // Export handlers: PDF, Print, Share
+  const statementPdfPayload = () => ({
+    driver: statement?.driver || { id: currentDriver?.driver_id, name: currentDriver?.driver_name, mobile_number: currentDriver?.driver_mobile },
+    summary: statement?.summary || {
+      total_advance_given: totalAdv,
+      total_expenses: totalExp,
+      total_settled_cash_paid: totalSettledPaid,
+      balance_in_manager_hand: currentDriver?.balance_in_manager_hand,
+      is_deficit: isDeficit,
+      is_surplus: isSurplus,
+      is_settled: isSettled,
+      deficit_amount: deficitAmount,
+      surplus_amount: surplusAmount,
+    },
+    timeline: statement?.timeline || [],
+    advances: statement?.advances,
+    trips_and_expenses: statement?.trips_and_expenses,
+    settlement_payments: statement?.settlement_payments,
+    dateRangeText: 'Complete Statement',
+  });
+
   const handlePrint = async () => {
     if (!currentDriver) return;
     try {
       setExportLoading('print');
-      const docData = {
-        driver: statement?.driver || { id: currentDriver.driver_id, name: currentDriver.driver_name, mobile_number: currentDriver.driver_mobile },
-        summary: statement?.summary || {
-          total_advance_given: totalAdv,
-          total_expenses: totalExp,
-          total_settled_cash_paid: totalSettledPaid,
-          balance_in_manager_hand: currentDriver.balance_in_manager_hand,
-          is_deficit: isDeficit,
-          is_surplus: isSurplus,
-          is_settled: isSettled,
-          deficit_amount: deficitAmount,
-          surplus_amount: surplusAmount,
-        },
-        timeline: statement?.timeline || [],
-        dateRangeText: 'Complete Statement',
-      };
-      await printDriverStatementPdf(docData);
+      await printDriverStatementPdf(statementPdfPayload());
     } catch (err: any) {
       Alert.alert('Print Error', err?.message || 'Could not print driver statement.');
     } finally {
@@ -368,23 +373,7 @@ const DriverAdvanceModal: React.FC<DriverAdvanceModalProps> = ({
     if (!currentDriver) return;
     try {
       setExportLoading('pdf');
-      const docData = {
-        driver: statement?.driver || { id: currentDriver.driver_id, name: currentDriver.driver_name, mobile_number: currentDriver.driver_mobile },
-        summary: statement?.summary || {
-          total_advance_given: totalAdv,
-          total_expenses: totalExp,
-          total_settled_cash_paid: totalSettledPaid,
-          balance_in_manager_hand: currentDriver.balance_in_manager_hand,
-          is_deficit: isDeficit,
-          is_surplus: isSurplus,
-          is_settled: isSettled,
-          deficit_amount: deficitAmount,
-          surplus_amount: surplusAmount,
-        },
-        timeline: statement?.timeline || [],
-        dateRangeText: 'Complete Statement',
-      };
-      const res = await downloadDriverStatementPdf(docData);
+      const res = await downloadDriverStatementPdf(statementPdfPayload());
       if (res.savedDirectly) {
         Alert.alert('Saved', `Driver statement PDF saved as ${res.filename}`);
       }
@@ -399,23 +388,7 @@ const DriverAdvanceModal: React.FC<DriverAdvanceModalProps> = ({
     if (!currentDriver) return;
     try {
       setExportLoading('share');
-      const docData = {
-        driver: statement?.driver || { id: currentDriver.driver_id, name: currentDriver.driver_name, mobile_number: currentDriver.driver_mobile },
-        summary: statement?.summary || {
-          total_advance_given: totalAdv,
-          total_expenses: totalExp,
-          total_settled_cash_paid: totalSettledPaid,
-          balance_in_manager_hand: currentDriver.balance_in_manager_hand,
-          is_deficit: isDeficit,
-          is_surplus: isSurplus,
-          is_settled: isSettled,
-          deficit_amount: deficitAmount,
-          surplus_amount: surplusAmount,
-        },
-        timeline: statement?.timeline || [],
-        dateRangeText: 'Complete Statement',
-      };
-      await shareDriverStatementPdf(docData);
+      await shareDriverStatementPdf(statementPdfPayload());
     } catch (err: any) {
       Alert.alert('Share Error', err?.message || 'Could not share driver statement.');
     } finally {
@@ -1044,9 +1017,35 @@ const DriverAdvanceModal: React.FC<DriverAdvanceModalProps> = ({
                     <>
                       <View>
                         <Text style={{ fontSize: 10, fontWeight: '800', color: '#c2410c' }}>2. TRIP EXPENSES</Text>
-                        <Text style={{ fontSize: 13, fontWeight: '800', color: '#9a3412', marginTop: 2 }}>
-                          {formatCurrency(story.totalExpenses)}
-                        </Text>
+                        {(() => {
+                          const fromStory = expenseDetailLines(story.expenses.flatMap((e: any) => e.expense_items || []));
+                          const fromTrip = expenseDetailLines(
+                            (statement?.trips_and_expenses || []).find((t: any) => Number(t.trip_id) === Number(story.tripId))?.expense_items
+                          );
+                          const lines = fromStory.length ? fromStory : fromTrip;
+                          if (!lines.length) {
+                            return (
+                              <Text style={{ fontSize: 13, fontWeight: '800', color: '#9a3412', marginTop: 2 }}>
+                                {formatCurrency(story.totalExpenses)}
+                              </Text>
+                            );
+                          }
+                          return (
+                            <View style={{ marginTop: 4, gap: 3 }}>
+                              {lines.map((l, li) => (
+                                <View key={`${l.type}-${li}`} style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+                                  <Text style={{ fontSize: 12, color: '#9a3412', flex: 1, marginRight: 8 }}>
+                                    {l.type}{l.description ? ` — ${l.description}` : ''}
+                                  </Text>
+                                  <Text style={{ fontSize: 12, fontWeight: '800', color: '#9a3412' }}>{formatCurrency(l.amount)}</Text>
+                                </View>
+                              ))}
+                              <Text style={{ fontSize: 12, fontWeight: '800', color: '#7c2d12', textAlign: 'right', marginTop: 2 }}>
+                                Total {formatCurrency(story.totalExpenses)}
+                              </Text>
+                            </View>
+                          );
+                        })()}
                       </View>
 
                       <View style={{ backgroundColor: '#f8fafc', borderRadius: 8, padding: 8, borderWidth: 1, borderColor: '#e2e8f0' }}>

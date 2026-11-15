@@ -7,7 +7,7 @@ import { Settlement, Trip } from '../types';
 import { formatDateDMY } from './dateUtils';
 import { PRINT_BRAND_CSS, printBrandLockup } from './pdfBrand';
 import { buildDriverTripStories, getSettlementBreakdown, storyBalanceAdvance, storyCashSettlements } from './driverTripStories';
-import { expenseLinesFromItems, formatExpenseType } from './expenseBreakdown';
+import { expenseDetailLines, formatExpenseType, normalizeExpenseItems } from './expenseBreakdown';
 
 export const generateSettlementHtml = (trip: Trip, settlement: Settlement) => {
   const formatCurrency = (val: number | string) => {
@@ -41,7 +41,7 @@ export const generateSettlementHtml = (trip: Trip, settlement: Settlement) => {
   const tripDate = formatDateDMY(trip.trip_date || settlement.trip_date || new Date());
   const payDate = settlement.payment_date ? formatDateDMY(settlement.payment_date) : '';
 
-  const items = settlement.expense_items || [];
+  const items = normalizeExpenseItems(settlement.expense_items);
   const expenseRows = items.length > 0
     ? items.map((item, idx) => `
         <tr>
@@ -406,7 +406,15 @@ export const generateSettlementHtml = (trip: Trip, settlement: Settlement) => {
         const inHand = ownerBal > 0 ? ownerBal : 0;
         const row = (label: string, value: string, extra = '') =>
           `<div class="calc-row"${extra}><span>${label}</span><strong>${value}</strong></div>`;
+        const alreadyInHand = Math.max(0, Math.round(Number((settlement as any).previous_driver_balance || leftoverUsed || 0)));
+        const withoutTrip = Math.max(0, Math.round(Number((settlement as any).without_trip_advance || 0)));
         let html = row('Total Driver Expenses Incurred:', `<span style="color:#b45309">${formatCurrency(totalExpenses)}</span>`);
+        html += row('Advance Given:', `<span style="color:#1d4ed8">${formatCurrency(tripAdvance)}</span>`);
+        if (tripAdvance > 0 && priorDeficitDeduction <= 0 && givenBy) {
+          html += row(`Advance given by:`, givenBy);
+        }
+        html += row('Already Amount in Hand:', `<span style="color:#047857">${formatCurrency(alreadyInHand)}</span>`, ' style="background:#ecfdf5"');
+        html += row('Without Trip (Driver Balance):', `<span style="color:#b45309">${formatCurrency(withoutTrip)}</span>`, ' style="background:#fff7ed"');
         if (tripAdvance > 0 && priorDeficitDeduction <= 0) {
           html += row(`Less: Trip Advance${givenBy ? ` (given by ${givenBy})` : ''}:`, `<span style="color:#1d4ed8">(-) ${formatCurrency(tripAdvance)}</span>`);
         } else if (tripAdvance > 0) {
@@ -2219,6 +2227,8 @@ export interface DriverStatementPdfData {
     surplus_amount: number;
     manager_advance_total?: number;
     owner_advance_total?: number;
+    trip_advance_total?: number;
+    without_trip_advance_total?: number;
   };
   timeline: Array<{
     id: string;
@@ -2319,6 +2329,8 @@ export const generateDriverStatementHtml = (data: DriverStatementPdfData): strin
     (data.trips_and_expenses || []).map((t: any) => [Number(t.trip_id || t.id), Array.isArray(t.expense_items) ? t.expense_items : []])
   );
   const tripStories = buildDriverTripStories(timeline);
+  const withoutTripTotal = Math.round(parseFloat(String(data.summary.without_trip_advance_total || 0)) || 0)
+    || tripStories.filter((s) => s.kind === 'DIRECT_ADVANCE').reduce((s, x) => s + Math.round(x.totalAdvance || 0), 0);
   let tripNo = 0;
   const storiesHtml = tripStories.length > 0
     ? tripStories.map((story) => {
@@ -2348,7 +2360,9 @@ export const generateDriverStatementHtml = (data: DriverStatementPdfData): strin
         const resultAmt = calcNeed > 0.5 ? calcNeed : calcHand;
         const resultColor = calcNeed > 0.5 ? '#dc2626' : calcHand > 0.5 ? '#16a34a' : '#475569';
         tripNo += 1;
-        const title = `Trip ${tripNo}${story.tripId ? ' #' + story.tripId : ''}${story.date ? ' - ' + formatDateDMY(story.date) : ''}`;
+        const title = story.kind === 'DIRECT_ADVANCE'
+          ? `Without trip · Direct advance${story.date ? ' - ' + formatDateDMY(story.date) : ''}`
+          : `Trip ${tripNo}${story.tripId ? ' #' + story.tripId : ''}${story.date ? ' - ' + formatDateDMY(story.date) : ''}`;
         const infoRows = [
           ['Party', story.partyName],
           ['Truck No', story.lorry],
@@ -2405,11 +2419,14 @@ export const generateDriverStatementHtml = (data: DriverStatementPdfData): strin
           ${infoRows}
           <tr><td colspan="2" style="padding:6px 8px 2px;font-size:10px;font-weight:800;color:#1d4ed8;">1. ADVANCE GIVEN</td></tr>
           ${advRows}
+          <tr><td style="padding:3px 8px;font-size:11px;font-weight:800;color:#1d4ed8;">Advance given</td><td style="padding:3px 8px;font-size:12px;font-weight:800;color:#1d4ed8;text-align:right;">${formatCurrency(story.totalAdvance)}</td></tr>
+          <tr><td style="padding:3px 8px;font-size:11px;font-weight:800;color:#b45309;">Without trip</td><td style="padding:3px 8px;font-size:12px;font-weight:800;color:#b45309;text-align:right;">${formatCurrency(story.kind === 'DIRECT_ADVANCE' ? story.totalAdvance : 0)}</td></tr>
+          <tr><td style="padding:3px 8px;font-size:11px;font-weight:800;color:#16a34a;">Balance in hand</td><td style="padding:3px 8px;font-size:12px;font-weight:800;color:#16a34a;text-align:right;">${formatCurrency(calcHand)}</td></tr>
           <tr><td colspan="2" style="padding:6px 8px 2px;font-size:10px;font-weight:800;color:#c2410c;">2. TRIP EXPENSES</td></tr>
-          ${expenseLinesFromItems(story.tripId ? tripExpenseItemsById.get(Number(story.tripId)) : []).map((l) =>
-            `<tr><td style="padding:2px 8px;font-size:11px;font-weight:700;color:#92400e;">${esc(l.label)}</td><td style="padding:2px 8px;font-size:11px;font-weight:800;color:#b45309;text-align:right;">${formatCurrency(l.amount)}</td></tr>`
-          ).join('')}
-          <tr><td colspan="2" style="padding:2px 8px 6px;font-size:13px;font-weight:800;color:#9a3412;">${formatCurrency(story.totalExpenses)}</td></tr>
+          ${(expenseDetailLines(story.tripId ? tripExpenseItemsById.get(Number(story.tripId)) : []).map((l) =>
+            `<tr><td style="padding:2px 8px;font-size:11px;font-weight:700;color:#92400e;">${esc(l.type)}${l.description ? ` — ${esc(l.description)}` : ''}</td><td style="padding:2px 8px;font-size:11px;font-weight:800;color:#b45309;text-align:right;">${formatCurrency(l.amount)}</td></tr>`
+          ).join('') || (story.totalExpenses > 0 ? `<tr><td style="padding:2px 8px;font-size:11px;font-weight:700;color:#92400e;">Trip expenses</td><td style="padding:2px 8px;font-size:11px;font-weight:800;color:#b45309;text-align:right;">${formatCurrency(story.totalExpenses)}</td></tr>` : ''))}
+          <tr><td colspan="2" style="padding:2px 8px 6px;font-size:13px;font-weight:800;color:#9a3412;">Total ${formatCurrency(story.totalExpenses)}</td></tr>
           <tr><td colspan="2" style="padding:6px 8px;background:#f8fafc;font-size:10px;font-weight:800;color:#475569;">3. CALCULATION</td></tr>
           ${story.broughtForward > 0 ? `<tr><td colspan="2" style="padding:2px 8px;font-size:11px;color:#047857;font-weight:700;">Previous in hand ${formatCurrency(story.broughtForward)}</td></tr>` : ''}
           <tr><td colspan="2" style="padding:2px 8px;font-size:11px;color:#334155;">Advance ${formatCurrency(Math.max(availableThisTrip, laterCovered, Math.round(story.totalAdvance || 0)))}</td></tr>
@@ -2483,21 +2500,25 @@ export const generateDriverStatementHtml = (data: DriverStatementPdfData): strin
 
         <table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;margin-bottom:10px;">
           <tr>
-            <td style="border:1px solid #cbd5e1;padding:8px 10px;background:#f8fafc;text-align:center;width:25%;">
+            <td style="border:1px solid #cbd5e1;padding:8px 10px;background:#f8fafc;text-align:center;width:20%;">
               <div style="font-size:9px;font-weight:800;color:#64748b;text-transform:uppercase;">Advance Given</div>
               <div style="font-size:15px;font-weight:800;color:#6d28d9;">${formatCurrency(data.summary.total_advance_given)}</div>
             </td>
-            <td style="border:1px solid #cbd5e1;padding:8px 10px;background:#f8fafc;text-align:center;width:25%;">
+            <td style="border:1px solid #fed7aa;padding:8px 10px;background:#fff7ed;text-align:center;width:20%;">
+              <div style="font-size:9px;font-weight:800;color:#c2410c;text-transform:uppercase;">Without Trip</div>
+              <div style="font-size:15px;font-weight:800;color:#c2410c;">${formatCurrency(withoutTripTotal)}</div>
+            </td>
+            <td style="border:1px solid #bbf7d0;padding:8px 10px;background:#f0fdf4;text-align:center;width:20%;">
+              <div style="font-size:9px;font-weight:800;color:#16a34a;text-transform:uppercase;">Balance in Hand</div>
+              <div style="font-size:15px;font-weight:800;color:#16a34a;">${formatCurrency(balanceInHand)}</div>
+            </td>
+            <td style="border:1px solid #cbd5e1;padding:8px 10px;background:#f8fafc;text-align:center;width:20%;">
               <div style="font-size:9px;font-weight:800;color:#64748b;text-transform:uppercase;">Trip Expenses</div>
               <div style="font-size:15px;font-weight:800;color:#c2410c;">${formatCurrency(data.summary.total_expenses)}</div>
             </td>
-            <td style="border:1px solid #fecaca;padding:8px 10px;background:#fef2f2;text-align:center;width:25%;">
+            <td style="border:1px solid #fecaca;padding:8px 10px;background:#fef2f2;text-align:center;width:20%;">
               <div style="font-size:9px;font-weight:800;color:#dc2626;text-transform:uppercase;">Need to Pay</div>
               <div style="font-size:15px;font-weight:800;color:#dc2626;">${formatCurrency(needToPay)}</div>
-            </td>
-            <td style="border:1px solid #bbf7d0;padding:8px 10px;background:#f0fdf4;text-align:center;width:25%;">
-              <div style="font-size:9px;font-weight:800;color:#16a34a;text-transform:uppercase;">Balance in Hand</div>
-              <div style="font-size:15px;font-weight:800;color:#16a34a;">${formatCurrency(balanceInHand)}</div>
             </td>
           </tr>
         </table>

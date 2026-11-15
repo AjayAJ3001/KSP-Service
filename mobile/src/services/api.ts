@@ -3,7 +3,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 
 export const API_PORT = 5000;
 /** Public server. Live IP is also learned from /health and saved. */
-export const CURRENT_WIFI_IP = '192.168.1.15';
+export const CURRENT_WIFI_IP = '189.72.146.91';
 const EXTRA_WIFI_IPS = ['10.185.83.146', '192.168.1.5', '192.168.5.140', '192.168.5.197', '10.180.228.146'];
 
 const SAVED_URL_KEY = 'ksp_server_base_url';

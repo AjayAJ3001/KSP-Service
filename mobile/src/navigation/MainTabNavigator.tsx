@@ -17,12 +17,13 @@ export const MainTabNavigator: React.FC = () => {
   const { user } = useAuth();
   const role = String(user?.role || '').toUpperCase();
   const isOwner = role === 'OWNER';
-  const isAdmin = role === 'ADMIN' || isOwner;
+  const isManager = role === 'MANAGER';
+  const isAdmin = role === 'ADMIN' || isOwner || isManager;
   const showTripEntry = role === 'ADMIN' || role === 'OWNER' || role === 'MANAGER' || role === 'TRANSPORT_USER';
 
   return (
     <Tab.Navigator
-      initialRouteName={isOwner || role === 'ADMIN' ? 'Admin' : 'Home'}
+      initialRouteName={isOwner || role === 'ADMIN' || isManager ? 'Admin' : 'Home'}
       screenOptions={{
         headerStyle: {
           backgroundColor: COLORS.indigo,
@@ -61,8 +62,8 @@ export const MainTabNavigator: React.FC = () => {
           name="Admin"
           component={AdminDashboardScreen}
           options={{
-            title: role === 'OWNER' ? 'Owner' : 'Admin',
-            headerTitle: role === 'OWNER' ? 'Owner Control Center' : 'Admin Control Center',
+            title: role === 'OWNER' ? 'Owner' : role === 'MANAGER' ? 'Manager' : 'Admin',
+            headerTitle: role === 'OWNER' ? 'Owner Control Center' : role === 'MANAGER' ? 'Manager Control Center' : 'Admin Control Center',
             tabBarIcon: ({ color, size }) => <ShieldCheck color={color} size={size} />,
           }}
         />
@@ -102,7 +103,7 @@ export const MainTabNavigator: React.FC = () => {
         component={ProfileScreen}
         options={{
           title: 'Profile',
-          headerTitle: isOwner ? 'Owner Profile' : isAdmin ? 'Admin Profile' : 'My Operator Profile',
+          headerTitle: isOwner ? 'Owner Profile' : isManager ? 'Manager Profile' : role === 'ADMIN' ? 'Admin Profile' : 'My Operator Profile',
           tabBarIcon: ({ color, size }) => <User color={color} size={size} />,
         }}
       />

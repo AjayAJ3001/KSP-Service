@@ -3,7 +3,7 @@ import { getTripReport, getPaymentReport, getSettlementReport } from '../control
 import { authenticate, authorize } from '../middleware/auth';
 
 const router = Router();
-router.use(authenticate, authorize('ADMIN', 'OWNER'));
+router.use(authenticate, authorize('ADMIN', 'OWNER', 'MANAGER'));
 
 router.get('/trips', getTripReport);
 router.get('/payments', getPaymentReport);

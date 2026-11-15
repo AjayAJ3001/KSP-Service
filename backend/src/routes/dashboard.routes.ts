@@ -5,7 +5,7 @@ import { authenticate, authorize } from '../middleware/auth';
 const router = Router();
 router.use(authenticate);
 
-router.get('/admin', authorize('ADMIN', 'OWNER'), getDashboard);
+router.get('/admin', authorize('ADMIN', 'OWNER', 'MANAGER'), getDashboard);
 router.get('/mobile', getMobileDashboard);
 
 export default router;

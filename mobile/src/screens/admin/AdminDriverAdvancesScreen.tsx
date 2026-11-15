@@ -124,7 +124,7 @@ export const AdminDriverAdvancesScreen: React.FC<{ navigation: any }> = ({ navig
   const [driverTrips, setDriverTrips] = useState<Trip[]>([]);
   const [amount, setAmount] = useState('');
   const [advanceDate, setAdvanceDate] = useState('');
-  const [paymentMode, setPaymentMode] = useState<'CASH' | 'UPI' | 'BANK_TRANSFER' | 'CHEQUE'>('CASH');
+  const [paymentMode, setPaymentMode] = useState<'CASH' | 'UPI' | 'BANK_TRANSFER' | 'ATM'>('CASH');
   const [notes, setNotes] = useState('');
 
   const loadLookups = useCallback(async () => {
@@ -376,7 +376,7 @@ export const AdminDriverAdvancesScreen: React.FC<{ navigation: any }> = ({ navig
         {/* Mode Filter Pills & Clear */}
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} style={[styles.modeRow, { flex: 1 }]}>
-            {['', 'CASH', 'UPI', 'BANK_TRANSFER', 'CHEQUE'].map((m) => (
+            {['', 'CASH', 'UPI', 'BANK_TRANSFER', 'ATM'].map((m) => (
               <TouchableOpacity
                 key={m}
                 style={[styles.modePill, modeFilter === m && styles.modePillActive]}
@@ -827,7 +827,7 @@ export const AdminDriverAdvancesScreen: React.FC<{ navigation: any }> = ({ navig
               {/* Payment Mode */}
               <Text style={styles.label}>PAYMENT MODE *</Text>
               <View style={styles.modeBtnGroup}>
-                {(['CASH', 'UPI', 'BANK_TRANSFER', 'CHEQUE'] as const).map((mode) => (
+                {(['CASH', 'UPI', 'BANK_TRANSFER', 'ATM'] as const).map((mode) => (
                   <TouchableOpacity
                     key={mode}
                     style={[styles.modeBtn, paymentMode === mode && styles.modeBtnActive]}

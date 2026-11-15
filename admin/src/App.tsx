@@ -35,6 +35,14 @@ const FullAdminRoute: React.FC<{ children: React.ReactNode }> = ({ children }) =
   return <>{children}</>;
 };
 
+const AdminOwnerRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const { user } = useAuth();
+  if (user?.role !== 'ADMIN' && user?.role !== 'OWNER') {
+    return <Navigate to="/dashboard" replace />;
+  }
+  return <>{children}</>;
+};
+
 const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { isAuthenticated, isLoading } = useAuth();
 
@@ -74,7 +82,7 @@ export function App() {
             <Route path="payments" element={<PaymentsPage />} />
             <Route path="expenses" element={<Navigate to="/trips" replace />} />
             <Route path="settlements" element={<SettlementsPage />} />
-            <Route path="users" element={<UsersPage />} />
+            <Route path="users" element={<AdminOwnerRoute><UsersPage /></AdminOwnerRoute>} />
             <Route path="drivers" element={<DriversPage />} />
             <Route path="owners" element={<OwnersPage />} />
             <Route path="owner-advances" element={<OwnerAdvancesPage />} />

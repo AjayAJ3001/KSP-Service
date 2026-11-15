@@ -27,6 +27,7 @@ import { formatDateDMY } from '../utils/dateUtils';
 export const DashboardPage: React.FC = () => {
   const { user } = useAuth();
   const isOwnerUser = user?.role === 'OWNER';
+  const isManagerUser = user?.role === 'MANAGER';
   const [data, setData] = useState<DashboardData | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [selectedTrip, setSelectedTrip] = useState<Trip | null>(null);
@@ -87,12 +88,14 @@ export const DashboardPage: React.FC = () => {
       >
         <div>
           <h2 style={{ fontSize: '24px', fontWeight: 800 }}>
-            {isOwnerUser ? 'Welcome to KSP Owner Dashboard' : 'Welcome to KSP Transport Dashboard'}
+            {isOwnerUser ? 'Welcome to KSP Owner Dashboard' : isManagerUser ? 'Welcome to KSP Manager Dashboard' : 'Welcome to KSP Transport Dashboard'}
           </h2>
           <p style={{ color: 'var(--text-muted)', fontSize: '14px' }}>
             {isOwnerUser
               ? 'Your trucks, driver settlements, advances and fleet masters'
-              : 'Real-time overview of fleet operations, logistics, freight collections & driver settlements'}
+              : isManagerUser
+                ? 'Trips, settlements, driver advance balance, and fleet operations'
+                : 'Real-time overview of fleet operations, logistics, freight collections & driver settlements'}
           </p>
         </div>
         <div style={{ display: 'flex', gap: '12px' }}>

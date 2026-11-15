@@ -195,7 +195,7 @@ export const LoginPage: React.FC = () => {
             KSP Transport
           </h1>
           <p style={{ color: '#64748b', fontSize: '13px', fontWeight: 500, margin: 0 }}>
-            Fleet Operations & Administrative Portal
+            Fleet Operations · Admin, Owner & Manager Portal
           </p>
         </div>
 
@@ -225,7 +225,7 @@ export const LoginPage: React.FC = () => {
         <form onSubmit={handleSubmit}>
           <div className="form-group" style={{ marginBottom: '16px' }}>
             <label className="form-label" style={{ fontSize: '12px', fontWeight: 700, color: '#334155', marginBottom: '5px' }}>
-              Admin Username
+              Username
             </label>
             <div style={{ position: 'relative' }}>
               <input
@@ -361,7 +361,7 @@ export const LoginPage: React.FC = () => {
               </>
             ) : (
               <>
-                <span>Sign In to Admin Portal</span>
+                <span>Sign In</span>
                 <ArrowRight size={16} strokeWidth={2.4} />
               </>
             )}

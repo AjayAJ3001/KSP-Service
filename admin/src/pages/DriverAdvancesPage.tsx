@@ -2626,6 +2626,7 @@ export const DriverAdvancesPage: React.FC<{ embedded?: boolean; initialView?: 'l
                 <option value="CASH">Cash</option>
                 <option value="UPI">UPI</option>
                 <option value="BANK_TRANSFER">Bank Transfer</option>
+                <option value="ATM">ATM</option>
               </select>
             </>
           )}
@@ -3925,6 +3926,7 @@ export const DriverAdvancesPage: React.FC<{ embedded?: boolean; initialView?: 'l
                 <option value="CASH">Cash</option>
                 <option value="UPI">UPI / GPay</option>
                 <option value="BANK_TRANSFER">Bank Transfer</option>
+                <option value="ATM">ATM</option>
               </select>
             </div>
           </div>
