@@ -300,6 +300,8 @@ export interface Trip {
     manager_name?: string;
   }[];
   created_by?: number;
+  created_by_name?: string;
+  created_by_role?: string;
   created_at: string;
   updated_at: string;
 }
@@ -347,6 +349,8 @@ export interface Settlement {
   trip_id: number;
   total_freight: number;
   total_expenses: number;
+  loading_expense?: number;
+  unloading_expense?: number;
   advance_paid: number;
   initial_trip_advance?: number;
   additional_advance_paid?: number;
@@ -376,6 +380,8 @@ export interface Settlement {
   notes?: string;
   settled_by?: number;
   settled_by_name?: string;
+  trip_started_by_name?: string;
+  trip_started_by_role?: string;
   settled_at?: string;
   created_by?: number;
   trip_date?: string;
@@ -434,6 +440,18 @@ export interface DashboardData {
     insurance_expiry_date?: string | null;
     permit_expiry_date?: string | null;
     tax_expiry_date?: string | null;
+  }>;
+  owner_advance_credit?: number;
+  owner_advance_entries?: number;
+  truck_advance_used?: number;
+  manager_available_balance?: number;
+  owner_advance_breakdown?: Array<{
+    id?: number;
+    owner_name?: string;
+    amount?: number;
+    advance_date?: string;
+    payment_mode?: string;
+    notes?: string;
   }>;
 }
 

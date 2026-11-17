@@ -42,13 +42,16 @@ import { formatDateDMY } from '../../utils/dateUtils';
 import { exportCSV } from '../../utils/exportUtils';
 import {
   downloadReportsPdf,
-  printReportsPdf,
   shareReportsPdf,
   downloadTripPdf,
+  shareTripPdf,
   downloadPaymentPdf,
+  sharePaymentPdf,
   downloadSettlementPdf,
+  shareSettlementPdf,
   ReportsPdfData,
 } from '../../utils/pdfGenerator';
+import { PdfExportButtons } from '../../components/PdfExportButtons';
 import { DatePickerModal, toDisplayDate } from '../../components/DatePickerModal';
 
 type Tab = 'trips' | 'payments' | 'settlements';
@@ -472,9 +475,9 @@ export const AdminReportsScreen: React.FC<{ navigation: any }> = ({ navigation }
     }
   };
 
-  const handlePrintFullPdf = async () => {
+  const handleShareFullPdf = async () => {
     try {
-      setPdfGenerating('full_print');
+      setPdfGenerating('share');
       const dateRange = fromDate || toDate ? `${toDisplayDate(fromDate) || 'Start'} to ${toDisplayDate(toDate) || 'Present'}` : 'All Dates';
       const filtersText = getActiveFilterSummary();
 
@@ -507,10 +510,9 @@ export const AdminReportsScreen: React.FC<{ navigation: any }> = ({ navigation }
         };
       }
 
-      await printReportsPdf(pdfData);
+      await shareReportsPdf(pdfData);
     } catch (err: any) {
-      console.error('Print full PDF failed', err);
-      Alert.alert('Print Error', err.message || 'Could not print PDF report.');
+      Alert.alert('Share Error', err.message || 'Could not share PDF report.');
     } finally {
       setPdfGenerating(null);
     }
@@ -881,52 +883,12 @@ export const AdminReportsScreen: React.FC<{ navigation: any }> = ({ navigation }
             )}
           </View>
 
-          {/* Full Report Export Actions: PDF, Print, CSV */}
           <View style={styles.fullExportRow}>
-            <TouchableOpacity
-              style={[styles.exportBtnBase, styles.exportPdfBtn]}
-              onPress={handleExportFullPdf}
-              disabled={pdfGenerating === 'full_pdf'}
-            >
-              {pdfGenerating === 'full_pdf' ? (
-                <ActivityIndicator size="small" color="#fff" />
-              ) : (
-                <>
-                  <FileText size={14} color="#fff" />
-                  <Text style={styles.exportBtnTextWhite}>PDF</Text>
-                </>
-              )}
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={[styles.exportBtnBase, styles.exportPrintBtn]}
-              onPress={handlePrintFullPdf}
-              disabled={pdfGenerating === 'full_print'}
-            >
-              {pdfGenerating === 'full_print' ? (
-                <ActivityIndicator size="small" color="#1d4ed8" />
-              ) : (
-                <>
-                  <Printer size={14} color="#1d4ed8" />
-                  <Text style={styles.exportBtnTextBlue}>Print</Text>
-                </>
-              )}
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={[styles.exportBtnBase, styles.exportCsvBtn]}
-              onPress={handleExportFullReport}
-              disabled={isExporting}
-            >
-              {isExporting ? (
-                <ActivityIndicator size="small" color="#fff" />
-              ) : (
-                <>
-                  <Download size={14} color="#fff" />
-                  <Text style={styles.exportBtnTextWhite}>CSV</Text>
-                </>
-              )}
-            </TouchableOpacity>
+            <PdfExportButtons
+              loading={pdfGenerating === 'full_pdf' || pdfGenerating === 'share' ? pdfGenerating : null}
+              onShare={handleShareFullPdf}
+              onDownload={handleExportFullPdf}
+            />
           </View>
         </View>
 
@@ -970,25 +932,22 @@ export const AdminReportsScreen: React.FC<{ navigation: any }> = ({ navigation }
                               {trip.status}
                             </Text>
                           </View>
-                          <TouchableOpacity
-                            style={styles.cardActionIconBtnPdf}
-                            onPress={() => handleDownloadSingleTripPdf(trip)}
-                            disabled={pdfGenerating === `trip_${trip.id}`}
-                          >
-                            {pdfGenerating === `trip_${trip.id}` ? (
-                              <ActivityIndicator size="small" color="#b91c1c" />
-                            ) : (
-                              <FileText size={13} color="#b91c1c" />
-                            )}
-                            <Text style={styles.cardActionIconTextPdf}>PDF</Text>
-                          </TouchableOpacity>
-                          <TouchableOpacity
-                            style={styles.cardActionIconBtnCsv}
-                            onPress={() => handleExportSingleTrip(trip)}
-                          >
-                            <Download size={13} color="#1d4ed8" />
-                            <Text style={styles.cardActionIconTextCsv}>CSV</Text>
-                          </TouchableOpacity>
+                          <PdfExportButtons
+                            compact
+                            loading={pdfGenerating?.includes(String(trip.id)) ? pdfGenerating : null}
+                            disabled={!!pdfGenerating}
+                            onShare={async () => {
+                              try {
+                                setPdfGenerating(`share_${trip.id}`);
+                                await shareTripPdf(trip);
+                              } catch (e: any) {
+                                Alert.alert('Share Error', e.message || 'Could not share trip challan.');
+                              } finally {
+                                setPdfGenerating(null);
+                              }
+                            }}
+                            onDownload={() => handleDownloadSingleTripPdf(trip)}
+                          />
                           {open ? <ChevronUp size={16} color={COLORS.textMuted} /> : <ChevronDown size={16} color={COLORS.textMuted} />}
                         </View>
                       </View>
@@ -1086,28 +1045,22 @@ export const AdminReportsScreen: React.FC<{ navigation: any }> = ({ navigation }
                           +{formatCurrency(p.received_amount)}
                         </Text>
 
-                        {/* Single PDF Voucher button */}
-                        <TouchableOpacity
-                          style={styles.cardActionIconBtnPdf}
-                          onPress={() => handleDownloadSinglePaymentPdf(p)}
-                          disabled={pdfGenerating === `payment_${p.id}`}
-                        >
-                          {pdfGenerating === `payment_${p.id}` ? (
-                            <ActivityIndicator size="small" color="#b91c1c" />
-                          ) : (
-                            <FileText size={13} color="#b91c1c" />
-                          )}
-                          <Text style={styles.cardActionIconTextPdf}>PDF</Text>
-                        </TouchableOpacity>
-
-                        {/* Single CSV button */}
-                        <TouchableOpacity
-                          style={styles.cardActionIconBtnCsv}
-                          onPress={() => handleExportSinglePayment(p)}
-                        >
-                          <Download size={13} color="#1d4ed8" />
-                          <Text style={styles.cardActionIconTextCsv}>CSV</Text>
-                        </TouchableOpacity>
+                        <PdfExportButtons
+                          compact
+                          loading={pdfGenerating?.includes(String(p.id)) ? pdfGenerating : null}
+                          disabled={!!pdfGenerating}
+                          onShare={async () => {
+                            try {
+                              setPdfGenerating(`share_${p.id}`);
+                              await sharePaymentPdf(p);
+                            } catch (e: any) {
+                              Alert.alert('Share Error', e.message || 'Could not share payment voucher.');
+                            } finally {
+                              setPdfGenerating(null);
+                            }
+                          }}
+                          onDownload={() => handleDownloadSinglePaymentPdf(p)}
+                        />
                       </View>
                     </View>
 
@@ -1155,28 +1108,32 @@ export const AdminReportsScreen: React.FC<{ navigation: any }> = ({ navigation }
                           </Text>
                         </View>
 
-                        {/* Single PDF Settlement Slip button */}
-                        <TouchableOpacity
-                          style={styles.cardActionIconBtnPdf}
-                          onPress={() => handleDownloadSingleSettlementPdf(s)}
-                          disabled={pdfGenerating === `settlement_${s.id}`}
-                        >
-                          {pdfGenerating === `settlement_${s.id}` ? (
-                            <ActivityIndicator size="small" color="#b91c1c" />
-                          ) : (
-                            <FileText size={13} color="#b91c1c" />
-                          )}
-                          <Text style={styles.cardActionIconTextPdf}>PDF</Text>
-                        </TouchableOpacity>
-
-                        {/* Single CSV button */}
-                        <TouchableOpacity
-                          style={styles.cardActionIconBtnCsv}
-                          onPress={() => handleExportSingleSettlement(s)}
-                        >
-                          <Download size={13} color="#1d4ed8" />
-                          <Text style={styles.cardActionIconTextCsv}>CSV</Text>
-                        </TouchableOpacity>
+                        <PdfExportButtons
+                          compact
+                          loading={pdfGenerating?.includes(String(s.id)) ? pdfGenerating : null}
+                          disabled={!!pdfGenerating}
+                          onShare={async () => {
+                            try {
+                              setPdfGenerating(`share_${s.id}`);
+                              await shareSettlementPdf(
+                                {
+                                  id: s.trip_id,
+                                  trip_date: s.trip_date || s.created_at,
+                                  lorry_number: s.lorry_number,
+                                  driver_name: s.driver_name,
+                                  party_name: s.party_name,
+                                  status: s.settlement_status || 'SETTLED',
+                                } as any,
+                                s
+                              );
+                            } catch (e: any) {
+                              Alert.alert('Share Error', e.message || 'Could not share settlement slip.');
+                            } finally {
+                              setPdfGenerating(null);
+                            }
+                          }}
+                          onDownload={() => handleDownloadSingleSettlementPdf(s)}
+                        />
                       </View>
                     </View>
 

@@ -7,6 +7,7 @@ import { DataTable, Column } from '../components/Common/DataTable';
 import { Modal } from '../components/Common/Modal';
 import { StatusBadge } from '../components/Common/StatusBadge';
 import { formatDateDMY } from '../utils/dateUtils';
+import { tripStartedByLabel } from '../utils/tripStartedBy';
 import { DateField } from '../components/Common/DateField';
 import { OverduePaymentAlertModal } from '../components/Common/OverduePaymentAlertModal';
 import { PRINT_BRAND_CSS, printBrandLockup } from '../utils/printBrand';
@@ -746,6 +747,10 @@ export const PaymentsPage: React.FC = () => {
                   <td style="background: #f8fafc; font-weight: 700; color: #475569; padding: 6px 9px; border: 1px solid #cbd5e1;">TRIP STATUS</td>
                   <td style="font-weight: 700; color: #0f172a; padding: 6px 9px; border: 1px solid #cbd5e1;">${t.status || 'NEW'}</td>
                 </tr>
+                <tr>
+                  <td style="background: #f8fafc; font-weight: 700; color: #475569; padding: 6px 9px; border: 1px solid #cbd5e1;">TRIP STARTED BY</td>
+                  <td style="font-weight: 700; color: #1d4ed8; padding: 6px 9px; border: 1px solid #cbd5e1;" colspan="3">${tripStartedByLabel((t as any).created_by_name || (t as any).trip_started_by_name, (t as any).created_by_role || (t as any).trip_started_by_role) || '—'}</td>
+                </tr>
               </tbody>
             </table>
 
@@ -1384,6 +1389,12 @@ export const PaymentsPage: React.FC = () => {
                   <strong style={{ color: '#6b21a8' }}>👤 {selectedTrip.owner_name}</strong>
                 </div>
               )}
+              {tripStartedByLabel(selectedTrip.created_by_name, selectedTrip.created_by_role) ? (
+                <div className="slip-row" style={{ border: 'none' }}>
+                  <span>Trip Started By:</span>
+                  <strong>{tripStartedByLabel(selectedTrip.created_by_name, selectedTrip.created_by_role)}</strong>
+                </div>
+              ) : null}
               <div className="slip-row" style={{ border: 'none' }}>
                 <span>Total Freight Billed:</span>
                 <strong>{formatCurrency(selectedTrip.total_freight)}</strong>
@@ -1501,6 +1512,9 @@ export const PaymentsPage: React.FC = () => {
               {selectedTrip.owner_name && (
                 <div><span style={{ color: '#64748b' }}>Owner:</span> <strong style={{ color: '#6b21a8' }}>👤 {selectedTrip.owner_name}</strong></div>
               )}
+              {tripStartedByLabel(selectedTrip.created_by_name, selectedTrip.created_by_role) ? (
+                <div><span style={{ color: '#64748b' }}>Started by:</span> <strong>{tripStartedByLabel(selectedTrip.created_by_name, selectedTrip.created_by_role)}</strong></div>
+              ) : null}
             </div>
           )}
           {paymentsList.length === 0 ? (

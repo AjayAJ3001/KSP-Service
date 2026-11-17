@@ -13,6 +13,7 @@ import { mobileTripService } from '../services/mobileService';
 import { Trip } from '../types';
 import { COLORS, SPACING, RADIUS, SHADOWS } from '../constants/theme';
 import { formatDateDMY } from '../utils/dateUtils';
+import { tripStartedByLabel } from '../utils/tripStartedBy';
 
 export const TripHistoryScreen: React.FC<{ navigation: any }> = ({ navigation }) => {
   const [trips, setTrips] = useState<Trip[]>([]);
@@ -166,14 +167,8 @@ export const TripHistoryScreen: React.FC<{ navigation: any }> = ({ navigation })
                   <View style={styles.tripCardFooter}>
                     <Text style={styles.driverText}>
                       Driver: {trip.driver_name}
-                      {trip.created_by_name
-                        ? ` · Started by ${trip.created_by_name}${
-                            trip.created_by_role === 'OWNER'
-                              ? ' (Owner)'
-                              : trip.created_by_role === 'ADMIN'
-                                ? ' (Admin)'
-                                : ''
-                          }`
+                      {tripStartedByLabel(trip.created_by_name, trip.created_by_role)
+                        ? ` · Started by ${tripStartedByLabel(trip.created_by_name, trip.created_by_role)}`
                         : ''}
                     </Text>
                     <View style={{ flexDirection: 'row', alignItems: 'center' }}>

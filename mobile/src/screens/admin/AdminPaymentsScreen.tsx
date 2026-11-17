@@ -31,7 +31,8 @@ import { Trip, Owner, Vehicle } from '../../types';
 import { COLORS, SPACING, RADIUS, SHADOWS } from '../../constants/theme';
 import { formatDateDMY } from '../../utils/dateUtils';
 import { DatePickerModal, toDisplayDate } from '../../components/DatePickerModal';
-import { printTripPdf, shareTripPdf, downloadTripPdf } from '../../utils/pdfGenerator';
+import { shareTripPdf, downloadTripPdf } from '../../utils/pdfGenerator';
+import { PdfExportButtons } from '../../components/PdfExportButtons';
 import { DetailsSheet } from '../../components/DetailsSheet';
 import { ViewChip } from '../../components/ViewChip';
 
@@ -262,42 +263,13 @@ export const AdminPaymentsScreen: React.FC<{ navigation: any }> = ({ navigation 
               </View>
               <View style={styles.cardActions}>
                 <ViewChip compact onPress={() => setViewTrip(t)} />
-                <TouchableOpacity
-                  style={[styles.actionBtn, { backgroundColor: '#eff6ff', borderColor: '#93c5fd' }]}
-                  onPress={() => handlePrintTrip(t)}
-                  disabled={pdfLoading !== null}
-                >
-                  {pdfLoading === `print_${t.id}` ? (
-                    <ActivityIndicator size="small" color="#1d4ed8" />
-                  ) : (
-                    <Printer size={13} color="#1d4ed8" />
-                  )}
-                  <Text style={[styles.actionBtnText, { color: '#1d4ed8' }]}>Print</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[styles.actionBtn, { backgroundColor: '#ecfdf5', borderColor: '#86efac' }]}
-                  onPress={() => handleShareTrip(t)}
-                  disabled={pdfLoading !== null}
-                >
-                  {pdfLoading === `share_${t.id}` ? (
-                    <ActivityIndicator size="small" color="#047857" />
-                  ) : (
-                    <Share2 size={13} color="#047857" />
-                  )}
-                  <Text style={[styles.actionBtnText, { color: '#047857' }]}>Share</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[styles.actionBtn, { backgroundColor: '#0f172a', borderColor: '#0f172a' }]}
-                  onPress={() => handleDownloadTrip(t)}
-                  disabled={pdfLoading !== null}
-                >
-                  {pdfLoading === `download_${t.id}` ? (
-                    <ActivityIndicator size="small" color="#fff" />
-                  ) : (
-                    <Download size={13} color="#fff" />
-                  )}
-                  <Text style={[styles.actionBtnText, { color: '#fff' }]}>Download</Text>
-                </TouchableOpacity>
+                <PdfExportButtons
+                  compact
+                  loading={pdfLoading?.includes(String(t.id)) ? pdfLoading : null}
+                  disabled={!!pdfLoading}
+                  onShare={() => handleShareTrip(t)}
+                  onDownload={() => handleDownloadTrip(t)}
+                />
               </View>
             </View>
           ))}

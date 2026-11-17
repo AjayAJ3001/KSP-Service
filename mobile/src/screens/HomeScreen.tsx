@@ -59,6 +59,7 @@ import {
   downloadDriverStatementPdf,
   shareDriverStatementPdf,
 } from '../utils/pdfGenerator';
+import { PdfExportButtons } from '../components/PdfExportButtons';
 import { buildDriverTripStories, getSettlementBreakdown } from '../utils/driverTripStories';
 import { expenseDetailLines } from '../utils/expenseBreakdown';
 
@@ -812,86 +813,12 @@ const DriverAdvanceModal: React.FC<DriverAdvanceModalProps> = ({
               borderTopWidth: 1,
               borderTopColor: '#e2e8f0',
             }}>
-              {/* PDF Button */}
-              <TouchableOpacity
-                style={{
-                  flex: 1,
-                  backgroundColor: '#dc2626',
-                  borderRadius: RADIUS.md,
-                  paddingVertical: 9,
-                  flexDirection: 'row',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  gap: 6,
-                  opacity: exportLoading === 'pdf' ? 0.7 : 1,
-                }}
-                onPress={handlePdf}
-                disabled={exportLoading !== null}
-                activeOpacity={0.8}
-              >
-                {exportLoading === 'pdf' ? (
-                  <ActivityIndicator size="small" color="#fff" />
-                ) : (
-                  <>
-                    <FileText size={15} color="#fff" />
-                    <Text style={{ color: '#fff', fontSize: 12, fontWeight: '800' }}>PDF</Text>
-                  </>
-                )}
-              </TouchableOpacity>
-
-              {/* Share Button */}
-              <TouchableOpacity
-                style={{
-                  flex: 1,
-                  backgroundColor: '#16a34a',
-                  borderRadius: RADIUS.md,
-                  paddingVertical: 9,
-                  flexDirection: 'row',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  gap: 6,
-                  opacity: exportLoading === 'share' ? 0.7 : 1,
-                }}
-                onPress={handleShare}
-                disabled={exportLoading !== null}
-                activeOpacity={0.8}
-              >
-                {exportLoading === 'share' ? (
-                  <ActivityIndicator size="small" color="#fff" />
-                ) : (
-                  <>
-                    <Share2 size={15} color="#fff" />
-                    <Text style={{ color: '#fff', fontSize: 12, fontWeight: '800' }}>SHARE</Text>
-                  </>
-                )}
-              </TouchableOpacity>
-
-              {/* Print Button */}
-              <TouchableOpacity
-                style={{
-                  flex: 1,
-                  backgroundColor: COLORS.primary,
-                  borderRadius: RADIUS.md,
-                  paddingVertical: 9,
-                  flexDirection: 'row',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  gap: 6,
-                  opacity: exportLoading === 'print' ? 0.7 : 1,
-                }}
-                onPress={handlePrint}
-                disabled={exportLoading !== null}
-                activeOpacity={0.8}
-              >
-                {exportLoading === 'print' ? (
-                  <ActivityIndicator size="small" color="#fff" />
-                ) : (
-                  <>
-                    <Printer size={15} color="#fff" />
-                    <Text style={{ color: '#fff', fontSize: 12, fontWeight: '800' }}>PRINT</Text>
-                  </>
-                )}
-              </TouchableOpacity>
+              <PdfExportButtons
+                loading={exportLoading === 'pdf' ? 'download' : exportLoading}
+                onShare={handleShare}
+                onDownload={handlePdf}
+                style={{ flex: 1 }}
+              />
             </View>
           </View>
         )}
@@ -2070,7 +1997,7 @@ export const HomeScreen: React.FC<{ navigation: any }> = ({ navigation }) => {
           )}
 
           {/* ── Owner Advance Credit — with touch spring ── */}
-          {(data?.owner_advance_credit ?? 0) > 0 && (
+          {user?.role !== 'MANAGER' && (data?.owner_advance_credit ?? 0) > 0 && (
             <Animated.View style={{ transform: [{ scale: advanceTileScale }] }}>
               <Pressable
                 style={styles.sectionTile}
@@ -2123,7 +2050,7 @@ export const HomeScreen: React.FC<{ navigation: any }> = ({ navigation }) => {
           )}
 
           {/* ── Give Truck Advance — with touch spring ── */}
-          {(data?.manager_available_balance ?? 0) > 0 && (
+          {(user?.role === 'MANAGER' || (data?.manager_available_balance ?? 0) > 0) && (
             <Animated.View style={{ transform: [{ scale: truckAdvScale }] }}>
               <Pressable
                 style={styles.truckAdvanceBtn}
@@ -2144,7 +2071,14 @@ export const HomeScreen: React.FC<{ navigation: any }> = ({ navigation }) => {
           <Animated.View style={{ transform: [{ scale: newTripScale }] }}>
             <Pressable
               style={styles.newTripBtn}
-              onPress={() => navigation.navigate('NewTrip')}
+              onPress={() =>
+                navigation.navigate(
+                  user?.role === 'MANAGER' ? 'GiveTruckAdvance' : 'NewTrip',
+                  user?.role === 'MANAGER'
+                    ? { availableBalance: data?.manager_available_balance ?? 0 }
+                    : undefined
+                )
+              }
               onPressIn={() => Animated.spring(newTripScale, { toValue: 0.96, speed: 50, useNativeDriver: true }).start()}
               onPressOut={() => Animated.spring(newTripScale, { toValue: 1.0, speed: 30, bounciness: 6, useNativeDriver: true }).start()}
             >

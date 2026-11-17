@@ -10,6 +10,7 @@ import { formatDateDMY } from '../utils/dateUtils';
 import { DateField } from '../components/Common/DateField';
 import { useAuth } from '../context/AuthContext';
 import { PRINT_BRAND_CSS, printBrandLockup } from '../utils/printBrand';
+import { tripStartedByLabel } from '../utils/tripStartedBy';
 
 function downloadCSV(filename: string, headers: string[], rows: string[][]) {
   const escape = (v: any) => `"${String(v ?? '').replace(/"/g, '""')}"`;
@@ -783,6 +784,7 @@ export const ReportsPage: React.FC = () => {
       <div class="row-item"><span class="label">Lorry Number:</span><span class="val">${trip.lorry_number}</span></div>
       <div class="row-item"><span class="label">Party Name:</span><span class="val">${trip.party_name}</span></div>
       <div class="row-item"><span class="label">Driver Name:</span><span class="val">${trip.driver_name || '-'}</span></div>
+      <div class="row-item"><span class="label">Trip Started By:</span><span class="val">${tripStartedByLabel((trip as any).created_by_name || (trip as any).trip_started_by_name, (trip as any).created_by_role || (trip as any).trip_started_by_role) || '—'}</span></div>
       <div class="row-item"><span class="label">Route / Destination:</span><span class="val">${trip.from_location || ''} &rarr; ${trip.to_location || ''}</span></div>
       <div class="row-item"><span class="label">Status:</span><span class="val">${trip.status}</span></div>
       <div class="row-item"><span class="label">Goods Weight:</span><span class="val">${trip.goods_weight || 0} ${trip.unit_name || 'Tons'}</span></div>
@@ -1255,6 +1257,9 @@ export const ReportsPage: React.FC = () => {
                                 <div style={{ fontSize: 10.5, fontWeight: 800, color: '#64748b', letterSpacing: 0.4, marginBottom: 6 }}>TRIP</div>
                                 <div><strong>Driver:</strong> {t.driver_name || '—'}</div>
                                 {t.owner_name ? <div><strong>Owner:</strong> {t.owner_name}</div> : null}
+                                {tripStartedByLabel((t as any).created_by_name || (t as any).trip_started_by_name, (t as any).created_by_role || (t as any).trip_started_by_role) ? (
+                                  <div><strong>Started by:</strong> {tripStartedByLabel((t as any).created_by_name || (t as any).trip_started_by_name, (t as any).created_by_role || (t as any).trip_started_by_role)}</div>
+                                ) : null}
                                 <div><strong>Route:</strong> {t.from_location} → {t.to_location}</div>
                                 <div><strong>Weight:</strong> {t.goods_weight} {t.unit_name || 'Tons'}</div>
                               </div>

@@ -39,7 +39,9 @@ import {
 import { TruckAdvance, Vehicle, Driver, User, Owner } from '../../types';
 import { COLORS, SPACING, RADIUS, SHADOWS } from '../../constants/theme';
 import { formatDateDMY } from '../../utils/dateUtils';
-import { printMastersPdf, downloadMastersPdf } from '../../utils/pdfGenerator';
+import { tripStartedByLabel } from '../../utils/tripStartedBy';
+import { shareMastersPdf, downloadMastersPdf } from '../../utils/pdfGenerator';
+import { PdfExportButtons } from '../../components/PdfExportButtons';
 import { DatePickerModal, toDisplayDate } from '../../components/DatePickerModal';
 import { DetailsSheet } from '../../components/DetailsSheet';
 import { ViewChip } from '../../components/ViewChip';
@@ -90,7 +92,7 @@ export const AdminTruckAdvancesScreen: React.FC<{ navigation: any }> = ({ naviga
   const [totalAmount, setTotalAmount] = useState(0);
   const [search, setSearch] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  const [pdfLoading, setPdfLoading] = useState<'print' | 'download' | null>(null);
+  const [pdfLoading, setPdfLoading] = useState<'share' | 'download' | null>(null);
 
   // Add Modal
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -108,10 +110,10 @@ export const AdminTruckAdvancesScreen: React.FC<{ navigation: any }> = ({ naviga
   const loadLookups = useCallback(async () => {
     try {
       const [vRes, dRes, uRes, oRes] = await Promise.all([
-        adminVehicleService.getVehicles({ limit: 100, status: 'ACTIVE' }),
-        adminDriverService.getDrivers({ limit: 100, status: 'ACTIVE' }),
-        adminUserService.getUsers({ limit: 100, status: 'ACTIVE' }),
-        adminOwnerService.getOwners({ limit: 200 }),
+        adminVehicleService.getVehicles({ limit: 100, status: 'ACTIVE' }).catch(() => ({ data: { items: [] as Vehicle[] } })),
+        adminDriverService.getDrivers({ limit: 100, status: 'ACTIVE' }).catch(() => ({ data: { items: [] as Driver[] } })),
+        adminUserService.getUsers({ limit: 100, status: 'ACTIVE' }).catch(() => ({ data: { items: [] as User[] } })),
+        adminOwnerService.getOwners({ limit: 200 }).catch(() => ({ data: { items: [] as Owner[] } })),
       ]);
       setVehicles(vRes.data.items || []);
       setDrivers(dRes.data.items || []);
@@ -238,18 +240,17 @@ export const AdminTruckAdvancesScreen: React.FC<{ navigation: any }> = ({ naviga
     );
   };
 
-  const handlePrintPdf = async () => {
+  const handleSharePdf = async () => {
     if (pdfLoading) return;
     try {
-      setPdfLoading('print');
-      await printMastersPdf({
+      setPdfLoading('share');
+      await shareMastersPdf({
         tab: 'TRUCK_ADVANCES',
         tabLabel: 'Truck Advance Directory',
         truckAdvances: advances,
       });
     } catch (err: any) {
-      console.error('Print truck advances PDF failed', err);
-      Alert.alert('Print Error', err.message || 'Failed to print truck advances.');
+      Alert.alert('Share Error', err.message || 'Failed to share truck advances.');
     } finally {
       setPdfLoading(null);
     }
@@ -295,37 +296,13 @@ export const AdminTruckAdvancesScreen: React.FC<{ navigation: any }> = ({ naviga
             ) : null}
           </View>
 
-          <TouchableOpacity
-            style={[styles.pdfBtn, styles.printBtn, pdfLoading === 'print' && { opacity: 0.7 }]}
-            onPress={handlePrintPdf}
-            disabled={pdfLoading !== null || isLoading}
-            activeOpacity={0.8}
-          >
-            {pdfLoading === 'print' ? (
-              <ActivityIndicator size="small" color={COLORS.white} />
-            ) : (
-              <>
-                <Printer size={13} color={COLORS.white} />
-                <Text style={styles.pdfBtnText}>Print</Text>
-              </>
-            )}
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={[styles.pdfBtn, styles.downloadBtn, pdfLoading === 'download' && { opacity: 0.7 }]}
-            onPress={handleDownloadPdf}
-            disabled={pdfLoading !== null || isLoading}
-            activeOpacity={0.8}
-          >
-            {pdfLoading === 'download' ? (
-              <ActivityIndicator size="small" color={COLORS.white} />
-            ) : (
-              <>
-                <Download size={13} color={COLORS.white} />
-                <Text style={styles.pdfBtnText}>PDF</Text>
-              </>
-            )}
-          </TouchableOpacity>
+          <PdfExportButtons
+            compact
+            loading={pdfLoading}
+            disabled={isLoading}
+            onShare={handleSharePdf}
+            onDownload={handleDownloadPdf}
+          />
 
           <TouchableOpacity style={styles.addBtn} onPress={openAddModal}>
             <Plus size={16} color={COLORS.white} />
@@ -511,6 +488,11 @@ export const AdminTruckAdvancesScreen: React.FC<{ navigation: any }> = ({ naviga
                   {(adv.from_location || adv.to_location) ? (
                     <Text style={styles.tripRouteText} numberOfLines={1}>
                       📍 Route: {adv.from_location || '—'} → {adv.to_location || '—'}
+                    </Text>
+                  ) : null}
+                  {tripStartedByLabel((adv as any).trip_started_by_name, (adv as any).trip_started_by_role) ? (
+                    <Text style={styles.tripRouteText} numberOfLines={1}>
+                      Started by {tripStartedByLabel((adv as any).trip_started_by_name, (adv as any).trip_started_by_role)}
                     </Text>
                   ) : null}
 
@@ -800,6 +782,7 @@ export const AdminTruckAdvancesScreen: React.FC<{ navigation: any }> = ({ naviga
           { label: 'Owner', value: viewAdvance.owner_name || '—' },
           { label: 'Driver', value: viewAdvance.driver_name || '—' },
           { label: 'Manager', value: viewAdvance.manager_name || '—' },
+          { label: 'Trip started by', value: tripStartedByLabel((viewAdvance as any).trip_started_by_name, (viewAdvance as any).trip_started_by_role) || '—' },
           { label: 'Amount', value: formatCurrency(viewAdvance.amount) },
           { label: 'Date', value: viewAdvance.advance_date ? formatDateDMY(viewAdvance.advance_date) : '—' },
           { label: 'Notes', value: viewAdvance.notes || '—' },

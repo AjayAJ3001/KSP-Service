@@ -37,6 +37,7 @@ import { PRINT_BRAND_CSS, printBrandLockup } from '../utils/printBrand';
 export const OwnerAdvancesPage: React.FC = () => {
   const { user: authUser } = useAuth();
   const isOwnerUser = authUser?.role === 'OWNER';
+  const isManagerUser = authUser?.role === 'MANAGER' || authUser?.role === 'TRANSPORT_USER';
   const [searchParams, setSearchParams] = useSearchParams();
   const [advances, setAdvances] = useState<OwnerAdvance[]>([]);
   const [owners, setOwners] = useState<Owner[]>([]);
@@ -1025,11 +1026,21 @@ export const OwnerAdvancesPage: React.FC = () => {
         }}
       >
         <div>
-          <div style={{ fontWeight: 800, color: '#9a3412', fontSize: '15px' }}>+ Give Advance</div>
-          <div style={{ fontSize: '12.5px', color: '#9a3412', opacity: 0.85 }}>
-            Record a new owner advance to a manager or driver
+          <div style={{ fontWeight: 800, color: '#9a3412', fontSize: '15px' }}>
+            {isManagerUser ? 'Balance from owner' : '+ Give Advance'}
           </div>
+          <div style={{ fontSize: '12.5px', color: '#9a3412', opacity: 0.85 }}>
+            {isManagerUser
+              ? 'Total amount the owner has given you. Remaining balance is on your dashboard.'
+              : 'Record a new owner advance to a manager or driver'}
+          </div>
+          {isManagerUser && (
+            <div style={{ fontSize: '24px', fontWeight: 900, color: '#9a3412', marginTop: '8px' }}>
+              {formatCurrency(totalAmount)}
+            </div>
+          )}
         </div>
+        {!isManagerUser && (
         <button
           onClick={openCreateModal}
           className="btn btn-primary"
@@ -1046,6 +1057,7 @@ export const OwnerAdvancesPage: React.FC = () => {
         >
           <Plus size={20} /> Give Advance
         </button>
+        )}
       </div>
 
       {/* Filters Bar */}

@@ -522,7 +522,7 @@ export const LoginScreen: React.FC<{ navigation: any }> = ({ navigation }) => {
                 style={styles.modalInput}
                 value={customServerUrl}
                 onChangeText={setCustomServerUrl}
-                placeholder="http://189.72.146.91:5000/api"
+                placeholder="http://192.168.1.11:5000/api"
                 placeholderTextColor={COLORS.textLight}
                 autoCapitalize="none"
                 autoCorrect={false}

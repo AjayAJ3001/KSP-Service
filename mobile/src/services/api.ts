@@ -2,14 +2,14 @@ import axios from 'axios';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 export const API_PORT = 5000;
-/** Public server. Live IP is also learned from /health and saved. */
-export const CURRENT_WIFI_IP = '189.72.146.91';
-const EXTRA_WIFI_IPS = ['10.185.83.146', '192.168.1.5', '192.168.5.140', '192.168.5.197', '10.180.228.146'];
+/** PC Wi‑Fi IP for this LAN. USB phones also reach the PC via adb reverse on localhost. */
+export const CURRENT_WIFI_IP = '192.168.1.11';
+const EXTRA_WIFI_IPS = ['192.168.1.11'];
 
 const SAVED_URL_KEY = 'ksp_server_base_url';
 const LAN_IPS_KEY = 'ksp_lan_ips';
 
-export const DEFAULT_BASE_URL = `http://${CURRENT_WIFI_IP}:${API_PORT}/api`;
+export const DEFAULT_BASE_URL = `http://localhost:${API_PORT}/api`;
 
 const toApiUrl = (hostOrUrl: string) => {
   let cleaned = String(hostOrUrl || '').trim().replace(/\/+$/, '');
@@ -33,11 +33,14 @@ const uniqueUrls = (urls: Array<string | null | undefined>) => {
   return out;
 };
 
+const isLocalApiUrl = (url: string) =>
+  /localhost|127\.0\.0\.1|10\.0\.2\.2|192\.168\.|10\.\d+\./i.test(url);
+
 export const CANDIDATE_BASE_URLS = uniqueUrls([
-  `http://${CURRENT_WIFI_IP}:${API_PORT}/api`,
-  `http://10.0.2.2:${API_PORT}/api`,
   `http://localhost:${API_PORT}/api`,
   `http://127.0.0.1:${API_PORT}/api`,
+  `http://10.0.2.2:${API_PORT}/api`,
+  `http://${CURRENT_WIFI_IP}:${API_PORT}/api`,
   ...EXTRA_WIFI_IPS.map((ip) => `http://${ip}:${API_PORT}/api`),
 ]);
 
@@ -88,12 +91,12 @@ export const discoverWorkingBaseUrl = async (): Promise<string | null> => {
     const saved = await AsyncStorage.getItem(SAVED_URL_KEY);
     const remembered = await loadLanApiUrls();
     const candidates = uniqueUrls([
+      ...CANDIDATE_BASE_URLS,
       DEFAULT_BASE_URL,
       `http://${CURRENT_WIFI_IP}:${API_PORT}/api`,
       api.defaults.baseURL as string,
-      saved,
-      ...remembered,
-      ...CANDIDATE_BASE_URLS,
+      isLocalApiUrl(saved || '') ? saved : '',
+      ...remembered.filter((u) => isLocalApiUrl(u)),
     ]);
 
     for (const candidate of candidates) {

@@ -25,6 +25,7 @@ import { ViewButton, DetailsModal } from '../components/Common/ViewDetails';
 import { Modal } from '../components/Common/Modal';
 import { DateField } from '../components/Common/DateField';
 import { formatIST } from '../utils/dateUtils';
+import { tripStartedByLabel } from '../utils/tripStartedBy';
 import { PRINT_BRAND_CSS, printBrandLockup } from '../utils/printBrand';
 import { useAuth } from '../context/AuthContext';
 
@@ -57,6 +58,8 @@ interface TruckAdvance {
   to_location?: string;
   manager_name: string;
   created_by_name?: string;
+  trip_started_by_name?: string;
+  trip_started_by_role?: string;
   created_at: string;
 }
 
@@ -264,6 +267,7 @@ export const TruckAdvancesPage: React.FC = () => {
         { 'Detail': 'DRIVER NAME', 'Information': a.driver_name || '—' },
         { 'Detail': 'DRIVER MOBILE', 'Information': a.driver_mobile || '—' },
         { 'Detail': 'PARTY NAME', 'Information': a.party_name || '—' },
+        { 'Detail': 'TRIP STARTED BY', 'Information': tripStartedByLabel(a.trip_started_by_name, a.trip_started_by_role) || '—' },
         { 'Detail': 'ROUTE / DESTINATION', 'Information': a.from_location && a.to_location ? `${a.from_location} → ${a.to_location}` : (a.to_location || a.from_location || '—') },
         { 'Detail': 'GOODS WEIGHT', 'Information': a.goods_weight ? `${a.goods_weight} ${a.unit_abbreviation || 'MT'}` : '—' },
         { 'Detail': 'TOTAL FREIGHT AMOUNT (₹)', 'Information': a.total_freight ? parseFloat(String(a.total_freight)) : 0 },
@@ -372,6 +376,7 @@ export const TruckAdvancesPage: React.FC = () => {
             </tr></thead>
             <tbody>
               <tr><td><strong>Party Name (Consignor/Consignee)</strong></td><td class="num"><strong>${a.party_name || '—'}</strong></td></tr>
+              <tr><td><strong>Trip Started By</strong></td><td class="num"><strong>${tripStartedByLabel(a.trip_started_by_name, a.trip_started_by_role) || '—'}</strong></td></tr>
               <tr><td>Route / Destination</td><td class="num">${a.from_location && a.to_location ? `${a.from_location} → ${a.to_location}` : (a.to_location || a.from_location || '—')}</td></tr>
               <tr><td>Goods Weight / Quantity</td><td class="num" style="color:#047857;font-weight:700">${a.goods_weight ? `${a.goods_weight} ${a.unit_abbreviation || 'MT'}` : '—'}</td></tr>
               <tr style="background:#eff6ff">
@@ -657,6 +662,11 @@ export const TruckAdvancesPage: React.FC = () => {
               <span style={{ fontSize: '11px', fontWeight: 700, color: '#4338ca', background: '#e0e7ff', padding: '1px 6px', borderRadius: '4px' }}>
                 Trip #{a.trip_id}
               </span>
+              {tripStartedByLabel(a.trip_started_by_name, a.trip_started_by_role) ? (
+                <div style={{ fontSize: '10.5px', fontWeight: 700, color: '#1d4ed8', marginTop: 3 }}>
+                  Started by {tripStartedByLabel(a.trip_started_by_name, a.trip_started_by_role)}
+                </div>
+              ) : null}
             </div>
           )}
         </div>
@@ -1159,6 +1169,7 @@ export const TruckAdvancesPage: React.FC = () => {
           { label: 'Owner', value: viewAdvance.owner_name || '—' },
           { label: 'Driver', value: viewAdvance.driver_name || '—' },
           { label: 'Trip', value: viewAdvance.trip_id ? `#${viewAdvance.trip_id}` : '—' },
+          { label: 'Trip started by', value: tripStartedByLabel(viewAdvance.trip_started_by_name, viewAdvance.trip_started_by_role) || '—' },
           { label: 'Amount', value: formatCurrency(viewAdvance.amount) },
           { label: 'Date', value: formatIST(viewAdvance.advance_date) },
           { label: 'Manager', value: viewAdvance.manager_name || '—' },

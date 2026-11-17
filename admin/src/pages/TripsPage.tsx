@@ -8,6 +8,7 @@ import { DataTable, Column } from '../components/Common/DataTable';
 import { Modal } from '../components/Common/Modal';
 import { StatusBadge } from '../components/Common/StatusBadge';
 import { formatDateDMY } from '../utils/dateUtils';
+import { tripStartedByLabel } from '../utils/tripStartedBy';
 import { DateField } from '../components/Common/DateField';
 import { PRINT_BRAND_CSS, printBrandLockup } from '../utils/printBrand';
 import { useAuth } from '../context/AuthContext';
@@ -800,6 +801,7 @@ export const TripsPage: React.FC = () => {
       ${trip.owner_name ? `<div class="row-item"><span class="label">Truck Owner:</span><span class="val" style="color:#4338ca;font-weight:800">${trip.owner_name}</span></div>` : ''}
       <div class="row-item"><span class="label">Party Name:</span><span class="val">${trip.party_name}</span></div>
       <div class="row-item"><span class="label">Driver Name:</span><span class="val">${trip.driver_name}</span></div>
+      <div class="row-item"><span class="label">Trip Started By:</span><span class="val">${tripStartedByLabel((trip as any).created_by_name, (trip as any).created_by_role) || '—'}</span></div>
       <div class="row-item"><span class="label">Unit / Destination:</span><span class="val">${trip.to_location || trip.from_location}</span></div>
       <div class="row-item"><span class="label">Status:</span><span class="val">${trip.status}</span></div>
       <div class="row-item"><span class="label">Goods Weight:</span><span class="val">${trip.goods_weight} ${trip.unit_abbreviation || 'Tons'}</span></div>
@@ -882,6 +884,10 @@ export const TripsPage: React.FC = () => {
       ),
     },
     { header: 'Driver', accessor: 'driver_name' },
+    {
+      header: 'Started By',
+      render: (t) => tripStartedByLabel((t as any).created_by_name, (t as any).created_by_role) || '—',
+    },
     {
       header: 'Weight / Qty',
       render: (t) => `${t.goods_weight} ${t.unit_abbreviation || 'Tons'}`,
@@ -1685,6 +1691,10 @@ export const TripsPage: React.FC = () => {
               <div className="slip-row">
                 <span>Driver:</span>
                 <strong>{selectedTrip.driver_name}</strong>
+              </div>
+              <div className="slip-row">
+                <span>Trip Started By:</span>
+                <strong>{tripStartedByLabel((selectedTrip as any).created_by_name, (selectedTrip as any).created_by_role) || '—'}</strong>
               </div>
               <div className="slip-row">
                 <span>Party Name:</span>

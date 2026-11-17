@@ -55,6 +55,7 @@ export const getTripReport = asyncHandler(async (req: AuthRequest, res: Response
      JOIN routes r ON t.route_id = r.id
      JOIN units u ON t.unit_id = u.id
      LEFT JOIN settlements s ON s.trip_id = t.id
+     LEFT JOIN users cu ON t.created_by = cu.id
      LEFT JOIN (
        SELECT trip_id,
               SUM(received_amount) as total_received,
@@ -116,7 +117,11 @@ export const getTripReport = asyncHandler(async (req: AuthRequest, res: Response
             COALESCE(dsp.driver_cash_paid, s.paid_amount, 0) as driver_cash_paid,
             COALESCE(s.prior_deficit_deduction, t.prior_deficit_deduction, 0) as prior_deficit_deduction,
             s.balance_to_driver,
-            s.net_balance_to_driver
+            s.net_balance_to_driver,
+            cu.name as created_by_name,
+            cu.role as created_by_role,
+            cu.name as trip_started_by_name,
+            cu.role as trip_started_by_role
      ${fromSql}
      WHERE ${where}
      ORDER BY t.trip_date DESC, t.id DESC`,

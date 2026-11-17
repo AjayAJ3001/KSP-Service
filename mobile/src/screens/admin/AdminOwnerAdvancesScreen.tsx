@@ -28,7 +28,8 @@ import {
   Download,
   Truck,
 } from 'lucide-react-native';
-import { printMastersPdf, downloadMastersPdf } from '../../utils/pdfGenerator';
+import { shareMastersPdf, downloadMastersPdf } from '../../utils/pdfGenerator';
+import { PdfExportButtons } from '../../components/PdfExportButtons';
 import { adminOwnerAdvanceService, adminOwnerService, adminUserService, adminDriverService, adminVehicleService } from '../../services/adminService';
 import { OwnerAdvance, Owner, User, Driver, Vehicle } from '../../types';
 import { COLORS, SPACING, RADIUS, SHADOWS } from '../../constants/theme';
@@ -36,8 +37,31 @@ import { formatDateDMY } from '../../utils/dateUtils';
 import { DatePickerModal, toDisplayDate } from '../../components/DatePickerModal';
 import { DetailsSheet } from '../../components/DetailsSheet';
 import { ViewChip } from '../../components/ViewChip';
+import { useAuth } from '../../context/AuthContext';
+
+const ADVANCE_PAYMENT_MODES = ['CASH', 'UPI', 'BANK_TRANSFER', 'ATM'] as const;
+type AdvancePaymentMode = (typeof ADVANCE_PAYMENT_MODES)[number];
+
+const normalizeAdvancePaymentMode = (mode?: string | null): AdvancePaymentMode => {
+  const u = String(mode || 'CASH').toUpperCase().trim();
+  if (u === 'CHEQUE' || u === 'ATM') return 'ATM';
+  if (u === 'UPI' || u.includes('UPI') || u.includes('GPAY') || u.includes('PHONEPE')) return 'UPI';
+  if (u === 'BANK_TRANSFER' || u.includes('BANK') || u.includes('NEFT')) return 'BANK_TRANSFER';
+  if (u === 'CASH') return 'CASH';
+  return 'CASH';
+};
+
+const advancePaymentModeLabel = (mode?: string | null): string => {
+  const m = normalizeAdvancePaymentMode(mode);
+  if (m === 'BANK_TRANSFER') return 'Bank';
+  if (m === 'ATM') return 'ATM';
+  if (m === 'UPI') return 'UPI';
+  return 'Cash';
+};
 
 export const AdminOwnerAdvancesScreen: React.FC<{ navigation: any; route?: any }> = ({ navigation, route }) => {
+  const { user } = useAuth();
+  const isManagerUser = String(user?.role || '').toUpperCase() === 'MANAGER';
   const [advances, setAdvances] = useState<OwnerAdvance[]>([]);
   const [owners, setOwners] = useState<Owner[]>([]);
   const [managers, setManagers] = useState<User[]>([]);
@@ -51,7 +75,7 @@ export const AdminOwnerAdvancesScreen: React.FC<{ navigation: any; route?: any }
   const [toDate, setToDate] = useState('');
   const [datePickerTarget, setDatePickerTarget] = useState<'from' | 'to' | 'form' | null>(null);
   const [isLoading, setIsLoading] = useState(false);
-  const [pdfLoading, setPdfLoading] = useState<'print' | 'download' | null>(null);
+  const [pdfLoading, setPdfLoading] = useState<'share' | 'download' | null>(null);
 
   // Add / Edit Modal
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -67,16 +91,18 @@ export const AdminOwnerAdvancesScreen: React.FC<{ navigation: any; route?: any }
   const [selectedVehicleId, setSelectedVehicleId] = useState<number | null>(null);
   const [amount, setAmount] = useState('');
   const [advanceDate, setAdvanceDate] = useState('');
-  const [paymentMode, setPaymentMode] = useState<'CASH' | 'UPI' | 'BANK_TRANSFER' | 'ATM'>('CASH');
+  const [paymentMode, setPaymentMode] = useState<AdvancePaymentMode>('CASH');
   const [notes, setNotes] = useState('');
 
   const loadLookups = useCallback(async () => {
     try {
       const [oRes, uRes, dRes, vRes] = await Promise.all([
-        adminOwnerService.getOwners({ limit: 100 }),
-        adminUserService.getUsers({ limit: 200, status: 'ACTIVE', for_advance: true }),
-        adminDriverService.getDrivers({ limit: 500, status: 'ACTIVE' }),
-        adminVehicleService.getVehicles({ limit: 100 }),
+        adminOwnerService.getOwners({ limit: 100 }).catch(() => ({ data: { items: [] as Owner[] } })),
+        isManagerUser
+          ? Promise.resolve({ data: { items: [] as User[] } })
+          : adminUserService.getUsers({ limit: 200, status: 'ACTIVE', for_advance: true }).catch(() => ({ data: { items: [] as User[] } })),
+        adminDriverService.getDrivers({ limit: 500, status: 'ACTIVE' }).catch(() => ({ data: { items: [] as Driver[] } })),
+        adminVehicleService.getVehicles({ limit: 100 }).catch(() => ({ data: { items: [] as Vehicle[] } })),
       ]);
       setOwners(oRes.data.items || []);
       const managerList = (uRes.data.items || []).filter((u) => u.role === 'MANAGER' || u.role === 'ADMIN');
@@ -86,7 +112,7 @@ export const AdminOwnerAdvancesScreen: React.FC<{ navigation: any; route?: any }
     } catch (err) {
       console.error('Failed to load owners/managers/drivers', err);
     }
-  }, []);
+  }, [isManagerUser]);
 
   const loadAdvances = useCallback(async () => {
     try {
@@ -118,11 +144,11 @@ export const AdminOwnerAdvancesScreen: React.FC<{ navigation: any; route?: any }
   }, [loadAdvances]);
 
   useEffect(() => {
-    if (route?.params?.openGive) {
+    if (route?.params?.openGive && !isManagerUser) {
       openAddModal();
       navigation.setParams?.({ openGive: undefined });
     }
-  }, [route?.params?.openGive]);
+  }, [route?.params?.openGive, isManagerUser]);
 
   const formatCurrency = (val: number | string) => {
     const num = parseFloat(String(val)) || 0;
@@ -158,7 +184,7 @@ export const AdminOwnerAdvancesScreen: React.FC<{ navigation: any; route?: any }
     setSelectedVehicleId(adv.vehicle_id || null);
     setAmount(String(adv.amount));
     setAdvanceDate(adv.advance_date ? adv.advance_date.split('T')[0] : getTodayISO());
-    setPaymentMode((adv.payment_mode as any) || 'CASH');
+    setPaymentMode(normalizeAdvancePaymentMode(adv.payment_mode));
     setNotes(adv.notes || '');
     setIsModalOpen(true);
   };
@@ -253,17 +279,16 @@ export const AdminOwnerAdvancesScreen: React.FC<{ navigation: any; route?: any }
     );
   };
 
-  const handlePrintPdf = async () => {
+  const handleSharePdf = async () => {
     try {
-      setPdfLoading('print');
-      await printMastersPdf({
+      setPdfLoading('share');
+      await shareMastersPdf({
         tab: 'ADVANCES',
         tabLabel: 'Owner Advances Ledger',
         advances,
       });
     } catch (err: any) {
-      console.error('Print advances PDF failed', err);
-      Alert.alert('Print Error', err.message || 'Failed to print advances ledger.');
+      Alert.alert('Share Error', err.message || 'Failed to share advances ledger.');
     } finally {
       setPdfLoading(null);
     }
@@ -308,44 +333,22 @@ export const AdminOwnerAdvancesScreen: React.FC<{ navigation: any; route?: any }
             ) : null}
           </View>
 
-          <TouchableOpacity
-            style={[styles.pdfBtn, styles.printBtn, pdfLoading === 'print' && { opacity: 0.7 }]}
-            onPress={handlePrintPdf}
-            disabled={pdfLoading !== null || isLoading}
-            activeOpacity={0.8}
-          >
-            {pdfLoading === 'print' ? (
-              <ActivityIndicator size="small" color={COLORS.white} />
-            ) : (
-              <>
-                <Printer size={13} color={COLORS.white} />
-                <Text style={styles.pdfBtnText}>Print</Text>
-              </>
-            )}
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={[styles.pdfBtn, styles.downloadBtn, pdfLoading === 'download' && { opacity: 0.7 }]}
-            onPress={handleDownloadPdf}
-            disabled={pdfLoading !== null || isLoading}
-            activeOpacity={0.8}
-          >
-            {pdfLoading === 'download' ? (
-              <ActivityIndicator size="small" color={COLORS.white} />
-            ) : (
-              <>
-                <Download size={13} color={COLORS.white} />
-                <Text style={styles.pdfBtnText}>PDF</Text>
-              </>
-            )}
-          </TouchableOpacity>
+          <PdfExportButtons
+            compact
+            loading={pdfLoading}
+            disabled={isLoading}
+            onShare={handleSharePdf}
+            onDownload={handleDownloadPdf}
+          />
 
         </View>
 
+        {!isManagerUser ? (
         <TouchableOpacity style={styles.giveAdvanceBanner} onPress={openAddModal} activeOpacity={0.85}>
           <Plus size={20} color={COLORS.white} />
           <Text style={styles.giveAdvanceBannerText}>+ Give Advance</Text>
         </TouchableOpacity>
+        ) : null}
 
         {/* Recipient Filter Pills */}
         <View style={styles.filterChipRow}>
@@ -484,7 +487,7 @@ export const AdminOwnerAdvancesScreen: React.FC<{ navigation: any; route?: any }
                     <Text style={styles.detailLabel}>Date: </Text>
                     {formatDateDMY(adv.advance_date)}
                     <Text style={styles.detailLabel}>  ·  Mode: </Text>
-                    {adv.payment_mode || 'CASH'}
+                    {advancePaymentModeLabel(adv.payment_mode)}
                   </Text>
                   {adv.created_by_name ? (
                     <Text style={styles.detailLine}>
@@ -687,14 +690,14 @@ export const AdminOwnerAdvancesScreen: React.FC<{ navigation: any; route?: any }
             {/* Payment Mode */}
             <Text style={styles.label}>Payment Mode</Text>
             <View style={styles.modePickerRow}>
-              {(['CASH', 'UPI', 'BANK_TRANSFER', 'ATM'] as const).map((m) => (
+              {ADVANCE_PAYMENT_MODES.map((m) => (
                 <TouchableOpacity
                   key={m}
                   style={[styles.modeBtn, paymentMode === m && styles.modeBtnActive]}
                   onPress={() => setPaymentMode(m)}
                 >
                   <Text style={[styles.modeBtnText, paymentMode === m && styles.modeBtnTextActive]}>
-                    {m}
+                    {advancePaymentModeLabel(m)}
                   </Text>
                 </TouchableOpacity>
               ))}
@@ -759,7 +762,7 @@ export const AdminOwnerAdvancesScreen: React.FC<{ navigation: any; route?: any }
           { label: 'Lorry', value: viewAdvance.lorry_number || '—' },
           { label: 'Amount', value: `₹${Number(viewAdvance.amount || 0).toLocaleString('en-IN')}` },
           { label: 'Date', value: formatDateDMY(viewAdvance.advance_date) },
-          { label: 'Mode', value: viewAdvance.payment_mode || 'CASH' },
+          { label: 'Mode', value: advancePaymentModeLabel(viewAdvance.payment_mode) },
           { label: 'Notes', value: viewAdvance.notes || '—' },
           { label: 'Recorded by', value: viewAdvance.created_by_name || '—' },
         ] : []}

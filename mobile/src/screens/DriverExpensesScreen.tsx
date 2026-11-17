@@ -33,7 +33,9 @@ import {
 import { mobileExpenseService, mobileSettlementService } from '../services/mobileService';
 import { Trip, DriverExpense, Settlement } from '../types';
 import { COLORS, SPACING, RADIUS, SHADOWS } from '../constants/theme';
-import { printTripPdf, shareTripPdf, downloadTripPdf } from '../utils/pdfGenerator';
+import { shareTripPdf, downloadTripPdf } from '../utils/pdfGenerator';
+import { PdfExportButtons } from '../components/PdfExportButtons';
+import { tripStartedByLabel } from '../utils/tripStartedBy';
 
 type ExpenseDefaults = {
   party_name: string;
@@ -622,37 +624,17 @@ export const DriverExpensesScreen: React.FC<{ route: any; navigation: any }> = (
       <Text style={styles.screenHeading}>{viewOnly ? 'Driver Expenses' : 'Driver Expenses Entry'}</Text>
       <Text style={styles.screenSub}>
         Trip #{trip.id} • Driver: {trip.driver_name || 'Driver'} ({trip.lorry_number || ''})
+        {tripStartedByLabel(trip.created_by_name, trip.created_by_role)
+          ? ` • Started by ${tripStartedByLabel(trip.created_by_name, trip.created_by_role)}`
+          : ''}
       </Text>
 
-      <View style={styles.pdfActionRow}>
-        <TouchableOpacity
-          style={[styles.pdfActionBtn, styles.pdfPrintBtn, pdfAction === 'print' && { opacity: 0.7 }]}
-          onPress={handlePrintTrip}
-          disabled={pdfAction !== null}
-          activeOpacity={0.8}
-        >
-          {pdfAction === 'print' ? <ActivityIndicator color="#fff" size="small" /> : <Printer size={15} color="#fff" />}
-          <Text style={styles.pdfActionBtnText}>Print</Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={[styles.pdfActionBtn, styles.pdfShareBtn, pdfAction === 'share' && { opacity: 0.7 }]}
-          onPress={handleShareTrip}
-          disabled={pdfAction !== null}
-          activeOpacity={0.8}
-        >
-          {pdfAction === 'share' ? <ActivityIndicator color="#fff" size="small" /> : <Share2 size={15} color="#fff" />}
-          <Text style={styles.pdfActionBtnText}>Share</Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={[styles.pdfActionBtn, styles.pdfDownloadBtn, pdfAction === 'download' && { opacity: 0.7 }]}
-          onPress={handleDownloadTrip}
-          disabled={pdfAction !== null}
-          activeOpacity={0.8}
-        >
-          {pdfAction === 'download' ? <ActivityIndicator color="#fff" size="small" /> : <Download size={15} color="#fff" />}
-          <Text style={styles.pdfActionBtnText}>Download</Text>
-        </TouchableOpacity>
-      </View>
+      <PdfExportButtons
+        loading={pdfAction}
+        onShare={handleShareTrip}
+        onDownload={handleDownloadTrip}
+        style={{ marginBottom: 12 }}
+      />
 
       {error ? (
         <View style={styles.errorBox}>

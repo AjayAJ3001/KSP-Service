@@ -33,7 +33,8 @@ import {
   RotateCcw,
 } from 'lucide-react-native';
 import * as ImagePicker from 'expo-image-picker';
-import { printMastersPdf, downloadMastersPdf } from '../../utils/pdfGenerator';
+import { shareMastersPdf, downloadMastersPdf } from '../../utils/pdfGenerator';
+import { PdfExportButtons } from '../../components/PdfExportButtons';
 import { adminDriverService } from '../../services/adminService';
 import { Driver } from '../../types';
 import { COLORS, SPACING, RADIUS, SHADOWS } from '../../constants/theme';
@@ -168,7 +169,7 @@ export const AdminDriversScreen: React.FC<{ navigation: any }> = ({ navigation }
   const [search, setSearch] = useState('');
   const [filterType, setFilterType] = useState<DriverFilter>('ALL');
   const [isLoading, setIsLoading] = useState(false);
-  const [pdfLoading, setPdfLoading] = useState<'print' | 'download' | null>(null);
+  const [pdfLoading, setPdfLoading] = useState<'share' | 'download' | null>(null);
 
   const hasActiveFilters = Boolean(search || filterType !== 'ALL');
 
@@ -397,17 +398,16 @@ export const AdminDriversScreen: React.FC<{ navigation: any }> = ({ navigation }
     ]);
   };
 
-  const handlePrintPdf = async () => {
+  const handleSharePdf = async () => {
     try {
-      setPdfLoading('print');
-      await printMastersPdf({
+      setPdfLoading('share');
+      await shareMastersPdf({
         tab: 'DRIVERS',
         tabLabel: 'Drivers Directory',
         drivers: filteredDrivers,
       });
     } catch (err: any) {
-      console.error('Print drivers PDF failed', err);
-      Alert.alert('Print Error', err.message || 'Failed to print drivers.');
+      Alert.alert('Share Error', err.message || 'Failed to share drivers.');
     } finally {
       setPdfLoading(null);
     }
@@ -454,37 +454,13 @@ export const AdminDriversScreen: React.FC<{ navigation: any }> = ({ navigation }
             ) : null}
           </View>
 
-          <TouchableOpacity
-            style={[styles.pdfBtn, styles.printBtn, pdfLoading === 'print' && { opacity: 0.7 }]}
-            onPress={handlePrintPdf}
-            disabled={pdfLoading !== null || isLoading}
-            activeOpacity={0.8}
-          >
-            {pdfLoading === 'print' ? (
-              <ActivityIndicator size="small" color={COLORS.white} />
-            ) : (
-              <>
-                <Printer size={13} color={COLORS.white} />
-                <Text style={styles.pdfBtnText}>Print</Text>
-              </>
-            )}
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={[styles.pdfBtn, styles.downloadBtn, pdfLoading === 'download' && { opacity: 0.7 }]}
-            onPress={handleDownloadPdf}
-            disabled={pdfLoading !== null || isLoading}
-            activeOpacity={0.8}
-          >
-            {pdfLoading === 'download' ? (
-              <ActivityIndicator size="small" color={COLORS.white} />
-            ) : (
-              <>
-                <Download size={13} color={COLORS.white} />
-                <Text style={styles.pdfBtnText}>PDF</Text>
-              </>
-            )}
-          </TouchableOpacity>
+          <PdfExportButtons
+            compact
+            loading={pdfLoading}
+            disabled={isLoading}
+            onShare={handleSharePdf}
+            onDownload={handleDownloadPdf}
+          />
 
           <TouchableOpacity style={styles.addBtn} onPress={openAddModal}>
             <Plus size={16} color={COLORS.white} />

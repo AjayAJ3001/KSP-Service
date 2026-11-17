@@ -14,7 +14,7 @@ import { StatusBadge } from '../components/Common/StatusBadge';
 import { formatDateDMY } from '../utils/dateUtils';
 import { DateField } from '../components/Common/DateField';
 import { PRINT_BRAND_CSS, printBrandLockup } from '../utils/printBrand';
-import { formatExpenseType, normalizeExpenseItems } from '../utils/expenseBreakdown';
+import { settlementExpenseBreakdown } from '../utils/expenseBreakdown';
 import { PdfPreviewModal } from '../components/Common/PdfPreviewModal';
 import { useAuth } from '../context/AuthContext';
 
@@ -64,6 +64,7 @@ export const SettlementsPage: React.FC = () => {
   const [selectedTripToSettle, setSelectedTripToSettle] = useState<string>('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isDownloading, setIsDownloading] = useState(false);
+  const [slipLoading, setSlipLoading] = useState<{ [id: number]: 'print' | 'download' | 'share' | null }>({});
 
   // Pay Driver Modal
   const [isPayModalOpen, setIsPayModalOpen] = useState(false);
@@ -212,11 +213,15 @@ export const SettlementsPage: React.FC = () => {
           return sum + (manager > 0 ? manager : leftover);
         }, 0);
       const totalExpenses = items.reduce((sum, s) => sum + Number(s.total_expenses || 0), 0);
+      const totalLoading = items.reduce((sum, s) => sum + settlementExpenseBreakdown(s).loading, 0);
+      const totalUnloading = items.reduce((sum, s) => sum + settlementExpenseBreakdown(s).unloading, 0);
       const totalBalance = items.reduce((sum, s) => sum + Number(s.balance_to_driver || 0), 0);
       const totalPaid = items.reduce((sum, s) => sum + Number(s.paid_amount || 0), 0);
 
       // Format data rows for executive Excel sheet
-      const excelRows: any[] = items.map((s) => ({
+      const excelRows: any[] = items.map((s) => {
+        const exp = settlementExpenseBreakdown(s);
+        return {
         'Settlement ID': `SET-${s.id}`,
         'Trip ID': `TRIP-${s.trip_id}`,
         'Trip Date': s.trip_date ? s.trip_date.slice(0, 10) : '-',
@@ -234,7 +239,9 @@ export const SettlementsPage: React.FC = () => {
           ? Number(s.manager_advance ?? s.initial_trip_advance ?? 0)
           : Number(s.owner_leftover_used ?? 0)),
         'Prior Advance in Hand (Rs)': Number(s.previous_driver_balance || 0),
-        'Total Expenses (Rs)': Number(s.total_expenses || 0),
+        'Loading (Rs)': exp.loading,
+        'Unloading (Rs)': exp.unloading,
+        'Full Expenses (Rs)': exp.total,
         'Already in Hand Taken (Rs)': Number(s.previous_driver_balance || 0) > 0 ? Math.min(Number(s.previous_driver_balance || 0), Math.max(0, Number(s.total_expenses || 0) - Number(s.initial_trip_advance ?? 0))) : 0,
         'Balance Need to Pay (Rs)': (s.net_balance_to_driver !== undefined && Number(s.net_balance_to_driver) > 0) ? Number(s.net_balance_to_driver) : Number(s.balance_to_driver || 0),
         'Balance in Driver Hand (Rs)': (s.net_balance_to_driver !== undefined && Number(s.net_balance_to_driver) < 0) ? Math.abs(Number(s.net_balance_to_driver)) : 0,
@@ -246,7 +253,8 @@ export const SettlementsPage: React.FC = () => {
         'Settled By': s.settled_by_name || '-',
         'Notes': s.notes || '-',
         'Created At': s.created_at ? new Date(s.created_at).toLocaleString('en-IN') : '-',
-      }));
+      };
+      });
 
       // Add a blank separator row
       excelRows.push({
@@ -264,7 +272,9 @@ export const SettlementsPage: React.FC = () => {
         'Freight Rate (Rs)': '',
         'Total Freight (Rs)': '',
         'Advance Paid (Rs)': '',
-        'Total Expenses (Rs)': '',
+        'Loading (Rs)': '',
+        'Unloading (Rs)': '',
+        'Full Expenses (Rs)': '',
         'Balance Payable (Rs)': '',
         'Settlement Status': '',
         'Payment Mode': '',
@@ -292,7 +302,9 @@ export const SettlementsPage: React.FC = () => {
         'Freight Rate (Rs)': '',
         'Total Freight (Rs)': Number(totalFreight.toFixed(2)),
         'Advance Paid (Rs)': Number(totalAdvance.toFixed(2)),
-        'Total Expenses (Rs)': Number(totalExpenses.toFixed(2)),
+        'Loading (Rs)': Number(totalLoading.toFixed(2)),
+        'Unloading (Rs)': Number(totalUnloading.toFixed(2)),
+        'Full Expenses (Rs)': Number(totalExpenses.toFixed(2)),
         'Balance Payable (Rs)': Number(totalBalance.toFixed(2)),
         'Settlement Status': `Total: ${totalCount} Settlements`,
         'Payment Mode': '',
@@ -323,7 +335,9 @@ export const SettlementsPage: React.FC = () => {
         { wch: 16 }, // Freight Rate
         { wch: 18 }, // Total Freight
         { wch: 18 }, // Advance Paid
-        { wch: 18 }, // Total Expenses
+        { wch: 16 }, // Loading
+        { wch: 16 }, // Unloading
+        { wch: 18 }, // Full Expenses
         { wch: 20 }, // Balance Payable
         { wch: 22 }, // Status
         { wch: 15 }, // Payment Mode
@@ -350,7 +364,9 @@ export const SettlementsPage: React.FC = () => {
         { 'Summary Field': 'Total Goods Weight', 'Value': `${totalWeight.toFixed(3)} MT` },
         { 'Summary Field': 'Total Freight Amount', 'Value': `₹${totalFreight.toLocaleString('en-IN', { minimumFractionDigits: 2 })}` },
         { 'Summary Field': 'Total Advance Paid to Driver', 'Value': `₹${totalAdvance.toLocaleString('en-IN', { minimumFractionDigits: 2 })}` },
-        { 'Summary Field': 'Total Trip Expenses', 'Value': `₹${totalExpenses.toLocaleString('en-IN', { minimumFractionDigits: 2 })}` },
+        { 'Summary Field': 'Total Loading Expenses', 'Value': `₹${totalLoading.toLocaleString('en-IN', { minimumFractionDigits: 2 })}` },
+        { 'Summary Field': 'Total Unloading Expenses', 'Value': `₹${totalUnloading.toLocaleString('en-IN', { minimumFractionDigits: 2 })}` },
+        { 'Summary Field': 'Total Full Trip Expenses', 'Value': `₹${totalExpenses.toLocaleString('en-IN', { minimumFractionDigits: 2 })}` },
         { 'Summary Field': 'Total Balance Payable to Driver', 'Value': `₹${totalBalance.toLocaleString('en-IN', { minimumFractionDigits: 2 })}` },
         { 'Summary Field': 'Total Paid Amount', 'Value': `₹${totalPaid.toLocaleString('en-IN', { minimumFractionDigits: 2 })}` },
         { 'Summary Field': 'Status Filter', 'Value': statusFilter || 'All' },
@@ -456,6 +472,8 @@ export const SettlementsPage: React.FC = () => {
           return sum + (manager > 0 ? manager : leftover);
         }, 0);
       const totalExpenses = items.reduce((sum, s) => sum + Number(s.total_expenses || 0), 0);
+      const totalLoading = items.reduce((sum, s) => sum + settlementExpenseBreakdown(s).loading, 0);
+      const totalUnloading = items.reduce((sum, s) => sum + settlementExpenseBreakdown(s).unloading, 0);
       const totalNeedToPay = items.reduce((sum, s) => sum + settlementOutcome(s).needToPay, 0);
       const totalInHand = items.reduce((sum, s) => sum + settlementOutcome(s).inHand, 0);
       const totalPaid = items.reduce((sum, s) => sum + Number(s.paid_amount || 0), 0);
@@ -533,7 +551,9 @@ export const SettlementsPage: React.FC = () => {
         <th>Destination</th>
         <th class="num" style="width: 75px;">Freight (₹)</th>
         <th class="num" style="width: 70px;">Advance (₹)</th>
-        <th class="num" style="width: 70px;">Expenses (₹)</th>
+        <th class="num" style="width: 70px;">Loading (₹)</th>
+        <th class="num" style="width: 75px;">Unloading (₹)</th>
+        <th class="num" style="width: 80px;">Full Expenses (₹)</th>
         <th class="num" style="width: 80px;">Need to Pay (₹)</th>
         <th class="num" style="width: 85px;">Balance in Hand (₹)</th>
         <th class="num" style="width: 70px;">Paid (₹)</th>
@@ -571,7 +591,18 @@ export const SettlementsPage: React.FC = () => {
             const giver = String(s.advance_given_by_name || '').trim();
             return `<div style="font-size:9px;color:#1d4ed8">Advance: ₹${manager.toLocaleString('en-IN')}${giver ? ` · ${giver}` : ''}</div>${!leftoverOnly && ownerAdv > 0 ? `<div style="font-size:9px;color:#6d28d9">${ownAdvLabel}: ₹${ownerAdv.toLocaleString('en-IN')}</div>` : ''}${priorDeficit > 0 ? `<div style="font-size:9px;color:#c2410c">Less (prior dues): ₹${priorDeficit.toLocaleString('en-IN')}</div>` : ''}${!leftoverOnly && lessAmt > 0 ? `<div style="font-size:9px;color:#c2410c">Less: ₹${lessAmt.toLocaleString('en-IN')}</div>` : ''}${ownerBal > 0 ? `<div style="font-size:9px;color:#047857">${ownBalLabel}: ₹${ownerBal.toLocaleString('en-IN')}</div>` : ''}${leftoverOnly ? `<div style="font-size:9px;color:#047857">${ownBalLabel}: ₹${leftover.toLocaleString('en-IN')}</div>` : ''}${s.settled_by_name ? `<div style="font-size:9px;color:#15803d">Settled by: ${s.settled_by_name}</div>` : ''}`;
           })()}</td>
-          <td class="num">${Number(s.total_expenses || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td>
+          <td class="num" style="color:#b45309">${(() => {
+            const exp = settlementExpenseBreakdown(s);
+            return exp.loading.toLocaleString('en-IN', { minimumFractionDigits: 2 });
+          })()}</td>
+          <td class="num" style="color:#b45309">${(() => {
+            const exp = settlementExpenseBreakdown(s);
+            return exp.unloading.toLocaleString('en-IN', { minimumFractionDigits: 2 });
+          })()}</td>
+          <td class="num" style="color:#9a3412;font-weight:800">${(() => {
+            const exp = settlementExpenseBreakdown(s);
+            return exp.total.toLocaleString('en-IN', { minimumFractionDigits: 2 });
+          })()}</td>
           <td class="num" style="color:#b91c1c;font-weight:800">${(() => {
             const o = settlementOutcome(s);
             return `₹${o.needToPay.toLocaleString('en-IN', { minimumFractionDigits: 2 })}`;
@@ -586,10 +617,11 @@ export const SettlementsPage: React.FC = () => {
         `;
       }).join('')}
       <tr class="footer-row">
-        <td class="center" colspan="2">TOTAL</td>
-        <td colspan="6"><strong>Total Count: ${totalCount} Settlements</strong></td>
+        <td class="center" colspan="7"><strong>TOTAL · ${totalCount} Settlements</strong></td>
         <td class="num"><strong>₹${totalFreight.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</strong></td>
         <td class="num"><strong>₹${totalAdvance.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</strong></td>
+        <td class="num"><strong>₹${totalLoading.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</strong></td>
+        <td class="num"><strong>₹${totalUnloading.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</strong></td>
         <td class="num"><strong>₹${totalExpenses.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</strong></td>
         <td class="num" style="color:#b91c1c"><strong>₹${totalNeedToPay.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</strong></td>
         <td class="num" style="color:#047857"><strong>₹${totalInHand.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</strong></td>
@@ -704,7 +736,7 @@ export const SettlementsPage: React.FC = () => {
   const settlementOutcome = (s: Settlement) => {
     const net = getNetBalance(s);
     const needToPay = net > 0 ? net : 0;
-    const inHand = net < 0 ? Math.abs(net) : Math.max(0, Math.round(Number(s.owner_balance || 0)));
+    const inHand = net < 0 ? Math.abs(net) : 0;
     return { needToPay, inHand };
   };
 
@@ -713,7 +745,7 @@ export const SettlementsPage: React.FC = () => {
     const tripAdvance = Math.round(Number(s.manager_advance ?? s.initial_trip_advance ?? 0));
     const ownerAdvance = Math.round(Number(s.owner_given || 0));
     const ownerApplied = Math.round(Number(s.owner_applied || 0));
-    const leftoverUsed = Math.round(Number(s.owner_leftover_used || s.previous_driver_balance || 0));
+    const leftoverRaw = Math.round(Number(s.owner_leftover_used || s.previous_driver_balance || 0));
     const ownerBalance = Math.round(Number(s.owner_balance || 0));
     const priorDeficit = Math.round(Number(s.prior_deficit_deduction || 0));
     const effectiveAdvance = Math.max(0, tripAdvance - priorDeficit);
@@ -728,10 +760,17 @@ export const SettlementsPage: React.FC = () => {
     const givenName = String(s.advance_given_by_name || '').trim();
     const advanceGivenBy = givenName ? (givenRoleLabel ? `${givenName} (${givenRoleLabel})` : givenName) : '';
     const settledBy = String(s.settled_by_name || '').trim();
+    const startedName = String((s as any).trip_started_by_name || '').trim();
+    const startedRole = String((s as any).trip_started_by_role || '').toUpperCase();
+    const startedRoleLabel = startedRole === 'OWNER' ? 'Owner' : startedRole === 'ADMIN' ? 'Admin' : startedRole === 'MANAGER' || startedRole === 'TRANSPORT_USER' ? 'Manager' : '';
+    const tripStartedBy = startedName ? (startedRoleLabel ? `${startedName} (${startedRoleLabel})` : startedName) : '';
+    const withoutTrip = Math.max(0, Math.round(Number(s.without_trip_advance || 0)), ownerAdvance);
+    const leftoverUsed = leftoverRaw > 0 && (leftoverRaw === ownerAdvance || leftoverRaw === withoutTrip) ? 0 : leftoverRaw;
+    const withTrip = tripAdvance;
     return {
       expenses, tripAdvance, ownerAdvance, ownerApplied, leftoverUsed, ownerBalance,
       priorDeficit, effectiveAdvance, paidAmount, isCashDisbursement, laterAdvanceAdjusted,
-      needToPay, inHand, ownerName, mode, advanceGivenBy, settledBy,
+      needToPay, inHand, ownerName, mode, advanceGivenBy, settledBy, tripStartedBy, withoutTrip, withTrip,
     };
   };
 
@@ -744,19 +783,16 @@ export const SettlementsPage: React.FC = () => {
       : Math.max(0, managerGiven - priorDeficit);
     const ownerGiven = Math.round(Number(s.owner_given || 0));
     const leftoverUsed = Math.round(Number(s.owner_leftover_used || 0));
-    const priorInHand = leftoverUsed > 0
+    const withoutTrip = Math.max(0, Math.round(Number(s.without_trip_advance || 0)), ownerGiven);
+    const leftoverIsSameAsWithoutTrip = leftoverUsed > 0 && (leftoverUsed === ownerGiven || leftoverUsed === withoutTrip);
+    const priorInHand = leftoverIsSameAsWithoutTrip ? 0 : leftoverUsed > 0
       ? leftoverUsed
       : Math.round(Number(s.previous_driver_balance || 0));
-    const ownerBal = Math.round(Number(s.owner_balance || 0));
     const cashPaid = s.payment_mode !== 'ADJUSTED_ADVANCE' ? Math.round(Number(s.paid_amount || 0)) : 0;
-    if (s.owner_applied != null || s.owner_given != null || s.owner_balance != null || (s as any).effective_manager_advance != null) {
-      if (ownerBal > 0) return -ownerBal;
-      return Math.max(0, expenses - manager - ownerGiven - priorInHand - cashPaid);
-    }
-    if (s.net_balance_to_driver !== undefined && s.net_balance_to_driver !== null) {
-      return parseFloat(String(s.net_balance_to_driver)) || 0;
-    }
-    return parseFloat(String(s.balance_to_driver || 0)) || 0;
+    const totalAdvance = manager + withoutTrip + priorInHand;
+    const remaining = totalAdvance - expenses;
+    if (remaining > 0) return -remaining;
+    return Math.max(0, expenses - totalAdvance - cashPaid);
   };
 
   const getTripAdvancePaid = (s: Settlement) => {
@@ -894,24 +930,15 @@ export const SettlementsPage: React.FC = () => {
     const totalExpenses = Math.round(parseFloat(String(s.total_expenses || 0)));
     const paidAmount = Math.round(parseFloat(String(s.paid_amount || 0)));
 
-    const expenseItems = normalizeExpenseItems(s.expense_items);
-    const expenseRows = expenseItems.length > 0
-      ? expenseItems.map((item, idx) => `
+    const expenseBreak = settlementExpenseBreakdown(s);
+    const expenseRows = expenseBreak.rows.map((item, idx) => `
           <tr>
             <td style="text-align: center; padding: 6px 8px; border: 1px solid #cbd5e1; font-size: 11px;">${idx + 1}</td>
-            <td style="padding: 6px 8px; border: 1px solid #cbd5e1; font-weight: 700; font-size: 11.5px; color: #0f172a;">${formatExpenseType(item.expense_type)}</td>
+            <td style="padding: 6px 8px; border: 1px solid #cbd5e1; font-weight: 700; font-size: 11.5px; color: #0f172a;">${item.type}</td>
             <td style="padding: 6px 8px; border: 1px solid #cbd5e1; font-size: 11px; color: #475569;">${item.description || '—'}</td>
             <td style="text-align: right; padding: 6px 8px; border: 1px solid #cbd5e1; font-weight: 700; font-size: 11.5px;">${formatCurrency(item.amount)}</td>
           </tr>
-        `).join('')
-      : `
-          <tr>
-            <td style="text-align: center; padding: 6px 8px; border: 1px solid #cbd5e1; font-size: 11px;">1</td>
-            <td style="padding: 6px 8px; border: 1px solid #cbd5e1; font-weight: 700; font-size: 11.5px; color: #0f172a;">Consolidated Driver Trip Expenses</td>
-            <td style="padding: 6px 8px; border: 1px solid #cbd5e1; font-size: 11px; color: #475569;">Loading, Unloading, Bata, Toll &amp; misc expenses</td>
-            <td style="text-align: right; padding: 6px 8px; border: 1px solid #cbd5e1; font-weight: 700; font-size: 11.5px;">${formatCurrency(s.total_expenses)}</td>
-          </tr>
-        `;
+        `).join('');
 
     return `<!DOCTYPE html>
 <html>
@@ -1206,8 +1233,8 @@ export const SettlementsPage: React.FC = () => {
       <tr>
         <td class="info-label">Settlement Mode</td>
         <td class="info-val">${s.payment_mode || (isSettled ? 'CASH' : 'PENDING')}</td>
-        <td class="info-label"></td>
-        <td class="info-val"></td>
+        <td class="info-label">Trip Started By</td>
+        <td class="info-val">${getSlipCalc(s).tripStartedBy || '—'}</td>
       </tr>
       ${getSlipCalc(s).advanceGivenBy || getSlipCalc(s).settledBy ? `
       <tr>
@@ -1234,8 +1261,8 @@ export const SettlementsPage: React.FC = () => {
       <tbody>
         ${expenseRows}
         <tr style="background: #f8fafc; font-weight: 800;">
-          <td colspan="3" style="text-align: right; padding: 7px 8px; font-size: 11.5px; text-transform: uppercase;">Total Trip Expenses:</td>
-          <td style="text-align: right; padding: 7px 8px; font-size: 12.5px; color: #b45309;">${formatCurrency(s.total_expenses)}</td>
+          <td colspan="3" style="text-align: right; padding: 7px 8px; font-size: 11.5px; text-transform: uppercase;">Full Trip Expenses:</td>
+          <td style="text-align: right; padding: 7px 8px; font-size: 12.5px; color: #b45309;">${formatCurrency(expenseBreak.total)}</td>
         </tr>
       </tbody>
     </table>
@@ -1249,16 +1276,13 @@ export const SettlementsPage: React.FC = () => {
         const row = (label: string, valueHtml: string, extra = '') =>
           `<div class="calc-row"${extra}><span>${label}</span><strong>${valueHtml}</strong></div>`;
         let html = row('Total Driver Expenses Incurred:', `<span style="color:#b45309">${formatCurrency(c.expenses)}</span>`);
-        html += row('Advance Given:', `<span style="color:#1d4ed8">${formatCurrency(c.tripAdvance)}</span>`);
-        html += row('Already Amount in Hand:', `<span style="color:#047857">${formatCurrency(Math.max(0, Math.round(Number(s.previous_driver_balance || c.leftoverUsed || 0))))}</span>`, ' style="background:#ecfdf5"');
-        html += row('Without Trip (Driver Balance):', `<span style="color:#b45309">${formatCurrency(Math.max(0, Math.round(Number((s as any).without_trip_advance || 0))))}</span>`, ' style="background:#fff7ed"');
-        if (c.tripAdvance > 0 && c.priorDeficit <= 0) {
-          html += row(`Less: Trip Advance${c.advanceGivenBy ? ` (given by ${c.advanceGivenBy})` : ''}:`, `<span style="color:#1d4ed8">(-) ${formatCurrency(c.tripAdvance)}</span>`);
-        } else if (c.tripAdvance > 0) {
-          html += row(`Trip Advance (given${c.advanceGivenBy ? ` by ${c.advanceGivenBy}` : ''}):`, `<span style="color:#1d4ed8">${formatCurrency(c.tripAdvance)}</span>`);
+        html += row('Advance given with trip:', `<span style="color:#1d4ed8">${formatCurrency(c.withTrip)}</span>`);
+        if (c.advanceGivenBy) {
+          html += row(`· Given by: ${c.advanceGivenBy}`, '', ' style="color:#1d4ed8;font-size:11px"');
         }
-        if (c.ownerAdvance > 0) {
-          html += row(`Advance from Owner${c.ownerName ? ` (${c.ownerName})` : ''}:`, `<span style="color:#6d28d9">${formatCurrency(c.ownerAdvance)}</span>`, ' style="background:#f5f3ff"');
+        html += row('Advance given without trip:', `<span style="color:#c2410c">${formatCurrency(c.withoutTrip)}</span>`, ' style="background:#fff7ed"');
+        if (c.ownerName || c.ownerAdvance > 0) {
+          html += row(`· Given by: Owner${c.ownerName ? ` — ${c.ownerName}` : ''}`, '', ' style="background:#fff7ed;color:#c2410c;font-size:11px"');
         }
         if (c.priorDeficit > 0) {
           html += row('Less: This trip advance adjusted to prior trip dues:', `<span style="color:#dc2626">(-) ${formatCurrency(c.priorDeficit)}</span>`, ' style="background:#fff7ed;color:#c2410c"');
@@ -1276,12 +1300,10 @@ export const SettlementsPage: React.FC = () => {
         if (c.isCashDisbursement && c.paidAmount > 0) {
           html += row(`Less: Paid to Driver (${c.mode})${c.settledBy ? ` — settled by ${c.settledBy}` : ''}:`, `<span style="color:#16a34a">(-) ${formatCurrency(c.paidAmount)}</span>`, ' style="background:#f0fdf4;color:#15803d"');
         }
-        if (c.needToPay > 0 || c.inHand === 0) {
+        if (c.needToPay > 0) {
           html += row('Need to Pay:', `<span style="color:#b91c1c">${formatCurrency(c.needToPay)}</span>`, ' style="background:#fef2f2;color:#b91c1c;font-weight:800;border-top:1.5px solid #fecaca"');
         }
-        if (c.inHand > 0) {
-          html += `<div class="calc-row highlight" style="background:#ecfdf5;color:#047857"><span>Balance in Hand:</span><span>${formatCurrency(c.inHand)}</span></div>`;
-        }
+        html += `<div class="calc-row highlight" style="background:#ecfdf5;color:#047857"><span>Balance in Hand:</span><span>${formatCurrency(c.inHand)}</span></div>`;
         return html;
       })()}
     </div>
@@ -1399,6 +1421,98 @@ export const SettlementsPage: React.FC = () => {
     }
   };
 
+  const settlementPdfBlob = async (s: Settlement): Promise<Blob> => {
+    const html2canvas = (await import('html2canvas')).default;
+    const { jsPDF } = await import('jspdf');
+    const wrap = document.createElement('div');
+    wrap.style.position = 'fixed';
+    wrap.style.left = '-10000px';
+    wrap.style.top = '0';
+    wrap.style.width = '800px';
+    wrap.style.background = '#fff';
+    wrap.innerHTML = buildChallanHtml(s);
+    document.body.appendChild(wrap);
+    const card = wrap.querySelector('.challan-card') as HTMLElement;
+    const canvas = await html2canvas(card || wrap, { scale: 2, useCORS: true, backgroundColor: '#ffffff' });
+    document.body.removeChild(wrap);
+    const pdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+    const pageW = pdf.internal.pageSize.getWidth();
+    const pageH = pdf.internal.pageSize.getHeight();
+    const imgW = pageW - 20;
+    const imgH = (canvas.height * imgW) / canvas.width;
+    const sliceH = pageH - 20;
+    const imgData = canvas.toDataURL('image/png');
+    if (imgH <= sliceH) {
+      pdf.addImage(imgData, 'PNG', 10, 10, imgW, imgH);
+    } else {
+      let drawn = 0;
+      while (drawn < imgH - 1) {
+        if (drawn > 0) pdf.addPage();
+        pdf.addImage(imgData, 'PNG', 10, 10 - drawn, imgW, imgH);
+        drawn += sliceH;
+      }
+    }
+    return pdf.output('blob');
+  };
+
+  const downloadSettlementPdf = async (s: Settlement) => {
+    try {
+      setSlipLoading((p) => ({ ...p, [s.id]: 'download' }));
+      const blob = await settlementPdfBlob(s);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `KSP-Settlement-${s.id}-Trip${s.trip_id}.pdf`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (err: any) {
+      alert(err?.message || 'Failed to download settlement PDF.');
+    } finally {
+      setSlipLoading((p) => ({ ...p, [s.id]: null }));
+    }
+  };
+
+  const shareSettlementPdf = async (s: Settlement) => {
+    try {
+      setSlipLoading((p) => ({ ...p, [s.id]: 'share' }));
+      const blob = await settlementPdfBlob(s);
+      const file = new File([blob], `KSP-Settlement-${s.id}-Trip${s.trip_id}.pdf`, { type: 'application/pdf' });
+      if (navigator.share && (navigator as any).canShare?.({ files: [file] })) {
+        await navigator.share({
+          title: `KSP Settlement #${s.id}`,
+          text: `Trip Settlement for ${s.driver_name} — ${s.lorry_number}`,
+          files: [file],
+        });
+      } else if (navigator.share) {
+        await navigator.share({
+          title: `KSP Settlement #${s.id}`,
+          text: `Trip Settlement for ${s.driver_name} — ${s.lorry_number}`,
+        });
+      } else {
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = file.name;
+        a.click();
+        URL.revokeObjectURL(url);
+        alert('Sharing not supported on this device. PDF downloaded instead.');
+      }
+    } catch (err: any) {
+      if (err?.name !== 'AbortError') alert(err?.message || 'Failed to share settlement PDF.');
+    } finally {
+      setSlipLoading((p) => ({ ...p, [s.id]: null }));
+    }
+  };
+
+  const printSettlementPdf = (s: Settlement) => {
+    const printWindow = window.open('', '_blank', 'width=850,height=950');
+    if (!printWindow) return;
+    printWindow.document.write(buildChallanHtml(s));
+    printWindow.document.close();
+    printWindow.focus();
+    setTimeout(() => printWindow.print(), 350);
+  };
+
   const payModeIcon = (mode: string) => {
     if (mode === 'ADJUSTED_ADVANCE') return <CheckCircle size={13} style={{ verticalAlign: 'middle', marginRight: 4, color: '#2563eb' }} />;
     if (mode === 'UPI') return <Smartphone size={13} style={{ verticalAlign: 'middle', marginRight: 4, color: '#7c3aed' }} />;
@@ -1448,6 +1562,11 @@ export const SettlementsPage: React.FC = () => {
           <div style={{ fontSize: '11px', color: '#475569', fontWeight: 600, lineHeight: 1.35 }}>
             {[s.driver_name, s.owner_name, s.to_location || s.from_location].filter(Boolean).join(' · ')}
           </div>
+          {getSlipCalc(s).tripStartedBy ? (
+            <div style={{ fontSize: '10.5px', color: '#1d4ed8', fontWeight: 700 }}>
+              Started by: {getSlipCalc(s).tripStartedBy}
+            </div>
+          ) : null}
         </div>
       ),
     },
@@ -1463,10 +1582,17 @@ export const SettlementsPage: React.FC = () => {
     { header: 'Freight', width: '100px', render: (s) => <span style={{ whiteSpace: 'nowrap' }}>{formatCurrency(s.total_freight)}</span> },
     {
       header: 'Expenses',
-      width: '110px',
-      render: (s) => (
-        <span style={{ whiteSpace: 'nowrap', fontWeight: 800, color: '#b45309' }}>{formatCurrency(s.total_expenses)}</span>
-      ),
+      width: '150px',
+      render: (s) => {
+        const exp = settlementExpenseBreakdown(s);
+        return (
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 2, minWidth: 120 }}>
+            <span style={{ fontSize: 10, fontWeight: 700, color: '#92400e', whiteSpace: 'nowrap' }}>Loading {formatCurrency(exp.loading)}</span>
+            <span style={{ fontSize: 10, fontWeight: 700, color: '#92400e', whiteSpace: 'nowrap' }}>Unloading {formatCurrency(exp.unloading)}</span>
+            <span style={{ fontSize: 12, fontWeight: 800, color: '#9a3412', whiteSpace: 'nowrap' }}>Full {formatCurrency(exp.total)}</span>
+          </div>
+        );
+      },
     },
     {
       header: 'Advance',
@@ -1474,30 +1600,29 @@ export const SettlementsPage: React.FC = () => {
         const manager = Math.round(parseFloat(String(s.manager_advance ?? s.initial_trip_advance ?? 0)) || 0);
         const leftoverUsed = Math.round(parseFloat(String(s.owner_leftover_used ?? s.previous_driver_balance ?? 0)) || 0);
         const ownerAdvance = Math.round(Number(s.owner_given || 0));
-        const ownerAdvanceBal = Math.round(parseFloat(String(s.owner_balance ?? 0)) || 0);
         const isOwnerLeftover = leftoverUsed > 0 && ownerAdvance <= 0 && manager <= 0;
         const giver = advanceGiverText(s);
-        const rows: { label: string; value: number; color: string; bg: string; sub?: string }[] = [
-          { label: 'Advance', value: manager, color: '#1d4ed8', bg: '#eff6ff', sub: giver || undefined },
-        ];
+        const withoutTrip = Math.max(0, Math.round(Number(s.without_trip_advance || 0)));
         const ownName = String(s.advance_owner_name || '').trim();
-        const ownAdvLabel = ownName ? `Owner` : 'Owner';
-        const ownBalLabel = 'In hand';
+        const rows: { label: string; value: number; color: string; bg: string; sub?: string }[] = [
+          { label: 'With trip', value: manager, color: '#1d4ed8', bg: '#eff6ff', sub: giver || undefined },
+          { label: 'Without trip', value: Math.max(withoutTrip, ownerAdvance), color: '#c2410c', bg: '#fff7ed', sub: ownName ? `Owner: ${ownName}` : undefined },
+        ];
+        const ownBalLabel = 'Balance in hand';
         const lessAmt = Math.round(Number(s.owner_applied || 0));
         const priorDeficit = Math.round(Number(s.prior_deficit_deduction || 0));
-        if (!isOwnerLeftover && ownerAdvance > 0) {
-          rows.push({ label: ownAdvLabel, value: ownerAdvance, color: '#6d28d9', bg: '#f5f3ff', sub: ownName || undefined });
-        }
         if (priorDeficit > 0) {
           rows.push({ label: 'Prior dues', value: priorDeficit, color: '#c2410c', bg: '#fff7ed' });
         }
         if (!isOwnerLeftover && lessAmt > 0) {
           rows.push({ label: 'Less', value: lessAmt, color: '#c2410c', bg: '#fff7ed' });
         }
-        if (ownerAdvanceBal > 0) {
-          rows.push({ label: ownBalLabel, value: ownerAdvanceBal, color: '#047857', bg: '#ecfdf5' });
+        const leftoverIsSameAsWithoutTrip = leftoverUsed > 0 && (leftoverUsed === ownerAdvance || leftoverUsed === Math.max(withoutTrip, ownerAdvance));
+        const { inHand } = settlementOutcome(s);
+        if (inHand > 0) {
+          rows.push({ label: ownBalLabel, value: inHand, color: '#047857', bg: '#ecfdf5' });
         }
-        if (leftoverUsed > 0 && !isOwnerLeftover) {
+        if (leftoverUsed > 0 && !isOwnerLeftover && !leftoverIsSameAsWithoutTrip) {
           rows.push({ label: 'Prior advance', value: leftoverUsed, color: '#047857', bg: '#ecfdf5' });
         }
         if (isOwnerLeftover) {
@@ -1647,12 +1772,41 @@ export const SettlementsPage: React.FC = () => {
     },
     {
       header: 'Actions',
-      width: '150px',
+      width: '280px',
       className: 'actions-cell',
       render: (s) => (
-        <div className="table-actions">
+        <div className="table-actions" style={{ flexWrap: 'wrap', gap: 4 }}>
           <button onClick={() => { setPdfTitle(`Settlement SETTLE-${s.id}`); setPdfHtml(buildChallanHtml(s)); }} className="btn btn-outline btn-sm" title="View Settlement PDF" style={{ display: 'inline-flex', alignItems: 'center', gap: 4, color: '#1d4ed8', borderColor: '#93c5fd', background: '#eff6ff', fontWeight: 700 }}>
             <Eye size={13} /> View
+          </button>
+          <button
+            type="button"
+            title="Print this settlement"
+            onClick={() => printSettlementPdf(s)}
+            className="btn btn-outline btn-sm"
+            style={{ display: 'inline-flex', alignItems: 'center', gap: 4, color: '#1d4ed8', borderColor: '#93c5fd', background: '#eff6ff', fontWeight: 700 }}
+          >
+            <Printer size={13} /> Print
+          </button>
+          <button
+            type="button"
+            title="Download this settlement PDF"
+            onClick={() => downloadSettlementPdf(s)}
+            disabled={slipLoading[s.id] === 'download'}
+            className="btn btn-outline btn-sm"
+            style={{ display: 'inline-flex', alignItems: 'center', gap: 4, color: '#15803d', borderColor: '#86efac', background: '#ecfdf5', fontWeight: 700 }}
+          >
+            {slipLoading[s.id] === 'download' ? <Loader2 size={13} className="animate-spin" /> : <Download size={13} />} Download
+          </button>
+          <button
+            type="button"
+            title="Share this settlement PDF"
+            onClick={() => shareSettlementPdf(s)}
+            disabled={slipLoading[s.id] === 'share'}
+            className="btn btn-outline btn-sm"
+            style={{ display: 'inline-flex', alignItems: 'center', gap: 4, color: '#7c3aed', borderColor: '#ddd6fe', background: '#f5f3ff', fontWeight: 700 }}
+          >
+            {slipLoading[s.id] === 'share' ? <Loader2 size={13} className="animate-spin" /> : <Share2 size={13} />} Share
           </button>
           {(s.settlement_status === 'PENDING' || s.settlement_status === 'VERIFIED') && (() => {
             const netBal = getNetBalance(s);
@@ -2346,8 +2500,12 @@ export const SettlementsPage: React.FC = () => {
                     <td style={{ padding: '6px 10px', fontSize: '11.5px', fontWeight: 700, color: '#0f172a', border: '1px solid #cbd5e1' }}>
                       {selectedSettlement.payment_mode || (selectedSettlement.settlement_status === 'SETTLED' ? 'CASH' : 'PENDING')}
                     </td>
-                    <td style={{ padding: '6px 10px', fontSize: '10.5px', fontWeight: 700, background: '#f8fafc', color: '#475569', textTransform: 'uppercase', border: '1px solid #cbd5e1' }} />
-                    <td style={{ padding: '6px 10px', fontSize: '11.5px', fontWeight: 700, color: '#0f172a', border: '1px solid #cbd5e1' }} />
+                    <td style={{ padding: '6px 10px', fontSize: '10.5px', fontWeight: 700, background: '#f8fafc', color: '#475569', textTransform: 'uppercase', border: '1px solid #cbd5e1' }}>
+                      Trip Started By
+                    </td>
+                    <td style={{ padding: '6px 10px', fontSize: '11.5px', fontWeight: 700, color: '#1d4ed8', border: '1px solid #cbd5e1' }}>
+                      {getSlipCalc(selectedSettlement).tripStartedBy || '—'}
+                    </td>
                   </tr>
                   {(getSlipCalc(selectedSettlement).advanceGivenBy || getSlipCalc(selectedSettlement).settledBy) && (
                     <tr>
@@ -2382,27 +2540,25 @@ export const SettlementsPage: React.FC = () => {
                   </tr>
                 </thead>
                 <tbody>
-                  {normalizeExpenseItems(selectedSettlement.expense_items).length > 0 ? (
-                    normalizeExpenseItems(selectedSettlement.expense_items).map((it, idx) => (
-                      <tr key={idx}>
-                        <td style={{ textAlign: 'center', padding: '6px 8px', border: '1px solid #cbd5e1', fontSize: '11px' }}>{idx + 1}</td>
-                        <td style={{ padding: '6px 8px', border: '1px solid #cbd5e1', fontWeight: 700, fontSize: '11.5px', color: '#0f172a' }}>{formatExpenseType(it.expense_type)}</td>
-                        <td style={{ padding: '6px 8px', border: '1px solid #cbd5e1', fontSize: '11px', color: '#475569' }}>{it.description || '—'}</td>
-                        <td style={{ textAlign: 'right', padding: '6px 8px', border: '1px solid #cbd5e1', fontWeight: 700, fontSize: '11.5px' }}>{formatCurrency(it.amount)}</td>
-                      </tr>
-                    ))
-                  ) : (
-                    <tr>
-                      <td style={{ textAlign: 'center', padding: '6px 8px', border: '1px solid #cbd5e1', fontSize: '11px' }}>1</td>
-                      <td style={{ padding: '6px 8px', border: '1px solid #cbd5e1', fontWeight: 700, fontSize: '11.5px', color: '#0f172a' }}>Consolidated Driver Trip Expenses</td>
-                      <td style={{ padding: '6px 8px', border: '1px solid #cbd5e1', fontSize: '11px', color: '#475569' }}>Loading, Unloading, Bata, Toll &amp; misc expenses</td>
-                      <td style={{ textAlign: 'right', padding: '6px 8px', border: '1px solid #cbd5e1', fontWeight: 700, fontSize: '11.5px' }}>{formatCurrency(selectedSettlement.total_expenses)}</td>
-                    </tr>
-                  )}
-                  <tr style={{ background: '#f8fafc', fontWeight: 800 }}>
-                    <td colSpan={3} style={{ textAlign: 'right', padding: '7px 8px', fontSize: '11.5px', textTransform: 'uppercase', border: '1px solid #cbd5e1' }}>Total Trip Expenses:</td>
-                    <td style={{ textAlign: 'right', padding: '7px 8px', fontSize: '12.5px', color: '#b45309', border: '1px solid #cbd5e1' }}>{formatCurrency(selectedSettlement.total_expenses)}</td>
-                  </tr>
+                  {(() => {
+                    const exp = settlementExpenseBreakdown(selectedSettlement);
+                    return (
+                      <>
+                        {exp.rows.map((it, idx) => (
+                          <tr key={idx}>
+                            <td style={{ textAlign: 'center', padding: '6px 8px', border: '1px solid #cbd5e1', fontSize: '11px' }}>{idx + 1}</td>
+                            <td style={{ padding: '6px 8px', border: '1px solid #cbd5e1', fontWeight: 700, fontSize: '11.5px', color: '#0f172a' }}>{it.type}</td>
+                            <td style={{ padding: '6px 8px', border: '1px solid #cbd5e1', fontSize: '11px', color: '#475569' }}>{it.description || '—'}</td>
+                            <td style={{ textAlign: 'right', padding: '6px 8px', border: '1px solid #cbd5e1', fontWeight: 700, fontSize: '11.5px' }}>{formatCurrency(it.amount)}</td>
+                          </tr>
+                        ))}
+                        <tr style={{ background: '#f8fafc', fontWeight: 800 }}>
+                          <td colSpan={3} style={{ textAlign: 'right', padding: '7px 8px', fontSize: '11.5px', textTransform: 'uppercase', border: '1px solid #cbd5e1' }}>Full Trip Expenses:</td>
+                          <td style={{ textAlign: 'right', padding: '7px 8px', fontSize: '12.5px', color: '#b45309', border: '1px solid #cbd5e1' }}>{formatCurrency(exp.total)}</td>
+                        </tr>
+                      </>
+                    );
+                  })()}
                 </tbody>
               </table>
 
@@ -2434,17 +2590,26 @@ export const SettlementsPage: React.FC = () => {
                   );
                   return (
                     <>
-                      {c.tripAdvance > 0 && c.priorDeficit <= 0 && row(`Less: Trip Advance${c.advanceGivenBy ? ` (given by ${c.advanceGivenBy})` : ''}:`, c.tripAdvance, { color: '#1d4ed8', minus: true })}
-                      {c.tripAdvance > 0 && c.priorDeficit > 0 && row(`Trip Advance (given${c.advanceGivenBy ? ` by ${c.advanceGivenBy}` : ''}):`, c.tripAdvance, { color: '#1d4ed8' })}
-                      {c.ownerAdvance > 0 && row(`Advance from Owner${c.ownerName ? ` (${c.ownerName})` : ''}:`, c.ownerAdvance, { bg: '#f5f3ff', color: '#6d28d9' })}
+                      {row('Advance given with trip:', c.withTrip, { color: '#1d4ed8' })}
+                      {!!c.advanceGivenBy && (
+                        <div style={{ padding: '2px 14px 7px', fontSize: 11, fontWeight: 700, color: '#1d4ed8' }}>
+                          · Given by: {c.advanceGivenBy}
+                        </div>
+                      )}
+                      {row('Advance given without trip:', c.withoutTrip, { bg: '#fff7ed', color: '#c2410c' })}
+                      {!!(c.ownerName || c.ownerAdvance > 0) && (
+                        <div style={{ padding: '2px 14px 7px', fontSize: 11, fontWeight: 700, color: '#c2410c', background: '#fff7ed' }}>
+                          · Given by: Owner{c.ownerName ? ` — ${c.ownerName}` : ''}
+                        </div>
+                      )}
                       {c.priorDeficit > 0 && row('Less: This trip advance adjusted to prior trip dues:', c.priorDeficit, { bg: '#fff7ed', color: '#c2410c', minus: true })}
                       {c.priorDeficit > 0 && row('Effective Advance Available for This Trip:', c.effectiveAdvance, { bg: '#f8fafc', color: '#0f172a', bold: true })}
                       {c.ownerApplied > 0 && row('Less: Owner advance used on this trip:', c.ownerApplied, { bg: '#fff7ed', color: '#c2410c', minus: true })}
                       {c.leftoverUsed > 0 && c.priorDeficit <= 0 && row('Less: Previous surplus used on this trip:', c.leftoverUsed, { bg: '#fff7ed', color: '#c2410c', minus: true })}
                       {c.laterAdvanceAdjusted && row('Less: Adjusted from later trip advance:', c.paidAmount, { bg: '#fff7ed', color: '#c2410c', minus: true })}
                       {c.isCashDisbursement && c.paidAmount > 0 && row(`Less: Paid to Driver (${c.mode})${c.settledBy ? ` — settled by ${c.settledBy}` : ''}:`, c.paidAmount, { bg: '#f0fdf4', color: '#15803d', minus: true })}
-                      {(c.needToPay > 0 || c.inHand === 0) && row('Need to Pay:', c.needToPay, { bg: '#fef2f2', color: '#b91c1c', bold: true })}
-                      {c.inHand > 0 && row('Balance in Hand:', c.inHand, { bg: '#ecfdf5', color: '#047857', bold: true })}
+                      {c.needToPay > 0 && row('Need to Pay:', c.needToPay, { bg: '#fef2f2', color: '#b91c1c', bold: true })}
+                      {row('Balance in Hand:', c.inHand, { bg: '#ecfdf5', color: '#047857', bold: true })}
                     </>
                   );
                 })()}

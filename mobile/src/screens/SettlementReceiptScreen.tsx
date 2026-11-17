@@ -1,5 +1,7 @@
 import React, { useState, useEffect, useLayoutEffect } from 'react';
 import { formatDateDMY } from '../utils/dateUtils';
+import { PdfExportButtons } from '../components/PdfExportButtons';
+import { tripStartedByLabel } from '../utils/tripStartedBy';
 import {
   View,
   Text,
@@ -325,6 +327,20 @@ export const SettlementReceiptScreen: React.FC<{ route: any; navigation: any }> 
             <Text style={styles.gridLabel}>Driver Name:</Text>
             <Text style={styles.gridValue}>{trip.driver_name || '—'}</Text>
           </View>
+          {!!tripStartedByLabel(
+            (settlement as any).trip_started_by_name || trip.created_by_name,
+            (settlement as any).trip_started_by_role || trip.created_by_role
+          ) && (
+            <View style={styles.gridRow}>
+              <Text style={styles.gridLabel}>Trip Started By:</Text>
+              <Text style={styles.gridValue}>
+                {tripStartedByLabel(
+                  (settlement as any).trip_started_by_name || trip.created_by_name,
+                  (settlement as any).trip_started_by_role || trip.created_by_role
+                )}
+              </Text>
+            </View>
+          )}
           {(trip.owner_name || settlement.owner_name) ? (
             <View style={styles.gridRow}>
               <Text style={styles.gridLabel}>Truck Owner:</Text>
@@ -411,8 +427,7 @@ export const SettlementReceiptScreen: React.FC<{ route: any; navigation: any }> 
             const tripAdvance = Math.round(Number((settlement as any).manager_advance ?? initialTripAdvance ?? advancePaid));
             const ownerAdvance = Math.round(Number((settlement as any).owner_given || 0));
             const leftoverUsed = Math.round(Number((settlement as any).owner_leftover_used || 0));
-            const alreadyInHand = Math.round(Number((settlement as any).previous_driver_balance || leftoverUsed || 0));
-            const withoutTrip = Math.round(Number((settlement as any).without_trip_advance || 0));
+            const withoutTrip = Math.max(Math.round(Number((settlement as any).without_trip_advance || 0)), ownerAdvance);
             const ownerName = String((settlement as any).advance_owner_name || '').trim();
             const mode = String(settlement.payment_mode || '').toUpperCase();
             const isCash = ['CASH', 'UPI', 'BANK_TRANSFER'].includes(mode);
@@ -420,32 +435,27 @@ export const SettlementReceiptScreen: React.FC<{ route: any; navigation: any }> 
             return (
               <>
                 <View style={styles.finRow}>
-                  <Text style={styles.finLabel}>Advance given</Text>
+                  <Text style={styles.finLabel}>Advance given with trip</Text>
                   <Text style={[styles.finVal, { color: '#1d4ed8' }]}>{formatCurrency(tripAdvance)}</Text>
                 </View>
-                <View style={[styles.finRow, { backgroundColor: '#ecfdf5' }]}>
-                  <Text style={[styles.finLabel, { color: '#047857' }]}>Already amount in hand</Text>
-                  <Text style={[styles.finVal, { color: '#047857' }]}>{formatCurrency(alreadyInHand)}</Text>
-                </View>
+                {!!String((settlement as any).advance_given_by_name || '').trim() && (
+                  <View style={styles.finRow}>
+                    <Text style={[styles.finLabel, { color: '#1d4ed8' }]}>
+                      · Given by: {String((settlement as any).advance_given_by_name || '').trim()}
+                    </Text>
+                    <Text style={styles.finVal} />
+                  </View>
+                )}
                 <View style={[styles.finRow, { backgroundColor: '#fff7ed' }]}>
-                  <Text style={[styles.finLabel, { color: '#c2410c' }]}>Without trip (driver balance)</Text>
+                  <Text style={[styles.finLabel, { color: '#c2410c' }]}>Advance given without trip</Text>
                   <Text style={[styles.finVal, { color: '#c2410c' }]}>{formatCurrency(withoutTrip)}</Text>
                 </View>
-                {tripAdvance > 0 && priorDeficitDeduction <= 0 ? (
-                  <View style={styles.finRow}>
-                    <Text style={styles.finLabel}>Less: Trip Advance</Text>
-                    <Text style={[styles.finVal, { color: '#1d4ed8' }]}>(-) {formatCurrency(tripAdvance)}</Text>
-                  </View>
-                ) : tripAdvance > 0 ? (
-                  <View style={styles.finRow}>
-                    <Text style={styles.finLabel}>Trip Advance (given)</Text>
-                    <Text style={[styles.finVal, { color: '#1d4ed8' }]}>{formatCurrency(tripAdvance)}</Text>
-                  </View>
-                ) : null}
-                {ownerAdvance > 0 && (
-                  <View style={[styles.finRow, { backgroundColor: '#f5f3ff' }]}>
-                    <Text style={styles.finLabel}>Advance from Owner{ownerName ? ` (${ownerName})` : ''}</Text>
-                    <Text style={[styles.finVal, { color: '#6d28d9' }]}>{formatCurrency(ownerAdvance)}</Text>
+                {!!(ownerName || ownerAdvance > 0) && (
+                  <View style={[styles.finRow, { backgroundColor: '#fff7ed' }]}>
+                    <Text style={[styles.finLabel, { color: '#c2410c' }]}>
+                      · Given by: Owner{ownerName ? ` — ${ownerName}` : ''}
+                    </Text>
+                    <Text style={styles.finVal} />
                   </View>
                 )}
                 {priorDeficitDeduction > 0 && (
@@ -478,6 +488,16 @@ export const SettlementReceiptScreen: React.FC<{ route: any; navigation: any }> 
                     <Text style={[styles.finVal, { color: '#16a34a' }]}>(-) {formatCurrency(paidAmount)}</Text>
                   </View>
                 )}
+                {payableToDriver > 0 ? (
+                  <View style={[styles.finRow, { backgroundColor: '#fef2f2' }]}>
+                    <Text style={[styles.finLabel, { color: '#b91c1c', fontWeight: '800' }]}>Need to pay</Text>
+                    <Text style={[styles.finVal, { color: '#b91c1c' }]}>{formatCurrency(payableToDriver)}</Text>
+                  </View>
+                ) : null}
+                <View style={[styles.finRow, { backgroundColor: '#ecfdf5' }]}>
+                  <Text style={[styles.finLabel, { color: '#047857', fontWeight: '800' }]}>Balance in hand</Text>
+                  <Text style={[styles.finVal, { color: '#047857' }]}>{formatCurrency(balanceInHand)}</Text>
+                </View>
               </>
             );
           })()}
@@ -579,63 +599,12 @@ export const SettlementReceiptScreen: React.FC<{ route: any; navigation: any }> 
         </View>
       </View>
 
-      {/* Action Buttons Toolbar: Print, Share, Download */}
-      <View style={styles.actionButtonsGrid}>
-        {/* Print Button */}
-        <TouchableOpacity
-          style={[styles.actionBtn, styles.printBtn, actionLoading === 'print' && { opacity: 0.7 }]}
-          onPress={handlePrint}
-          disabled={actionLoading !== null}
-          activeOpacity={0.8}
-        >
-          {actionLoading === 'print' ? (
-            <ActivityIndicator color={COLORS.white} size="small" />
-          ) : (
-            <>
-              <Printer size={18} color={COLORS.white} />
-              <Text style={styles.actionBtnText}>PRINT</Text>
-            </>
-          )}
-        </TouchableOpacity>
-
-        {/* Share Button */}
-        <TouchableOpacity
-          style={[styles.actionBtn, styles.shareBtn, actionLoading === 'share' && { opacity: 0.7 }]}
-          onPress={handleShare}
-          disabled={actionLoading !== null}
-          activeOpacity={0.8}
-        >
-          {actionLoading === 'share' ? (
-            <ActivityIndicator color={COLORS.white} size="small" />
-          ) : (
-            <>
-              <Share2 size={18} color={COLORS.white} />
-              <Text style={styles.actionBtnText}>SHARE</Text>
-            </>
-          )}
-        </TouchableOpacity>
-
-        {/* Download Button */}
-        <TouchableOpacity
-          style={[
-            styles.actionBtn,
-            styles.downloadBtn,
-            actionLoading === 'download' && { opacity: 0.7 },
-          ]}
-          onPress={handleDownload}
-          disabled={actionLoading !== null}
-          activeOpacity={0.8}
-        >
-          {actionLoading === 'download' ? (
-            <ActivityIndicator color={COLORS.white} size="small" />
-          ) : (
-            <>
-              <Download size={18} color={COLORS.white} />
-              <Text style={styles.actionBtnText}>DOWNLOAD</Text>
-            </>
-          )}
-        </TouchableOpacity>
-      </View>
+      <PdfExportButtons
+        loading={actionLoading}
+        onShare={handleShare}
+        onDownload={handleDownload}
+        style={{ marginBottom: 16 }}
+      />
 
       {/* Return to Dashboard */}
       <TouchableOpacity

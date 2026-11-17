@@ -31,7 +31,7 @@ import {
 } from 'lucide-react-native';
 import * as ImagePicker from 'expo-image-picker';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
-import { mobileLookupService, mobileTripService } from '../services/mobileService';
+import { mobileLookupService, mobileTripService, mobileDashboardService } from '../services/mobileService';
 import { Vehicle, Driver, Party, Route, Unit, FreightRate, RootStackParamList } from '../types';
 import { COLORS, SPACING, RADIUS, SHADOWS } from '../constants/theme';
 import { ComplianceAlertModal, ComplianceDoc } from '../components/ComplianceAlertModal';
@@ -45,7 +45,11 @@ type Props = NativeStackScreenProps<RootStackParamList, 'NewTrip'>;
 
 export const NewTripScreen: React.FC<Props> = ({ navigation, route }) => {
   const { user } = useAuth();
-  const canManualEntry = String(user?.role || '').toUpperCase() === 'ADMIN';
+  const userRole = String(user?.role || '').toUpperCase();
+  const canManualEntry = userRole === 'ADMIN';
+  const canEditFreight = userRole === 'ADMIN' || userRole === 'OWNER';
+  const isManagerWallet = userRole === 'MANAGER' || userRole === 'TRANSPORT_USER';
+  const [managerAvailableBalance, setManagerAvailableBalance] = useState(0);
   const [weightEntryMode, setWeightEntryMode] = useState<'upload' | 'manual'>('upload');
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
   const [drivers, setDrivers] = useState<Driver[]>([]);
@@ -199,6 +203,14 @@ export const NewTripScreen: React.FC<Props> = ({ navigation, route }) => {
         setSelectedUnitId(uRes.data[0].id);
       }
       setFreightRates(frRes.data.items);
+      if (isManagerWallet) {
+        try {
+          const dash = await mobileDashboardService.getDashboard();
+          setManagerAvailableBalance(Math.round(Number(dash.data?.manager_available_balance || 0)));
+        } catch {
+          setManagerAvailableBalance(0);
+        }
+      }
 
       // No auto-selection — user must explicitly choose from dropdown
     } catch (err) {
@@ -718,9 +730,22 @@ export const NewTripScreen: React.FC<Props> = ({ navigation, route }) => {
     }
     const rate = parseFloat(freightRate);
     if (isNaN(rate) || rate < 0) {
-      const msg = 'Please enter a valid freight rate.';
+      const msg = canEditFreight
+        ? 'Please enter a valid freight rate.'
+        : 'Freight rate is set from party and unit. Upload the weighment bill. If rate is empty, ask admin to add it in master rates.';
       setError(msg);
-      showNotice('warning', 'Invalid Freight Rate', msg, {
+      showNotice('warning', canEditFreight ? 'Invalid Freight Rate' : 'Freight Rate From Master', msg, {
+        actions: [{ label: 'OK', onPress: closeNotice }],
+      });
+      return;
+    }
+    const advAmt = parseFloat(advancePaid) || 0;
+    if (isManagerWallet && advAmt > managerAvailableBalance) {
+      const msg = managerAvailableBalance <= 0
+        ? 'No balance from owner. Start this trip without advance, or give only after the owner gives you advance.'
+        : `You can only give ₹${managerAvailableBalance.toLocaleString('en-IN')} — remaining from the amount the owner gave you.`;
+      setError(msg);
+      showNotice('warning', 'Advance Limit', msg, {
         actions: [{ label: 'OK', onPress: closeNotice }],
       });
       return;
@@ -807,7 +832,13 @@ export const NewTripScreen: React.FC<Props> = ({ navigation, route }) => {
     <View style={{ flex: 1 }}>
       <ScrollView style={styles.container} contentContainerStyle={styles.content}>
         <Text style={styles.screenHeading}>New Trip Dispatch Entry</Text>
-        <Text style={styles.screenSub}>Assign fleet vehicle, driver, client party & calculate freight</Text>
+        <Text style={styles.screenSub}>
+          {canEditFreight
+            ? 'Assign fleet vehicle, driver, client party & calculate freight'
+            : hasPreselectedAdvance
+            ? 'Advance is pre-filled from owner balance. Select party, unit, and upload the weighment bill.'
+            : 'Select truck, party and unit, then upload the weighment bill. Freight rate is taken from master.'}
+        </Text>
 
         {error ? (
           <View style={styles.errorBox}>
@@ -1252,15 +1283,21 @@ export const NewTripScreen: React.FC<Props> = ({ navigation, route }) => {
               </View>
             </View>
             <View style={{ flex: 1 }}>
-              <Text style={styles.fieldLabel}>Freight Rate (₹) *</Text>
-              <TextInput
-                style={styles.input}
-                placeholder="e.g. 1250"
-                placeholderTextColor={COLORS.textLight}
-                keyboardType="decimal-pad"
-                value={freightRate}
-                onChangeText={setFreightRate}
-              />
+              <Text style={styles.fieldLabel}>
+                {canEditFreight ? 'Freight Rate (₹) *' : 'Freight Rate (from master)'}
+              </Text>
+              <View style={styles.inputWithIcon}>
+                {!canEditFreight ? <Lock size={16} color={COLORS.textMuted} style={{ marginRight: 8 }} /> : null}
+                <TextInput
+                  style={[styles.innerInput, !canEditFreight && { color: COLORS.textMuted }]}
+                  placeholder={canEditFreight ? 'e.g. 1250' : 'From party / unit'}
+                  placeholderTextColor={COLORS.textLight}
+                  keyboardType="decimal-pad"
+                  value={freightRate}
+                  editable={canEditFreight}
+                  onChangeText={setFreightRate}
+                />
+              </View>
             </View>
           </View>
 
@@ -1268,6 +1305,11 @@ export const NewTripScreen: React.FC<Props> = ({ navigation, route }) => {
           <View style={styles.formRow}>
             <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
               <Text style={styles.fieldLabel}>Advance Paid to Driver (₹)</Text>
+              {isManagerWallet ? (
+                <Text style={{ fontSize: 10, fontWeight: '700', color: '#047857' }}>
+                  From owner: ₹{managerAvailableBalance.toLocaleString('en-IN')}
+                </Text>
+              ) : null}
               {hasPreselectedAdvance && (
                 <View style={{ backgroundColor: '#eff6ff', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, borderWidth: 1, borderColor: '#bfdbfe' }}>
                   <Text style={{ fontSize: 10, fontWeight: '700', color: '#1d4ed8' }}>PRE-FILLED FROM ADVANCE</Text>

@@ -3,7 +3,7 @@ import { query } from '../config/database';
 import { AppError, asyncHandler } from '../middleware/errorHandler';
 import { AuthRequest } from '../middleware/auth';
 import { createAuditLog } from '../utils/auditLog';
-import { applyOwnerScope, assertOwnerOwner, assertOwnerVehicle, isOwnerUser, linkManagerToOwners } from '../utils/ownerScope';
+import { applyOwnerScope, assertOwnerOwner, assertOwnerVehicle, isManagerRole, isOwnerUser, linkManagerToOwners } from '../utils/ownerScope';
 import { reconcileDriverPendingSettlements } from './settlement.controller';
 
 // ===== OWNER ADVANCES =====
@@ -46,6 +46,10 @@ export const getOwnerAdvances = asyncHandler(async (req: AuthRequest, res: Respo
   if (manager_id) {
     conditions.push(`oa.manager_id = $${paramIdx}`);
     params.push(parseInt(manager_id));
+    paramIdx++;
+  } else if (isManagerRole(req) && req.user?.id) {
+    conditions.push(`oa.manager_id = $${paramIdx}`);
+    params.push(req.user.id);
     paramIdx++;
   }
 
@@ -224,6 +228,7 @@ export const createOwnerAdvance = asyncHandler(async (req: AuthRequest, res: Res
     screenshot_url,
   } = req.body;
   let { owner_id } = req.body;
+  const resolvedManagerId = manager_id ? parseInt(String(manager_id), 10) : NaN;
 
   if (!owner_id && isOwnerUser(req) && req.user?.ownerIds?.length === 1) {
     owner_id = req.user.ownerIds[0];
@@ -234,8 +239,8 @@ export const createOwnerAdvance = asyncHandler(async (req: AuthRequest, res: Res
   }
   assertOwnerOwner(req, owner_id);
   if (vehicle_id) assertOwnerVehicle(req, vehicle_id);
-  if (manager_id) {
-    await linkManagerToOwners(Number(manager_id), [parseInt(String(owner_id), 10)], req.user?.id);
+  if (Number.isFinite(resolvedManagerId) && resolvedManagerId > 0) {
+    await linkManagerToOwners(resolvedManagerId, [parseInt(String(owner_id), 10)], req.user?.id);
   }
 
   if (amount === undefined || amount === null) {
@@ -248,9 +253,9 @@ export const createOwnerAdvance = asyncHandler(async (req: AuthRequest, res: Res
   }
 
   const finalRecipientType: 'MANAGER' | 'DRIVER' =
-    recipient_type === 'DRIVER' || (!manager_id && driver_id) ? 'DRIVER' : 'MANAGER';
+    recipient_type === 'DRIVER' || (!(Number.isFinite(resolvedManagerId) && resolvedManagerId > 0) && driver_id) ? 'DRIVER' : 'MANAGER';
 
-  if (finalRecipientType === 'MANAGER' && !manager_id) {
+  if (finalRecipientType === 'MANAGER' && !(Number.isFinite(resolvedManagerId) && resolvedManagerId > 0)) {
     throw new AppError('Manager (Received By) is required when giving advance to a manager.', 400);
   }
 
@@ -279,7 +284,7 @@ export const createOwnerAdvance = asyncHandler(async (req: AuthRequest, res: Res
     [
       owner_id,
       finalRecipientType,
-      finalRecipientType === 'MANAGER' ? manager_id : null,
+      finalRecipientType === 'MANAGER' ? resolvedManagerId : null,
       finalRecipientType === 'DRIVER' ? driver_id : null,
       vehicle_id || null,
       numAmount,
@@ -293,8 +298,8 @@ export const createOwnerAdvance = asyncHandler(async (req: AuthRequest, res: Res
 
   let managerName: string | null = null;
   let managerRole: string | null = null;
-  if (finalRecipientType === 'MANAGER' && manager_id) {
-    const mgrRes = await query(`SELECT name, role FROM users WHERE id = $1`, [manager_id]);
+  if (finalRecipientType === 'MANAGER' && Number.isFinite(resolvedManagerId)) {
+    const mgrRes = await query(`SELECT name, role FROM users WHERE id = $1`, [resolvedManagerId]);
     managerName = mgrRes.rows[0]?.name || null;
     managerRole = mgrRes.rows[0]?.role || 'MANAGER';
   }
@@ -302,7 +307,7 @@ export const createOwnerAdvance = asyncHandler(async (req: AuthRequest, res: Res
   await createAuditLog(req.user?.id, 'CREATE_OWNER_ADVANCE', 'OWNER_ADVANCES', result.rows[0].id, {
     owner_id,
     recipient_type: finalRecipientType,
-    manager_id: finalRecipientType === 'MANAGER' ? manager_id : null,
+    manager_id: finalRecipientType === 'MANAGER' ? resolvedManagerId : null,
     manager_name: managerName,
     manager_role: managerRole,
     driver_id: finalRecipientType === 'DRIVER' ? driver_id : null,

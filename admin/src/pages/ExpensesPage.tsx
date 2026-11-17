@@ -5,6 +5,7 @@ import { Trip, DriverExpense } from '../types';
 import { Modal } from '../components/Common/Modal';
 import { StatusBadge } from '../components/Common/StatusBadge';
 import { formatDateDMY } from '../utils/dateUtils';
+import { tripStartedByLabel } from '../utils/tripStartedBy';
 
 export const ExpensesPage: React.FC = () => {
   const [trips, setTrips] = useState<Trip[]>([]);
@@ -242,6 +243,9 @@ export const ExpensesPage: React.FC = () => {
                 <h3 className="card-title">Expense Line Items for Trip #{selectedTrip.id}</h3>
                 <div style={{ fontSize: '13px', color: 'var(--text-muted)' }}>
                   Driver: <strong>{selectedTrip.driver_name}</strong> | Lorry: <strong>{selectedTrip.lorry_number}</strong>
+                  {tripStartedByLabel(selectedTrip.created_by_name, selectedTrip.created_by_role)
+                    ? ` | Started by: ${tripStartedByLabel(selectedTrip.created_by_name, selectedTrip.created_by_role)}`
+                    : ''}
                 </div>
               </div>
             </div>

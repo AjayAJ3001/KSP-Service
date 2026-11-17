@@ -53,7 +53,8 @@ import { formatIST, formatISTDate } from '../utils/dateUtils';
 import { useAuth } from '../context/AuthContext';
 import { generateDriverStatementHtml, openStatementWindow } from '../utils/driverStatementPdf';
 import { PRINT_BRAND_CSS, printBrandLockup } from '../utils/printBrand';
-import { expenseDetailLines, formatExpenseType, normalizeExpenseItems } from '../utils/expenseBreakdown';
+import { driverSummaryExpense, settlementExpenseBreakdown } from '../utils/expenseBreakdown';
+import { tripStartedByLabel } from '../utils/tripStartedBy';
 import { ViewButton } from '../components/Common/ViewDetails';
 import { PdfPreviewModal } from '../components/Common/PdfPreviewModal';
 
@@ -85,7 +86,7 @@ const uniquePeople = (names: string[]) =>
 const managerNameForTrip = (trip: Trip, advances: DriverAdvance[]) =>
   uniquePeople([
     ...advances
-      .filter((a) => Number(a.trip_id) === Number(trip.id) && !isOwnerAdvance(a))
+      .filter((a) => !a.is_without_trip && Number(a.trip_id) === Number(trip.id) && !isOwnerAdvance(a))
       .map((a) => a.manager_name || a.given_by_name || a.given_by || ''),
     ...(trip.truck_advances || []).map((ta) => ta.manager_name || ''),
   ]);
@@ -229,7 +230,7 @@ const tripAdvancePaid = (
   settlement: Settlement | undefined,
   alloc: OwnerAlloc | undefined,
   adj?: AdvanceAdjLink | null
-): { chips: AdvancePaidChip[]; manager: number; ownerAdvance: number; less: number; ownerBal: number } => {
+): { chips: AdvancePaidChip[]; manager: number; ownerAdvance: number; less: number; ownerBal: number; inHand: number; needPay: number } => {
   const manager = numAmt(alloc?.manager_advance) || numAmt(settlement?.manager_advance ?? settlement?.initial_trip_advance);
   const leftoverUsed = numAmt(alloc?.owner_leftover_used);
   const ownerApplied = numAmt(alloc?.owner_applied);
@@ -237,45 +238,46 @@ const tripAdvancePaid = (
   const ownerAdvance = numAmt(alloc?.owner_given);
   const leftoverOnly = manager < 0.5 && leftoverUsed > 0.5 && ownerAdvance < 0.5;
   const less = leftoverOnly ? leftoverUsed : ownerApplied > 0.5 ? ownerApplied : 0;
-  const mgrName = managerNameForTrip(trip, advances);
-  const ownName = ownerNameForDriver(trip, advances);
-  const ownerLabel = ownName ? `Owner: ${ownName}` : undefined;
+  const stmt = tripStatementCalc(trip, advances, alloc, settlement);
+  const ownerLabel = stmt.ownName ? `Owner: ${stmt.ownName}` : undefined;
 
   const chips: AdvancePaidChip[] = [];
-  if (leftoverOnly) {
+  chips.push({
+    label: 'With trip',
+    name: stmt.mgrName ? `Admin: ${stmt.mgrName}` : undefined,
+    amount: stmt.manager,
+    color: '#1d4ed8',
+    bg: '#eff6ff',
+  });
+  chips.push({
+    label: 'Without trip',
+    name: ownerLabel,
+    amount: stmt.withoutTrip,
+    color: '#c2410c',
+    bg: '#fff7ed',
+  });
+  if (stmt.cashPaid > 0.5) {
     chips.push({
-      label: 'Advance Balance in Hand',
-      name: ownerLabel,
-      amount: leftoverUsed,
+      label: 'Settlement paid',
+      amount: stmt.cashPaid,
       color: '#047857',
       bg: '#ecfdf5',
     });
   }
-  if (manager > 0.5) {
+  if (stmt.inHand > 0.5) {
     chips.push({
-      label: 'Advance',
-      name: mgrName ? `Manager: ${mgrName}` : undefined,
-      amount: manager,
-      color: '#1d4ed8',
-      bg: '#eff6ff',
+      label: 'Balance in hand',
+      amount: stmt.inHand,
+      color: '#047857',
+      bg: '#ecfdf5',
     });
   }
-  if (!leftoverOnly && ownerAdvance > 0.5) {
+  if (stmt.needPay > 0.5) {
     chips.push({
-      label: 'Owner Advance',
-      name: ownerLabel,
-      amount: ownerAdvance,
-      color: '#6d28d9',
-      bg: '#f5f3ff',
-    });
-  }
-  if (!leftoverOnly && less > 0.5) {
-    chips.push({
-      label: 'Less',
-      amount: less,
-      color: '#c2410c',
-      bg: '#fff7ed',
-      minus: true,
+      label: 'Need to pay',
+      amount: stmt.needPay,
+      color: '#b91c1c',
+      bg: '#fef2f2',
     });
   }
   if (adj?.toPrior && adj.toPrior.amount > 0.5) {
@@ -302,10 +304,12 @@ const tripAdvancePaid = (
 
   return {
     chips,
-    manager,
-    ownerAdvance: leftoverOnly ? 0 : ownerAdvance,
+    manager: stmt.manager,
+    ownerAdvance: stmt.ownerAdvance,
     less,
-    ownerBal: leftoverOnly ? (ownerBal > 0.5 ? ownerBal : 0) : ownerBal,
+    ownerBal: stmt.inHand,
+    inHand: stmt.inHand,
+    needPay: stmt.needPay,
   };
 };
 
@@ -349,9 +353,9 @@ const settlementAdjNotes = (pay: TripPaymentInfo, adj?: AdvanceAdjLink | null) =
   return notes;
 };
 
-const tripCashAmounts = (paid: { ownerBal: number }, pay: TripPaymentInfo) => {
-  const inHandAmt = Math.max(0, paid.ownerBal > 0.5 ? paid.ownerBal : pay.inHand);
-  const needPayAmt = inHandAmt > 0.5 ? 0 : Math.max(0, pay.needPay);
+const tripCashAmounts = (paid: { ownerBal: number; inHand?: number; needPay?: number }, pay: TripPaymentInfo) => {
+  const inHandAmt = Math.max(0, paid.inHand ?? (paid.ownerBal > 0.5 ? paid.ownerBal : pay.inHand));
+  const needPayAmt = inHandAmt > 0.5 ? 0 : Math.max(0, paid.needPay ?? pay.needPay);
   return { inHandAmt, needPayAmt };
 };
 
@@ -363,15 +367,18 @@ const cashCellsHtml = (paid: { ownerBal: number }, pay: TripPaymentInfo) => {
 
 const tripDetailRowHtml = (tr: Trip, advances: DriverAdvance[], settlements: Settlement[], alloc: Record<number, OwnerAlloc>, adj?: AdvanceAdjLink | null, allTrips: Trip[] = []) => {
   const paid = tripAdvancePaid(tr, advances, settlements.find((s) => Number(s.trip_id) === Number(tr.id)), alloc[tr.id], adj);
-  const pay = tripPaymentInfo(tr, advances, alloc[tr.id], allTrips);
+  const pay = tripPaymentInfo(tr, advances, alloc[tr.id], allTrips, settlements.find((s) => Number(s.trip_id) === Number(tr.id)));
   const adjNotes = settlementAdjNotes(pay, adj);
   return `<tr>
-    <td><strong>#${tr.id}</strong></td>
+    <td><strong>#${tr.id}</strong>${tripStartedByLabel((tr as any).created_by_name || (tr as any).trip_started_by_name, (tr as any).created_by_role || (tr as any).trip_started_by_role) ? `<div style="font-size:10px;color:#1d4ed8;font-weight:700">Started by ${tripStartedByLabel((tr as any).created_by_name || (tr as any).trip_started_by_name, (tr as any).created_by_role || (tr as any).trip_started_by_role)}</div>` : ''}</td>
     <td>${formatISTDate(tr.trip_date)}</td>
     <td>${tr.party_name || '—'}<div style="font-size:10px;color:#64748b">${tr.from_location || '—'} → ${tr.to_location || '—'}</div></td>
     <td>${tr.lorry_number || '—'}${tr.owner_name ? `<div style="font-size:10px;color:#64748b">${tr.owner_name}</div>` : ''}</td>
     <td>${advancePaidHtml(paid.chips) || '—'}</td>
-    <td class="num" style="color:#b45309">${formatCurrency(tripExpenseTotal(tr))}${expenseDetailLines(tr.expense_items).map((l) => `<div style="font-size:9px;font-weight:700;color:#92400e">${l.type}${l.description ? ` — ${l.description}` : ''} ${formatCurrency(l.amount)}</div>`).join('')}</td>
+    <td class="num" style="color:#b45309">${(() => {
+      const exp = settlementExpenseBreakdown({ expense_items: tr.expense_items, total_expenses: tripExpenseTotal(tr) });
+      return `${formatCurrency(exp.total)}<div style="font-size:9px;font-weight:700;color:#92400e">Loading ${formatCurrency(exp.loading)}</div><div style="font-size:9px;font-weight:700;color:#92400e">Unloading ${formatCurrency(exp.unloading)}</div>${exp.rows.filter((l) => l.type !== 'Loading' && l.type !== 'Unloading').map((l) => `<div style="font-size:9px;font-weight:700;color:#92400e">${l.type}${l.description ? ` — ${l.description}` : ''} ${formatCurrency(l.amount)}</div>`).join('')}<div style="font-size:9px;font-weight:800;color:#9a3412">Full ${formatCurrency(exp.total)}</div>`;
+    })()}</td>
     ${cashCellsHtml(paid, pay)}
     <td style="font-weight:800;color:${paymentStatusColor(pay.driverKind)}">${pay.driverLabel}${adjNotes.map((n) => `<div style="font-size:10px;font-weight:700;color:#c2410c">${n}</div>`).join('')}</td>
   </tr>`;
@@ -380,20 +387,30 @@ const tripDetailRowHtml = (tr: Trip, advances: DriverAdvance[], settlements: Set
 const getTripAdvanceLines = (trip: Trip, advances: DriverAdvance[] = []): AdvanceLine[] => {
   const lines: AdvanceLine[] = [];
   const seen = new Set<string>();
-  advances
-    .filter((a) => Number(a.trip_id) === Number(trip.id))
-    .forEach((a) => {
-      seen.add(`${a.source_type || 'ADV'}-${a.id}`);
-      lines.push({ amount: parseFloat(String(a.amount)) || 0, givenBy: givenByLabel(a) });
-    });
+  const push = (key: string, amount: number, givenBy: string) => {
+    if (seen.has(key) || amount <= 0) return;
+    seen.add(key);
+    lines.push({ amount, givenBy });
+  };
+  // Same as settlement: truck advances on this trip, else driver advances, else trips.advance_paid.
   (trip.truck_advances || []).forEach((ta) => {
-    const key = `TRIP_TRUCK_ADVANCE-${ta.id}`;
-    if (seen.has(key)) return;
-    lines.push({
-      amount: parseFloat(String(ta.amount)) || 0,
-      givenBy: `Manager: ${ta.manager_name || 'Manager'}`,
-    });
+    push(`TRIP_TRUCK_ADVANCE-${ta.id}`, parseFloat(String(ta.amount)) || 0, `Manager: ${ta.manager_name || 'Manager'}`);
   });
+  advances
+    .filter((a) => !a.is_without_trip && !isOwnerAdvance(a) && Number(a.trip_id) === Number(trip.id))
+    .forEach((a) => {
+      const src = String(a.source_type || 'ADV').toUpperCase();
+      if (src.includes('TRUCK')) {
+        push(`${src}-${a.id}`, parseFloat(String(a.amount)) || 0, givenByLabel(a));
+      }
+    });
+  if (!lines.length) {
+    advances
+      .filter((a) => !a.is_without_trip && !isOwnerAdvance(a) && Number(a.trip_id) === Number(trip.id))
+      .forEach((a) => {
+        push(`${a.source_type || 'ADV'}-${a.id}`, parseFloat(String(a.amount)) || 0, givenByLabel(a));
+      });
+  }
   if (!lines.length && parseFloat(String(trip.advance_paid || 0)) > 0) {
     lines.push({ amount: parseFloat(String(trip.advance_paid)) || 0, givenBy: 'Trip advance' });
   }
@@ -408,6 +425,63 @@ const tripAdvanceTotal = (trip: Trip, advances: DriverAdvance[] = []) => {
 const tripExpenseTotal = (trip: Trip) => Math.max(0, parseFloat(String(trip.total_expenses || 0)) || 0);
 
 const numAmt = (val: unknown) => parseFloat(String(val ?? 0)) || 0;
+
+/** Same chips as Settlements: with trip = trip-linked, without trip = unmatched + owner. */
+const tripStatementCalc = (trip: Trip, advances: DriverAdvance[] = [], alloc?: OwnerAlloc, settlement?: Settlement) => {
+  const mgrName = managerNameForTrip(trip, advances);
+  const ownName = ownerNameForDriver(trip, advances) || String((settlement as any)?.advance_owner_name || '').trim();
+  const ownerAdvance = Math.round(
+    numAmt(settlement?.owner_given)
+    || numAmt(alloc?.owner_given)
+    || advances.filter(isOwnerAdvance).reduce((s, a) => s + numAmt(a.amount), 0)
+  );
+  const hasSettlementSplit =
+    settlement != null && (settlement.manager_advance != null || (settlement as any).without_trip_advance != null);
+  const manager = Math.round(
+    hasSettlementSplit
+      ? numAmt(settlement?.manager_advance ?? settlement?.initial_trip_advance)
+      : (numAmt(alloc?.manager_advance)
+        || getTripAdvanceLines(trip, advances).filter((l) => !/^Owner:/i.test(l.givenBy)).reduce((s, l) => s + l.amount, 0))
+  );
+  const withoutFromRows = Math.round(
+    advances
+      .filter((a) => a.is_without_trip || isOwnerAdvance(a) || a.trip_id == null)
+      .reduce((s, a) => s + numAmt(a.amount), 0)
+  );
+  const withoutTrip = hasSettlementSplit
+    ? Math.max(0, Math.round(numAmt((settlement as any).without_trip_advance)), ownerAdvance)
+    : Math.max(withoutFromRows, ownerAdvance);
+  const leftoverRaw = Math.round(numAmt(hasSettlementSplit ? (settlement as any)?.owner_leftover_used : alloc?.owner_leftover_used));
+  const leftoverUsed = leftoverRaw > 0 && (leftoverRaw === ownerAdvance || leftoverRaw === withoutTrip) ? 0 : leftoverRaw;
+  const expenses = Math.round(tripExpenseTotal(trip));
+  const pool = manager + withoutTrip + leftoverUsed;
+  const payMode = String((settlement as any)?.payment_mode || trip.settlement_payment_mode || '').toUpperCase();
+  const cashPaid = payMode === 'ADJUSTED_ADVANCE'
+    ? 0
+    : Math.round(numAmt((settlement as any)?.paid_amount ?? trip.settlement_paid_amount));
+  const settleStatus = String((settlement as any)?.settlement_status || trip.settlement_status || '').toUpperCase();
+  let inHand = hasSettlementSplit && (settlement as any).in_hand != null
+    ? Math.round(numAmt((settlement as any).in_hand))
+    : Math.max(0, pool - expenses);
+  let needPay = hasSettlementSplit && (settlement as any).need_to_pay != null
+    ? Math.round(numAmt((settlement as any).need_to_pay))
+    : Math.max(0, expenses - pool);
+  needPay = Math.max(0, needPay - cashPaid);
+  if (settleStatus === 'SETTLED') needPay = 0;
+  if (needPay > 0.5) inHand = 0;
+  return {
+    manager,
+    ownerAdvance,
+    withoutTrip,
+    leftoverUsed,
+    expenses,
+    inHand,
+    needPay,
+    cashPaid,
+    mgrName,
+    ownName,
+  };
+};
 
 type TripSeqCash = {
   ownAdv: number;
@@ -436,7 +510,8 @@ const computeSequentialTripCash = (trips: Trip[], advances: DriverAdvance[]) => 
   let carry = 0;
 
   for (const t of active) {
-    const ownAdv = Math.round(tripAdvanceTotal(t, advances));
+    const stmt = tripStatementCalc(t, advances);
+    const ownAdv = Math.round(stmt.manager + stmt.withoutTrip);
     const expenses = Math.round(tripExpenseTotal(t));
     let remainingNew = ownAdv;
     let remainingCarry = Math.round(carry);
@@ -498,7 +573,7 @@ type TripPaymentInfo = {
   isAdjusted: boolean;
 };
 
-const tripPaymentInfo = (trip: Trip, advances: DriverAdvance[] = [], alloc?: OwnerAlloc, allTrips?: Trip[]): TripPaymentInfo => {
+const tripPaymentInfo = (trip: Trip, advances: DriverAdvance[] = [], alloc?: OwnerAlloc, allTrips?: Trip[], settlement?: Settlement): TripPaymentInfo => {
   const settle = String(trip.settlement_status || '').toUpperCase();
   const freight = Math.max(0, numAmt(trip.total_freight));
   const expenses = tripExpenseTotal(trip);
@@ -568,24 +643,15 @@ const tripPaymentInfo = (trip: Trip, advances: DriverAdvance[] = [], alloc?: Own
     driverLabel = 'Settled';
   }
 
-  const netSettled = trip.net_balance_to_driver != null && trip.net_balance_to_driver !== undefined
-    ? numAmt(trip.net_balance_to_driver)
-    : null;
-  if (netSettled != null) {
-    if (netSettled > 0.5) {
-      needPay = Math.round(netSettled);
-      inHand = 0;
-      driverKind = 'need_pay';
-      driverLabel = settle === 'VERIFIED' ? 'Verified · Need to Pay' : 'Need to Pay';
-    } else if (netSettled < -0.5) {
-      inHand = Math.round(Math.abs(netSettled));
-      needPay = 0;
-      driverKind = 'in_hand';
-      driverLabel = 'Cash in Hand';
-    } else {
-      needPay = 0;
-      inHand = 0;
-    }
+  const stmt = tripStatementCalc(trip, advances, alloc, settlement);
+  inHand = stmt.inHand;
+  needPay = stmt.needPay;
+  if (needPay > 0.5) {
+    driverKind = settle === 'SETTLED' ? 'settled' : 'need_pay';
+    driverLabel = settle === 'SETTLED' ? driverLabel : settle === 'VERIFIED' ? 'Verified · Need to Pay' : 'Need to Pay';
+  } else if (inHand > 0.5) {
+    driverKind = settle === 'SETTLED' ? 'settled' : 'in_hand';
+    driverLabel = settle === 'SETTLED' ? driverLabel : 'Cash in Hand';
   }
 
   return {
@@ -646,10 +712,11 @@ const buildTripSlipHtml = (trip: Trip, ctx: SlipContext = {}) => {
   const fromWhomRows = lines.length
     ? lines.map((l) => `<tr><td>${l.givenBy}</td><td class="num">${formatCurrency(l.amount)}</td></tr>`).join('')
     : `<tr><td colspan="2" class="center">No advance recorded</td></tr>`;
-  const expenseItems = normalizeExpenseItems(trip.expense_items);
-  const expenseRows = expenseItems.length
-    ? expenseItems.map((item, idx) => `<tr><td>${idx + 1}</td><td>${formatExpenseType(item.expense_type)}</td><td>${item.description || '—'}</td><td class="num">${formatCurrency(item.amount)}</td></tr>`).join('')
-    : `<tr><td>1</td><td>Trip expenses</td><td>—</td><td class="num">${formatCurrency(pay.expenses)}</td></tr>`;
+  const expenseBreak = settlementExpenseBreakdown({
+    expense_items: trip.expense_items,
+    total_expenses: pay.expenses,
+  });
+  const expenseRows = expenseBreak.rows.map((item, idx) => `<tr><td>${idx + 1}</td><td>${item.type}</td><td>${item.description || '—'}</td><td class="num">${formatCurrency(item.amount)}</td></tr>`).join('');
 
   const adj = buildAdvanceAdjustmentLinks(ctx.trips || []).get(trip.id);
   const outcomeRows = [
@@ -722,6 +789,7 @@ const buildTripSlipHtml = (trip: Trip, ctx: SlipContext = {}) => {
       <div class="row-item"><span class="label">Date</span><span class="val">${formatISTDate(trip.trip_date)}</span></div>
       <div class="row-item"><span class="label">Lorry</span><span class="val">${trip.lorry_number || '—'}</span></div>
       <div class="row-item"><span class="label">Driver</span><span class="val">${trip.driver_name || d?.driver_name || '—'}</span></div>
+      <div class="row-item"><span class="label">Trip Started By</span><span class="val">${tripStartedByLabel((trip as any).created_by_name || (trip as any).trip_started_by_name, (trip as any).created_by_role || (trip as any).trip_started_by_role) || '—'}</span></div>
       <div class="row-item"><span class="label">Party</span><span class="val">${trip.party_name || '—'}</span></div>
       <div class="row-item"><span class="label">Route</span><span class="val">${trip.from_location || '—'} → ${trip.to_location || '—'}</span></div>
       <div class="row-item"><span class="label">Driver Settlement</span><span class="val" style="color:${paymentStatusColor(pay.driverKind)}">${pay.driverLabel}</span></div>
@@ -744,7 +812,7 @@ const buildTripSlipHtml = (trip: Trip, ctx: SlipContext = {}) => {
     <table>
       <thead><tr><th>#</th><th>Type</th><th>Description</th><th class="num">Amount</th></tr></thead>
       <tbody>${expenseRows}
-        <tr><td colspan="3" style="font-weight:800;text-align:right">Total expenses</td><td class="num">${formatCurrency(pay.expenses)}</td></tr>
+        <tr><td colspan="3" style="font-weight:800;text-align:right">Full expenses</td><td class="num">${formatCurrency(expenseBreak.total)}</td></tr>
       </tbody>
     </table>
 
@@ -926,15 +994,22 @@ export const DriverBalanceMasterPage: React.FC = () => {
   // Dynamic totals of filtered
   const filteredTotals = useMemo(() => {
     return filteredSummaries.reduce(
-      (acc, d) => ({
-        total_advance_given: acc.total_advance_given + (parseFloat(String(d.total_advance_given)) || 0),
-        total_expenses_reported: acc.total_expenses_reported + (parseFloat(String(d.total_expenses_reported)) || 0),
-        balance_in_hand: acc.balance_in_hand + Math.max(0, parseFloat(String(d.balance_in_hand)) || 0),
-        need_to_pay: acc.need_to_pay + Math.max(0, parseFloat(String(d.need_to_pay)) || 0),
-      }),
+      (acc, d) => {
+        const exp = driverSummaryExpense(d);
+        return {
+          total_advance_given: acc.total_advance_given + (parseFloat(String(d.total_advance_given)) || 0),
+          total_expenses_reported: acc.total_expenses_reported + exp.total,
+          loading_expense: acc.loading_expense + exp.loading,
+          unloading_expense: acc.unloading_expense + exp.unloading,
+          balance_in_hand: acc.balance_in_hand + Math.max(0, parseFloat(String(d.balance_in_hand)) || 0),
+          need_to_pay: acc.need_to_pay + Math.max(0, parseFloat(String(d.need_to_pay)) || 0),
+        };
+      },
       {
         total_advance_given: 0,
         total_expenses_reported: 0,
+        loading_expense: 0,
+        unloading_expense: 0,
         balance_in_hand: 0,
         need_to_pay: 0,
       }
@@ -1373,7 +1448,7 @@ export const DriverBalanceMasterPage: React.FC = () => {
             </div>
             <div class="dkpis">
               <span>Advance <b>${formatCurrency(d.total_advance_given || 0)}</b></span>
-              <span>Expense <b style="color:#b45309">${formatCurrency(d.total_expenses_reported || 0)}</b></span>
+              <span>Expense <b style="color:#b45309">${(() => { const exp = driverSummaryExpense(d); return `L ${formatCurrency(exp.loading)} · U ${formatCurrency(exp.unloading)} · Full ${formatCurrency(exp.total)}`; })()}</b></span>
               <span style="color:#047857">In Hand <b>${formatCurrency(balInHand)}</b></span>
               <span style="color:#dc2626">Need to Pay <b>${formatCurrency(needToPay)}</b></span>
             </div>
@@ -1381,7 +1456,7 @@ export const DriverBalanceMasterPage: React.FC = () => {
           <table>
             <thead><tr>
               <th>Trip</th><th>Date</th><th>Party / Route</th><th>Lorry</th>
-              <th>Advance from whom</th><th class="num">Expense</th>
+              <th>Advance from whom</th><th class="num">Expenses (Loading / Unloading / Full)</th>
               <th class="num">In Hand</th><th class="num">Need to Pay</th><th>Driver Settlement</th>
             </tr></thead>
             <tbody>${tripRows}</tbody>
@@ -1451,7 +1526,11 @@ export const DriverBalanceMasterPage: React.FC = () => {
           </div>
           <div class="kpi-card" style="border-color:#fde68a;background:#fffbeb">
             <div class="lbl" style="color:#b45309">Trip Expenses</div>
-            <div class="val" style="color:#b45309">${fmtINR(filteredTotals.total_expenses_reported)}</div>
+            <div class="val" style="color:#b45309;font-size:11px;line-height:1.35">
+              Loading ${fmtINR(filteredTotals.loading_expense)}<br/>
+              Unloading ${fmtINR(filteredTotals.unloading_expense)}<br/>
+              Full ${fmtINR(filteredTotals.total_expenses_reported)}
+            </div>
           </div>
           <div class="kpi-card" style="border-color:${filteredTotals.balance_in_hand > 0 ? '#bbf7d0' : '#fecaca'};background:${filteredTotals.balance_in_hand > 0 ? '#f0fdf4' : '#fef2f2'}">
             <div class="lbl" style="color:${filteredTotals.balance_in_hand > 0 ? '#15803d' : '#dc2626'}">Fleet Net Balance</div>
@@ -1540,7 +1619,9 @@ export const DriverBalanceMasterPage: React.FC = () => {
           'Vehicle / Lorry': d.lorry_number || '—',
           'Vehicle Owner': d.owner_name || '—',
           'Total Advance Given (₹)': parseFloat(String(d.total_advance_given || 0)),
-          'Total Expenses Reported (₹)': parseFloat(String(d.total_expenses_reported || 0)),
+          'Loading (₹)': driverSummaryExpense(d).loading,
+          'Unloading (₹)': driverSummaryExpense(d).unloading,
+          'Full Expenses (₹)': driverSummaryExpense(d).total,
           'Balance in Hand (₹)': balInHand,
           'Need to Pay / Dues (₹)': needToPay,
           'Driver Settlement': driverOverallPaymentStatus(d).label,
@@ -1898,7 +1979,9 @@ export const DriverBalanceMasterPage: React.FC = () => {
         </div>
         <div style={{ background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 12, padding: '12px 14px' }}>
           <div style={{ fontSize: 11, fontWeight: 800, color: '#b45309' }}>Expenses</div>
-          <div style={{ fontSize: 18, fontWeight: 900, color: '#b45309' }}>{formatCurrency(filteredTotals.total_expenses_reported)}</div>
+          <div style={{ fontSize: 12, fontWeight: 700, color: '#92400e', marginTop: 4 }}>Loading {formatCurrency(filteredTotals.loading_expense)}</div>
+          <div style={{ fontSize: 12, fontWeight: 700, color: '#92400e' }}>Unloading {formatCurrency(filteredTotals.unloading_expense)}</div>
+          <div style={{ fontSize: 16, fontWeight: 900, color: '#9a3412' }}>Full {formatCurrency(filteredTotals.total_expenses_reported)}</div>
         </div>
         <div style={{ background: '#ecfdf5', border: '1px solid #a7f3d0', borderRadius: 12, padding: '12px 14px' }}>
           <div style={{ fontSize: 11, fontWeight: 800, color: '#059669' }}>In Hand</div>
@@ -1971,10 +2054,21 @@ export const DriverBalanceMasterPage: React.FC = () => {
                             <div style={{ textAlign: 'right' }}>
                               <div style={{ fontSize: 10, fontWeight: 700, color: '#94a3b8' }}>Total Advance</div>
                               <div style={{ fontSize: 13, fontWeight: 800, color: '#1e40af' }}>{formatCurrency(d.total_advance_given || 0)}</div>
+                              <div style={{ fontSize: 10, fontWeight: 700, color: '#1d4ed8' }}>With trip {formatCurrency(d.trip_advance_given || 0)}</div>
+                              <div style={{ fontSize: 10, fontWeight: 700, color: '#c2410c' }}>Without trip {formatCurrency(d.without_trip_advance_given || 0)}</div>
                             </div>
                             <div style={{ textAlign: 'right' }}>
-                              <div style={{ fontSize: 10, fontWeight: 700, color: '#94a3b8' }}>Total Expense</div>
-                              <div style={{ fontSize: 13, fontWeight: 800, color: '#b45309' }}>{formatCurrency(d.total_expenses_reported || 0)}</div>
+                              {(() => {
+                                const exp = driverSummaryExpense(d);
+                                return (
+                                  <>
+                                    <div style={{ fontSize: 10, fontWeight: 700, color: '#94a3b8' }}>Expenses</div>
+                                    <div style={{ fontSize: 11, fontWeight: 700, color: '#92400e' }}>Loading {formatCurrency(exp.loading)}</div>
+                                    <div style={{ fontSize: 11, fontWeight: 700, color: '#92400e' }}>Unloading {formatCurrency(exp.unloading)}</div>
+                                    <div style={{ fontSize: 13, fontWeight: 800, color: '#9a3412' }}>Full {formatCurrency(exp.total)}</div>
+                                  </>
+                                );
+                              })()}
                             </div>
                             <div style={{ textAlign: 'right' }}>
                               <div style={{ fontSize: 10, fontWeight: 700, color: '#059669' }}>In Hand</div>
@@ -2055,7 +2149,7 @@ export const DriverBalanceMasterPage: React.FC = () => {
                                           <th style={{ padding: '8px 10px', textAlign: 'left' }}>Party / Route</th>
                                           <th style={{ padding: '8px 10px', textAlign: 'left' }}>Lorry</th>
                                           <th style={{ padding: '8px 10px', textAlign: 'left' }}>Advance from whom</th>
-                                          <th style={{ padding: '8px 10px', textAlign: 'right' }}>Expense</th>
+                                          <th style={{ padding: '8px 10px', textAlign: 'right' }}>Expenses (Loading / Unloading / Full)</th>
                                           <th style={{ padding: '8px 10px', textAlign: 'right' }}>In Hand</th>
                                           <th style={{ padding: '8px 10px', textAlign: 'right' }}>Need to Pay</th>
                                           <th style={{ padding: '8px 10px', textAlign: 'left' }}>Driver Settlement</th>
@@ -2077,7 +2171,7 @@ export const DriverBalanceMasterPage: React.FC = () => {
                                             adj
                                           );
                                           const expAmt = tripExpenseTotal(tr);
-                                          const pay = tripPaymentInfo(tr, advances, allocMap[tr.id], expData?.trips || []);
+                                          const pay = tripPaymentInfo(tr, advances, allocMap[tr.id], expData?.trips || [], (expData?.settlements || []).find((s) => Number(s.trip_id) === Number(tr.id)));
                                           const cash = tripCashAmounts(paid, pay);
                                           const checked = (selectedTripIds[d.driver_id] || []).includes(tr.id);
                                           return (
@@ -2085,7 +2179,14 @@ export const DriverBalanceMasterPage: React.FC = () => {
                                               <td style={{ padding: '10px', textAlign: 'center' }}>
                                                 <input type="checkbox" checked={checked} onChange={() => toggleTripSelected(d.driver_id, tr.id)} />
                                               </td>
-                                              <td style={{ padding: '10px', fontWeight: 800, color: '#1d4ed8' }}>#{tr.id}</td>
+                                              <td style={{ padding: '10px', fontWeight: 800, color: '#1d4ed8' }}>
+                                                #{tr.id}
+                                                {tripStartedByLabel((tr as any).created_by_name || (tr as any).trip_started_by_name, (tr as any).created_by_role || (tr as any).trip_started_by_role) ? (
+                                                  <div style={{ fontSize: 10, fontWeight: 700, color: '#1d4ed8', marginTop: 3 }}>
+                                                    Started by {tripStartedByLabel((tr as any).created_by_name || (tr as any).trip_started_by_name, (tr as any).created_by_role || (tr as any).trip_started_by_role)}
+                                                  </div>
+                                                ) : null}
+                                              </td>
                                               <td style={{ padding: '10px' }}>{formatISTDate(tr.trip_date)}</td>
                                               <td style={{ padding: '10px' }}>
                                                 <div style={{ fontWeight: 700 }}>{tr.party_name || '—'}</div>
@@ -2111,7 +2212,19 @@ export const DriverBalanceMasterPage: React.FC = () => {
                                                 </div>
                                               </td>
                                               <td style={{ padding: '10px', textAlign: 'right', fontWeight: 700, color: '#b45309' }}>
-                                                {formatCurrency(expAmt)}
+                                                {(() => {
+                                                  const exp = settlementExpenseBreakdown({
+                                                    expense_items: tr.expense_items,
+                                                    total_expenses: expAmt,
+                                                  });
+                                                  return (
+                                                    <div>
+                                                      <div style={{ fontSize: 11, fontWeight: 700 }}>Loading {formatCurrency(exp.loading)}</div>
+                                                      <div style={{ fontSize: 11, fontWeight: 700 }}>Unloading {formatCurrency(exp.unloading)}</div>
+                                                      <div style={{ fontSize: 12, fontWeight: 800, color: '#9a3412' }}>Full {formatCurrency(exp.total)}</div>
+                                                    </div>
+                                                  );
+                                                })()}
                                               </td>
                                               <td style={{ padding: '10px', textAlign: 'right', fontWeight: 800, color: cash.inHandAmt > 0 ? '#047857' : '#64748b' }}>
                                                 {formatCurrency(cash.inHandAmt)}

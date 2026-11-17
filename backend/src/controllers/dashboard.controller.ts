@@ -2,7 +2,8 @@ import { Response } from 'express';
 import { query } from '../config/database';
 import { asyncHandler } from '../middleware/errorHandler';
 import { AuthRequest } from '../middleware/auth';
-import { hasFleetWideAccess, isFleetScoped, sqlIsCompanyOperator, sqlManagerVisibleTrip, sqlOwnerVehicleIn, sqlSelfOrCompany } from '../utils/ownerScope';
+import { hasFleetWideAccess, isFleetScoped, isManagerRole, sqlIsCompanyOperator, sqlManagerVisibleTrip, sqlOwnerVehicleIn, sqlSelfOrCompany } from '../utils/ownerScope';
+import { getManagerWalletSnapshot } from '../utils/managerWallet';
 
 export const getDashboard = asyncHandler(async (req: AuthRequest, res: Response): Promise<void> => {
   const today = new Date().toISOString().split('T')[0];
@@ -113,6 +114,16 @@ export const getDashboard = asyncHandler(async (req: AuthRequest, res: Response)
     ),
   ]);
 
+  const wallet = isManagerRole(req)
+    ? await getManagerWalletSnapshot(ownerUserId)
+    : {
+        owner_advance_credit: 0,
+        owner_advance_entries: 0,
+        truck_advance_used: 0,
+        manager_available_balance: 0,
+        owner_advance_breakdown: [],
+      };
+
   res.json({
     success: true,
     message: 'Dashboard data retrieved.',
@@ -131,6 +142,7 @@ export const getDashboard = asyncHandler(async (req: AuthRequest, res: Response)
       financials: totalFreightResult.rows[0],
       recent_trips: recentTripsResult.rows,
       compliance_alerts: complianceAlertsResult.rows,
+      ...wallet,
     },
   });
 });
@@ -197,7 +209,7 @@ export const getMobileDashboard = asyncHandler(async (req: AuthRequest, res: Res
     : '';
   const balanceParams = managerOnly ? [userId] : fleet ? fleetParams : [userId];
 
-  const [todayTripsResult, balanceDueResult, recentTripsResult, advanceCreditSummaryResult, truckAdvanceUsedResult, advanceCreditResult, driverBalancesResult] = await Promise.all([
+  const [todayTripsResult, balanceDueResult, recentTripsResult, wallet, driverBalancesResult] = await Promise.all([
     query(tripCountSql, tripCountParams),
     query(
       managerOnly
@@ -230,32 +242,7 @@ export const getMobileDashboard = asyncHandler(async (req: AuthRequest, res: Res
        ORDER BY t.created_at DESC LIMIT 10`,
       recentTripParams
     ),
-    // Total owner advance credit received by this manager
-    query(
-      `SELECT COALESCE(SUM(amount), 0) as total_credit,
-              COUNT(*) as total_entries
-       FROM owner_advances
-       WHERE manager_id = $1`,
-      [userId]
-    ),
-    // Total advances given to trucks/drivers by this manager
-    query(
-      `SELECT (
-         COALESCE((SELECT SUM(amount) FROM truck_advances WHERE manager_id = $1), 0) +
-         COALESCE((SELECT SUM(amount) FROM driver_advances WHERE manager_id = $1), 0)
-       ) as total_used`,
-      [userId]
-    ),
-    // Per-owner breakdown of advances received by this manager
-    query(
-      `SELECT oa.id, oa.amount, oa.advance_date, oa.payment_mode, oa.notes,
-              COALESCE(o.name, 'Owner') as owner_name
-       FROM owner_advances oa
-       LEFT JOIN owners o ON oa.owner_id = o.id
-       WHERE oa.manager_id = $1
-       ORDER BY oa.advance_date DESC, oa.created_at DESC`,
-      [userId]
-    ),
+    getManagerWalletSnapshot(userId || 0),
     // Per-driver advance balance for this manager:
     // balance_in_manager_hand = total advance given + total settled cash paid - total driver expenses
     // Positive: manager still has money in hand (expenses were less than advance)
@@ -341,11 +328,10 @@ export const getMobileDashboard = asyncHandler(async (req: AuthRequest, res: Res
          CASE WHEN (total_advance_given > 0 OR total_expenses > 0) THEN 0 ELSE 1 END,
          driver_name ASC`,
       balanceParams
-    ),
+    ).catch(() => ({ rows: [] })),
   ]);
 
-  const ownerAdvanceBreakdown = advanceCreditResult.rows;
-  const driverBalances = driverBalancesResult.rows.map((r: any) => ({
+  const driverBalances = (driverBalancesResult.rows || []).map((r: any) => ({
     driver_id: parseInt(r.driver_id),
     driver_name: r.driver_name,
     driver_mobile: r.driver_mobile,
@@ -361,13 +347,11 @@ export const getMobileDashboard = asyncHandler(async (req: AuthRequest, res: Res
       trips_today: parseInt(todayTripsResult.rows[0].total),
       balance_due: parseFloat(balanceDueResult.rows[0].balance_due),
       recent_trips: recentTripsResult.rows,
-      owner_advance_credit: parseFloat(advanceCreditSummaryResult.rows[0].total_credit),
-      owner_advance_entries: parseInt(advanceCreditSummaryResult.rows[0].total_entries),
-      truck_advance_used: parseFloat(truckAdvanceUsedResult.rows[0].total_used),
-      manager_available_balance:
-        parseFloat(advanceCreditSummaryResult.rows[0].total_credit) -
-        parseFloat(truckAdvanceUsedResult.rows[0].total_used),
-      owner_advance_breakdown: ownerAdvanceBreakdown,
+      owner_advance_credit: wallet.owner_advance_credit,
+      owner_advance_entries: wallet.owner_advance_entries,
+      truck_advance_used: wallet.truck_advance_used,
+      manager_available_balance: wallet.manager_available_balance,
+      owner_advance_breakdown: wallet.owner_advance_breakdown,
       driver_advance_balances: driverBalances,
     },
   });

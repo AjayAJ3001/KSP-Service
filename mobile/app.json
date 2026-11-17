@@ -24,7 +24,7 @@
       }
     },
     "extra": {
-      "apiBaseUrl": "http://189.72.146.91:5000/api"
+      "apiBaseUrl": "http://192.168.1.11:5000/api"
     },
     "plugins": [
       "expo-asset",

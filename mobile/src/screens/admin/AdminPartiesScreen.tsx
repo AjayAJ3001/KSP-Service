@@ -26,7 +26,8 @@ import {
   Printer,
   Download,
 } from 'lucide-react-native';
-import { printMastersPdf, downloadMastersPdf } from '../../utils/pdfGenerator';
+import { shareMastersPdf, downloadMastersPdf } from '../../utils/pdfGenerator';
+import { PdfExportButtons } from '../../components/PdfExportButtons';
 import { adminPartyService } from '../../services/adminService';
 import { Party } from '../../types';
 import { COLORS, SPACING, RADIUS, SHADOWS } from '../../constants/theme';
@@ -38,7 +39,7 @@ export const AdminPartiesScreen: React.FC<{ navigation: any }> = ({ navigation }
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  const [pdfLoading, setPdfLoading] = useState<'print' | 'download' | null>(null);
+  const [pdfLoading, setPdfLoading] = useState<'share' | 'download' | null>(null);
 
   // Add / Edit Modal
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -168,17 +169,16 @@ export const AdminPartiesScreen: React.FC<{ navigation: any }> = ({ navigation }
     ]);
   };
 
-  const handlePrintPdf = async () => {
+  const handleSharePdf = async () => {
     try {
-      setPdfLoading('print');
-      await printMastersPdf({
+      setPdfLoading('share');
+      await shareMastersPdf({
         tab: 'PARTIES',
         tabLabel: 'Parties Directory',
         parties: filteredParties,
       });
     } catch (err: any) {
-      console.error('Print parties PDF failed', err);
-      Alert.alert('Print Error', err.message || 'Failed to print parties directory.');
+      Alert.alert('Share Error', err.message || 'Failed to share parties directory.');
     } finally {
       setPdfLoading(null);
     }
@@ -223,37 +223,13 @@ export const AdminPartiesScreen: React.FC<{ navigation: any }> = ({ navigation }
             ) : null}
           </View>
 
-          <TouchableOpacity
-            style={[styles.pdfBtn, styles.printBtn, pdfLoading === 'print' && { opacity: 0.7 }]}
-            onPress={handlePrintPdf}
-            disabled={pdfLoading !== null || isLoading}
-            activeOpacity={0.8}
-          >
-            {pdfLoading === 'print' ? (
-              <ActivityIndicator size="small" color={COLORS.white} />
-            ) : (
-              <>
-                <Printer size={13} color={COLORS.white} />
-                <Text style={styles.pdfBtnText}>Print</Text>
-              </>
-            )}
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={[styles.pdfBtn, styles.downloadBtn, pdfLoading === 'download' && { opacity: 0.7 }]}
-            onPress={handleDownloadPdf}
-            disabled={pdfLoading !== null || isLoading}
-            activeOpacity={0.8}
-          >
-            {pdfLoading === 'download' ? (
-              <ActivityIndicator size="small" color={COLORS.white} />
-            ) : (
-              <>
-                <Download size={13} color={COLORS.white} />
-                <Text style={styles.pdfBtnText}>PDF</Text>
-              </>
-            )}
-          </TouchableOpacity>
+          <PdfExportButtons
+            compact
+            loading={pdfLoading}
+            disabled={isLoading}
+            onShare={handleSharePdf}
+            onDownload={handleDownloadPdf}
+          />
 
           <TouchableOpacity style={styles.addBtn} onPress={openAddModal}>
             <Plus size={16} color={COLORS.white} />

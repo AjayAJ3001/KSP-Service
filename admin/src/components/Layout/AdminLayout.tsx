@@ -37,7 +37,7 @@ export const AdminLayout: React.FC = () => {
   const { user, logout } = useAuth();
   const location = useLocation();
   const isOwnerUser = user?.role === 'OWNER';
-  const isManagerUser = user?.role === 'MANAGER';
+  const isManagerUser = user?.role === 'MANAGER' || user?.role === 'TRANSPORT_USER';
   const isFullAdmin = user?.role === 'ADMIN';
   const navigate = useNavigate();
   const [showExpiryModal, setShowExpiryModal] = useState(false);

@@ -8,13 +8,15 @@ import {
   ActivityIndicator,
   Alert,
 } from 'react-native';
-import { ArrowLeft, ArrowRight, FileText, Share2, Download, Printer } from 'lucide-react-native';
+import { FileText } from 'lucide-react-native';
 import api from '../services/api';
 import { adminPaymentService } from '../services/adminService';
 import { Trip, TripPayment } from '../types';
 import { COLORS, SPACING, RADIUS, SHADOWS } from '../constants/theme';
 import { formatDateDMY } from '../utils/dateUtils';
-import { printTripPdf, shareTripPdf, downloadTripPdf } from '../utils/pdfGenerator';
+import { tripStartedByLabel } from '../utils/tripStartedBy';
+import { shareTripPdf, downloadTripPdf } from '../utils/pdfGenerator';
+import { PdfExportButtons } from '../components/PdfExportButtons';
 
 export const PartyPaymentScreen: React.FC<{ route: any; navigation: any }> = ({
   route,
@@ -111,35 +113,12 @@ export const PartyPaymentScreen: React.FC<{ route: any; navigation: any }> = ({
         {viewOnly ? 'Freight billed, amount received and balance from the party' : 'Review calculated freight details'}
       </Text>
 
-      <View style={styles.pdfActionRow}>
-        <TouchableOpacity
-          style={[styles.pdfActionBtn, { backgroundColor: '#1d4ed8' }, pdfAction === 'print' && { opacity: 0.7 }]}
-          onPress={handlePrintTrip}
-          disabled={pdfAction !== null}
-          activeOpacity={0.8}
-        >
-          {pdfAction === 'print' ? <ActivityIndicator color="#fff" size="small" /> : <Printer size={15} color="#fff" />}
-          <Text style={styles.pdfActionBtnText}>Print</Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={[styles.pdfActionBtn, { backgroundColor: '#047857' }, pdfAction === 'share' && { opacity: 0.7 }]}
-          onPress={handleShareTrip}
-          disabled={pdfAction !== null}
-          activeOpacity={0.8}
-        >
-          {pdfAction === 'share' ? <ActivityIndicator color="#fff" size="small" /> : <Share2 size={15} color="#fff" />}
-          <Text style={styles.pdfActionBtnText}>Share</Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={[styles.pdfActionBtn, { backgroundColor: '#0f172a' }, pdfAction === 'download' && { opacity: 0.7 }]}
-          onPress={handleDownloadTrip}
-          disabled={pdfAction !== null}
-          activeOpacity={0.8}
-        >
-          {pdfAction === 'download' ? <ActivityIndicator color="#fff" size="small" /> : <Download size={15} color="#fff" />}
-          <Text style={styles.pdfActionBtnText}>Download</Text>
-        </TouchableOpacity>
-      </View>
+      <PdfExportButtons
+        loading={pdfAction}
+        onShare={handleShareTrip}
+        onDownload={handleDownloadTrip}
+        style={{ marginBottom: 12 }}
+      />
 
       {/* Trip & Payment Information Card */}
       <View style={styles.card}>
@@ -164,6 +143,15 @@ export const PartyPaymentScreen: React.FC<{ route: any; navigation: any }> = ({
                 <Text style={{ fontSize: 12, color: COLORS.textMuted }}>({ownerMobile})</Text>
               ) : null}
             </View>
+          </View>
+        ) : null}
+
+        {tripStartedByLabel(trip.created_by_name, trip.created_by_role) ? (
+          <View style={styles.infoRow}>
+            <Text style={styles.infoLabel}>Trip Started By:</Text>
+            <Text style={styles.infoValueBold}>
+              {tripStartedByLabel(trip.created_by_name, trip.created_by_role)}
+            </Text>
           </View>
         ) : null}
 

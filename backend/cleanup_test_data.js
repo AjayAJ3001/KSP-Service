@@ -15,7 +15,8 @@ async function cleanupTestData() {
       'driver_advances',
       'owner_advances',
       'trip_payments',
-      'trips'
+      'trips',
+      'audit_logs',
     ];
 
     for (const t of tables) {
@@ -39,6 +40,7 @@ async function cleanupTestData() {
     await client.query('DELETE FROM owner_advances');
     await client.query('DELETE FROM trip_payments');
     await client.query('DELETE FROM trips');
+    await client.query('DELETE FROM audit_logs');
 
     // Reset sequences
     console.log('Resetting sequence counters to 1...');
@@ -49,7 +51,9 @@ async function cleanupTestData() {
       'driver_advances_id_seq',
       'owner_advances_id_seq',
       'driver_expenses_id_seq',
-      'driver_settlement_payments_id_seq'
+      'driver_settlement_payments_id_seq',
+      'trip_payments_id_seq',
+      'audit_logs_id_seq',
     ];
 
     for (const seq of seqs) {

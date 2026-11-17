@@ -37,7 +37,8 @@ import { useAuth } from '../../context/AuthContext';
 import { Trip, Owner, Vehicle } from '../../types';
 import { COLORS, SPACING, RADIUS, SHADOWS } from '../../constants/theme';
 import { formatDateDMY } from '../../utils/dateUtils';
-import { downloadTripPdf, downloadReportsPdf, printReportsPdf } from '../../utils/pdfGenerator';
+import { downloadTripPdf, shareTripPdf, downloadReportsPdf, shareReportsPdf } from '../../utils/pdfGenerator';
+import { PdfExportButtons } from '../../components/PdfExportButtons';
 import { DatePickerModal, toDisplayDate } from '../../components/DatePickerModal';
 import { DetailsSheet } from '../../components/DetailsSheet';
 import { ViewChip } from '../../components/ViewChip';
@@ -202,9 +203,9 @@ export const AdminTripsScreen: React.FC<{ navigation: any }> = ({ navigation }) 
     }
   };
 
-  const handlePrintFilteredTripsPdf = async () => {
+  const handleShareFilteredTripsPdf = async () => {
     try {
-      setPdfLoading('trips_print');
+      setPdfLoading('share');
       const activeOwner = owners.find(o => String(o.id) === ownerFilter);
       const activeVeh = vehicles.find(v => String(v.id) === vehicleFilter);
       const filterParts: string[] = [];
@@ -213,14 +214,14 @@ export const AdminTripsScreen: React.FC<{ navigation: any }> = ({ navigation }) 
       if (activeVeh) filterParts.push(`Truck: ${activeVeh.lorry_number}`);
       if (search) filterParts.push(`Search: "${search}"`);
 
-      await printReportsPdf({
+      await shareReportsPdf({
         type: 'TRIPS',
         title: 'Trips Operations Dispatch Report',
         filtersText: filterParts.length > 0 ? filterParts.join(' | ') : 'All Active Trips',
         items: filteredTrips,
       });
     } catch (e: any) {
-      Alert.alert('Print Error', e.message || 'Could not print Trips PDF.');
+      Alert.alert('Share Error', e.message || 'Could not share Trips PDF.');
     } finally {
       setPdfLoading(null);
     }
@@ -412,38 +413,12 @@ export const AdminTripsScreen: React.FC<{ navigation: any }> = ({ navigation }) 
             )}
           </View>
 
-          {/* PDF Report and Print Buttons */}
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
-            <TouchableOpacity
-              style={styles.topActionPdfBtn}
-              onPress={handleDownloadFilteredTripsPdf}
-              disabled={pdfLoading === 'trips_pdf'}
-            >
-              {pdfLoading === 'trips_pdf' ? (
-                <ActivityIndicator size="small" color="#fff" />
-              ) : (
-                <>
-                  <FileText size={12} color="#fff" />
-                  <Text style={styles.topActionPdfBtnText}>PDF</Text>
-                </>
-              )}
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={styles.topActionPrintBtn}
-              onPress={handlePrintFilteredTripsPdf}
-              disabled={pdfLoading === 'trips_print'}
-            >
-              {pdfLoading === 'trips_print' ? (
-                <ActivityIndicator size="small" color="#1d4ed8" />
-              ) : (
-                <>
-                  <Printer size={12} color="#1d4ed8" />
-                  <Text style={styles.topActionPrintBtnText}>Print</Text>
-                </>
-              )}
-            </TouchableOpacity>
-          </View>
+          <PdfExportButtons
+            compact
+            loading={pdfLoading && !String(pdfLoading).includes('challan') ? pdfLoading : null}
+            onShare={handleShareFilteredTripsPdf}
+            onDownload={handleDownloadFilteredTripsPdf}
+          />
         </View>
       </View>
 
@@ -537,18 +512,22 @@ export const AdminTripsScreen: React.FC<{ navigation: any }> = ({ navigation }) 
               {/* Action Buttons: Challan PDF, Party Payment, Driver Expenses, Settlement Slip */}
               <View style={styles.cardActions}>
                 <ViewChip compact onPress={() => setViewTrip(t)} />
-                <TouchableOpacity
-                  style={[styles.actionBtn, { backgroundColor: '#fef2f2', borderColor: '#fca5a5', borderWidth: 1 }]}
-                  onPress={() => handleDownloadTripChallan(t)}
-                  disabled={pdfLoading === `challan_${t.id}`}
-                >
-                  {pdfLoading === `challan_${t.id}` ? (
-                    <ActivityIndicator size="small" color="#b91c1c" />
-                  ) : (
-                    <FileText size={12} color="#b91c1c" />
-                  )}
-                  <Text style={[styles.actionBtnText, { color: '#b91c1c' }]}>Challan</Text>
-                </TouchableOpacity>
+                <PdfExportButtons
+                  compact
+                  loading={pdfLoading?.includes(String(t.id)) ? pdfLoading : null}
+                  disabled={!!pdfLoading}
+                  onShare={async () => {
+                    try {
+                      setPdfLoading(`share_${t.id}`);
+                      await shareTripPdf(t);
+                    } catch (e: any) {
+                      Alert.alert('Share Error', e.message || 'Could not share trip challan.');
+                    } finally {
+                      setPdfLoading(null);
+                    }
+                  }}
+                  onDownload={() => handleDownloadTripChallan(t)}
+                />
 
                 <TouchableOpacity
                   style={[styles.actionBtn, { backgroundColor: '#eff6ff' }]}

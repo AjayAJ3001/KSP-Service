@@ -6,6 +6,7 @@ import { createAuditLog } from '../utils/auditLog';
 import { applyOwnerScope, applyVehicleScope, assertOwnerVehicle, assertOwnerVehicleAsync, assertTripInOwnerScope, hasFleetWideAccess, isCompanyOperatorUserId, isFleetScoped, sqlManagerVisibleTrip } from '../utils/ownerScope';
 import { matchWeighBillToTrip, normalizeVehicleNo, parseWeighBillText, vehicleNosMatch } from '../utils/parseWeighBill';
 import { decodeBillImage, hashBillImage, ocrWeighBill } from '../utils/weighBillOcr';
+import { assertManagerCanDisburse } from '../utils/managerWallet';
 
 const duplicateBillMessage = (dup: { id: number; trip_date?: string; weigh_bill_slip_no?: string; weigh_bill_date?: string }) => {
   const slip = dup.weigh_bill_slip_no ? ` slip ${dup.weigh_bill_slip_no}` : '';
@@ -397,6 +398,7 @@ export const createTrip = asyncHandler(async (req: AuthRequest, res: Response): 
     }
 
     const entered_advance = Math.max(0, Math.round(parseFloat(advance_paid) || 0));
+    await assertManagerCanDisburse(req, entered_advance);
 
     // Calculate if admin owes driver any money from prior trips (unsettled pending balance)
     const driverDeficitRes = await client.query(

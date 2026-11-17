@@ -37,7 +37,8 @@ import {
   RotateCcw,
 } from 'lucide-react-native';
 import * as ImagePicker from 'expo-image-picker';
-import { printMastersPdf, downloadMastersPdf } from '../../utils/pdfGenerator';
+import { shareMastersPdf, downloadMastersPdf } from '../../utils/pdfGenerator';
+import { PdfExportButtons } from '../../components/PdfExportButtons';
 import { adminVehicleService, adminOwnerService } from '../../services/adminService';
 import { Vehicle, Owner } from '../../types';
 import { COLORS, SPACING, RADIUS, SHADOWS } from '../../constants/theme';
@@ -237,7 +238,7 @@ export const AdminVehiclesScreen: React.FC<{ navigation: any }> = ({ navigation 
   const [isOwnerFilterModalOpen, setIsOwnerFilterModalOpen] = useState(false);
   const [ownerFilterSearch, setOwnerFilterSearch] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  const [pdfLoading, setPdfLoading] = useState<'print' | 'download' | null>(null);
+  const [pdfLoading, setPdfLoading] = useState<'share' | 'download' | null>(null);
 
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingVehicle, setEditingVehicle] = useState<Vehicle | null>(null);
@@ -578,17 +579,16 @@ export const AdminVehiclesScreen: React.FC<{ navigation: any }> = ({ navigation 
   const setField = (key: keyof VehicleFormData, value: string) =>
     setFormData(prev => ({ ...prev, [key]: value }));
 
-  const handlePrintPdf = async () => {
+  const handleSharePdf = async () => {
     try {
-      setPdfLoading('print');
-      await printMastersPdf({
+      setPdfLoading('share');
+      await shareMastersPdf({
         tab: 'VEHICLES',
         tabLabel: 'Fleet Vehicles Directory',
         vehicles: filteredVehicles,
       });
     } catch (err: any) {
-      console.error('Print vehicles PDF failed', err);
-      Alert.alert('Print Error', err.message || 'Failed to print vehicles.');
+      Alert.alert('Share Error', err.message || 'Failed to share vehicles.');
     } finally {
       setPdfLoading(null);
     }
@@ -633,37 +633,13 @@ export const AdminVehiclesScreen: React.FC<{ navigation: any }> = ({ navigation 
             {search ? <TouchableOpacity onPress={() => setSearch('')}><X size={16} color={COLORS.textMuted} /></TouchableOpacity> : null}
           </View>
 
-          <TouchableOpacity
-            style={[styles.pdfBtn, styles.printBtn, pdfLoading === 'print' && { opacity: 0.7 }]}
-            onPress={handlePrintPdf}
-            disabled={pdfLoading !== null || isLoading}
-            activeOpacity={0.8}
-          >
-            {pdfLoading === 'print' ? (
-              <ActivityIndicator size="small" color={COLORS.white} />
-            ) : (
-              <>
-                <Printer size={13} color={COLORS.white} />
-                <Text style={styles.pdfBtnText}>Print</Text>
-              </>
-            )}
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={[styles.pdfBtn, styles.downloadBtn, pdfLoading === 'download' && { opacity: 0.7 }]}
-            onPress={handleDownloadPdf}
-            disabled={pdfLoading !== null || isLoading}
-            activeOpacity={0.8}
-          >
-            {pdfLoading === 'download' ? (
-              <ActivityIndicator size="small" color={COLORS.white} />
-            ) : (
-              <>
-                <Download size={13} color={COLORS.white} />
-                <Text style={styles.pdfBtnText}>PDF</Text>
-              </>
-            )}
-          </TouchableOpacity>
+          <PdfExportButtons
+            compact
+            loading={pdfLoading}
+            disabled={isLoading}
+            onShare={handleSharePdf}
+            onDownload={handleDownloadPdf}
+          />
 
           <TouchableOpacity style={styles.addBtn} onPress={openAddModal}>
             <Plus size={16} color="#fff" />

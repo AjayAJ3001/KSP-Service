@@ -43,6 +43,7 @@ import { DataTable, Column } from '../components/Common/DataTable';
 import { Modal } from '../components/Common/Modal';
 import { DateField } from '../components/Common/DateField';
 import { formatIST, formatISTDate } from '../utils/dateUtils';
+import { tripStartedByLabel } from '../utils/tripStartedBy';
 import { PRINT_BRAND_CSS, printBrandLockup } from '../utils/printBrand';
 
 const formatCurrency = (val: number | string) => {
@@ -1264,6 +1265,7 @@ export const DriverAdvancesPage: React.FC<{ embedded?: boolean; initialView?: 'l
                 <span style="font-weight:600;color:#0f172a">${a.party_name || '—'}</span>
                 <span style="color:#64748b;font-size:11.5px">${a.from_location && a.to_location ? `${a.from_location} → ${a.to_location}` : '—'}</span>
               </div>
+              ${tripStartedByLabel((a as any).trip_started_by_name, (a as any).trip_started_by_role) ? `<div style="font-size:11px;color:#1d4ed8;font-weight:700;margin-top:4px">Started by ${tripStartedByLabel((a as any).trip_started_by_name, (a as any).trip_started_by_role)}</div>` : ''}
             ` : `
               <div style="font-weight:700;color:#b45309">WITHOUT TRIP · DIRECT ADVANCE</div>
               <div style="font-size:11.5px;color:#334155;margin-top:2px">${a.notes || 'Direct driver advance disbursed between trips'}</div>
@@ -1341,6 +1343,7 @@ export const DriverAdvancesPage: React.FC<{ embedded?: boolean; initialView?: 'l
         { Detail: 'TRIP ID',                    Value: `TRIP-${t.id}` },
         { Detail: 'TRIP DATE',                  Value: formatISTDate(t.trip_date) },
         { Detail: 'DRIVER NAME',                Value: driverName },
+        { Detail: 'TRIP STARTED BY',            Value: tripStartedByLabel((t as any).created_by_name || (t as any).trip_started_by_name, (t as any).created_by_role || (t as any).trip_started_by_role) || '—' },
         { Detail: 'LORRY NUMBER',               Value: t.lorry_number || '—' },
         { Detail: 'PARTY NAME',                 Value: t.party_name || '—' },
         { Detail: 'ROUTE (FROM)',               Value: t.from_location || '—' },
@@ -1492,6 +1495,10 @@ export const DriverAdvancesPage: React.FC<{ embedded?: boolean; initialView?: 'l
                   <td style="width:30%;font-weight:800;color:#0f172a;padding:6px 9px;border:1px solid #cbd5e1;">${t.party_name || '—'}</td>
                   <td style="width:20%;background:#f8fafc;font-weight:700;color:#475569;padding:6px 9px;border:1px solid #cbd5e1;">ROUTE</td>
                   <td style="width:30%;font-weight:600;color:#0f172a;padding:6px 9px;border:1px solid #cbd5e1;">${t.from_location || '—'} ➔ ${t.to_location || '—'}</td>
+                </tr>
+                <tr>
+                  <td style="background:#f8fafc;font-weight:700;color:#475569;padding:6px 9px;border:1px solid #cbd5e1;">TRIP STARTED BY</td>
+                  <td style="font-weight:700;color:#1d4ed8;padding:6px 9px;border:1px solid #cbd5e1;" colspan="3">${tripStartedByLabel((t as any).created_by_name || (t as any).trip_started_by_name, (t as any).created_by_role || (t as any).trip_started_by_role) || '—'}</td>
                 </tr>
                 <tr>
                   <td style="background:#f8fafc;font-weight:700;color:#475569;padding:6px 9px;border:1px solid #cbd5e1;">GOODS / WEIGHT</td>
@@ -3231,6 +3238,11 @@ export const DriverAdvancesPage: React.FC<{ embedded?: boolean; initialView?: 'l
                                                       </td>
                                                       <td style={{ padding: '8px 12px', color: '#334155' }}>
                                                         {t.party_name} ({t.from_location} → {t.to_location})
+                                                        {tripStartedByLabel((t as any).created_by_name || (t as any).trip_started_by_name, (t as any).created_by_role || (t as any).trip_started_by_role) ? (
+                                                          <div style={{ fontSize: 10.5, fontWeight: 700, color: '#1d4ed8', marginTop: 3 }}>
+                                                            Started by {tripStartedByLabel((t as any).created_by_name || (t as any).trip_started_by_name, (t as any).created_by_role || (t as any).trip_started_by_role)}
+                                                          </div>
+                                                        ) : null}
                                                       </td>
                                                       <td style={{ padding: '8px 12px', textAlign: 'right', color: '#047857', fontWeight: 700 }}>
                                                         {t.goods_weight ? `${t.goods_weight} ${t.unit_abbreviation || 'MT'}` : '—'}
@@ -3684,6 +3696,11 @@ export const DriverAdvancesPage: React.FC<{ embedded?: boolean; initialView?: 'l
                         {(adv.from_location || adv.to_location) ? (
                           <div style={{ fontSize: 12, color: '#64748b', marginBottom: 6 }}>
                             {adv.from_location || '—'} → {adv.to_location || '—'}
+                          </div>
+                        ) : null}
+                        {tripStartedByLabel((adv as any).trip_started_by_name, (adv as any).trip_started_by_role) ? (
+                          <div style={{ fontSize: 12, fontWeight: 700, color: '#1d4ed8', marginBottom: 6 }}>
+                            Started by {tripStartedByLabel((adv as any).trip_started_by_name, (adv as any).trip_started_by_role)}
                           </div>
                         ) : null}
                         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 6 }}>

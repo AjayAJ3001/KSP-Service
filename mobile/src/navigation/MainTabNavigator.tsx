@@ -74,7 +74,7 @@ export const MainTabNavigator: React.FC = () => {
           component={HomeScreen}
           options={{
             title: 'Entry',
-            headerTitle: role === 'ADMIN' ? 'Admin Trip Entry' : role === 'OWNER' ? 'Owner Trip Entry' : 'KSP Transport',
+            headerTitle: role === 'ADMIN' ? 'Admin Trip Entry' : role === 'OWNER' ? 'Owner Trip Entry' : role === 'MANAGER' ? 'Manager Trip Entry' : 'KSP Transport',
             tabBarIcon: ({ color, size }) => <Home color={color} size={size} />,
           }}
         />

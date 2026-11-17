@@ -11,7 +11,9 @@ import {
 import { BookOpen, Wallet, TrendingDown, TrendingUp } from 'lucide-react-native';
 import { DetailsSheet } from '../../components/DetailsSheet';
 import { ViewChip } from '../../components/ViewChip';
+import { PdfExportButtons } from '../../components/PdfExportButtons';
 import { adminTruckAdvanceService } from '../../services/adminService';
+import { shareMastersPdf, downloadMastersPdf } from '../../utils/pdfGenerator';
 import { COLORS, SPACING, RADIUS, SHADOWS } from '../../constants/theme';
 
 const formatCurrency = (val: number | string) => {
@@ -25,6 +27,7 @@ export const AdminManagerLedgerScreen: React.FC = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [viewManager, setViewManager] = useState<any | null>(null);
+  const [pdfLoading, setPdfLoading] = useState<'share' | 'download' | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -58,6 +61,43 @@ export const AdminManagerLedgerScreen: React.FC = () => {
       contentContainerStyle={styles.content}
       refreshControl={<RefreshControl refreshing={isRefreshing} onRefresh={() => { setIsRefreshing(true); load(); }} />}
     >
+      <View style={{ marginBottom: 10 }}>
+        <PdfExportButtons
+          compact
+          loading={pdfLoading}
+          onShare={async () => {
+            try {
+              setPdfLoading('share');
+              await shareMastersPdf({
+                tab: 'MANAGER_LEDGER',
+                tabLabel: 'Manager Advance Ledger',
+                managers,
+              });
+            } catch (e: any) {
+              Alert.alert('Share Error', e.message || 'Could not share manager ledger.');
+            } finally {
+              setPdfLoading(null);
+            }
+          }}
+          onDownload={async () => {
+            try {
+              setPdfLoading('download');
+              const res = await downloadMastersPdf({
+                tab: 'MANAGER_LEDGER',
+                tabLabel: 'Manager Advance Ledger',
+                managers,
+              });
+              if (res.savedDirectly) {
+                Alert.alert('PDF Saved', `Manager ledger saved:\n${res.filename}`);
+              }
+            } catch (e: any) {
+              Alert.alert('Download Error', e.message || 'Could not download manager ledger.');
+            } finally {
+              setPdfLoading(null);
+            }
+          }}
+        />
+      </View>
       <View style={styles.totalsCard}>
         <View style={styles.totalCol}>
           <TrendingUp size={16} color="#047857" />

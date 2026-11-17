@@ -5,14 +5,20 @@ import { Platform } from 'react-native';
 import { Settlement, Trip } from '../types';
 
 import { formatDateDMY } from './dateUtils';
+import { tripStartedByLabel } from './tripStartedBy';
 import { PRINT_BRAND_CSS, printBrandLockup } from './pdfBrand';
-import { buildDriverTripStories, getSettlementBreakdown, storyBalanceAdvance, storyCashSettlements } from './driverTripStories';
-import { expenseDetailLines, formatExpenseType, normalizeExpenseItems } from './expenseBreakdown';
+import { buildDriverTripStories, getSettlementBreakdown, storyCashSettlements } from './driverTripStories';
+import { settlementExpenseBreakdown } from './expenseBreakdown';
+import {
+  SETTLEMENT_ACCOUNT_CSS,
+  settlementExpenseTableHtml,
+  settlementAccountStatementHtml,
+} from './settlementAccountHtml';
 
 export const generateSettlementHtml = (trip: Trip, settlement: Settlement) => {
   const formatCurrency = (val: number | string) => {
     const num = parseFloat(String(val)) || 0;
-    return `₹${Math.round(num).toLocaleString('en-IN')}`;
+    return `Rs. ${Math.round(num).toLocaleString('en-IN')}`;
   };
 
   const totalExpenses = Math.round(parseFloat(String(settlement.total_expenses || 0)));
@@ -41,54 +47,66 @@ export const generateSettlementHtml = (trip: Trip, settlement: Settlement) => {
   const tripDate = formatDateDMY(trip.trip_date || settlement.trip_date || new Date());
   const payDate = settlement.payment_date ? formatDateDMY(settlement.payment_date) : '';
 
-  const items = normalizeExpenseItems(settlement.expense_items);
-  const expenseRows = items.length > 0
-    ? items.map((item, idx) => `
-        <tr>
-          <td style="text-align: center; padding: 6px 8px; border: 1px solid #cbd5e1; font-size: 11px;">${idx + 1}</td>
-          <td style="padding: 6px 8px; border: 1px solid #cbd5e1; font-weight: 700; font-size: 11.5px; color: #0f172a;">${formatExpenseType(item.expense_type)}</td>
-          <td style="padding: 6px 8px; border: 1px solid #cbd5e1; font-size: 11px; color: #475569;">${item.description || '—'}</td>
-          <td style="text-align: right; padding: 6px 8px; border: 1px solid #cbd5e1; font-weight: 700; font-size: 11.5px;">${formatCurrency(item.amount)}</td>
-        </tr>
-      `).join('')
-    : `
-        <tr>
-          <td style="text-align: center; padding: 6px 8px; border: 1px solid #cbd5e1; font-size: 11px;">1</td>
-          <td style="padding: 6px 8px; border: 1px solid #cbd5e1; font-weight: 700; font-size: 11.5px; color: #0f172a;">Consolidated Driver Trip Expenses</td>
-          <td style="padding: 6px 8px; border: 1px solid #cbd5e1; font-size: 11px; color: #475569;">Loading, Unloading, Bata, Toll &amp; misc expenses</td>
-          <td style="text-align: right; padding: 6px 8px; border: 1px solid #cbd5e1; font-weight: 700; font-size: 11.5px;">${formatCurrency(settlement.total_expenses)}</td>
-        </tr>
-      `;
+  const expenseBreak = settlementExpenseBreakdown(settlement);
+  const tripAdvance = Math.round(Number((settlement as any).manager_advance ?? initialTripAdvance ?? 0));
+  const ownerAdvance = Math.round(Number((settlement as any).owner_given || 0));
+  const ownerApplied = Math.round(Number((settlement as any).owner_applied || 0));
+  const leftoverRaw = Math.round(Number((settlement as any).owner_leftover_used || 0));
+  const ownerName = String((settlement as any).advance_owner_name || '').trim();
+  const givenBy = String((settlement as any).advance_given_by_name || '').trim();
+  const settledBy = String(settlement.settled_by_name || '').trim();
+  const mode = String(settlement.payment_mode || '').toUpperCase();
+  const isCash = ['CASH', 'UPI', 'BANK_TRANSFER'].includes(mode);
+  const laterAdj = paidAmount > 0 && !isCash;
+  const withoutTrip = Math.max(0, Math.round(Number((settlement as any).without_trip_advance || 0)), ownerAdvance);
+  const leftoverUsed = leftoverRaw > 0 && (leftoverRaw === ownerAdvance || leftoverRaw === withoutTrip) ? 0 : leftoverRaw;
+  const withTrip = tripAdvance;
+  const pool = withTrip + withoutTrip + leftoverUsed;
+  const laterIsDuplicate = laterAdj && (
+    Math.abs(paidAmount - ownerApplied) < 1
+    || Math.abs(paidAmount - leftoverUsed) < 1
+  );
+  const statementNeed = Math.max(0, totalExpenses - pool - (isCash ? paidAmount : 0));
+  const statementInHand = Math.max(0, pool - totalExpenses);
 
   return `<!DOCTYPE html>
 <html>
 <head>
   <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=3, user-scalable=yes">
   <title>KSP Transport - Settlement Challan #${settlement.id}</title>
   <style>
     ${PRINT_BRAND_CSS}
+    ${SETTLEMENT_ACCOUNT_CSS}
     @page { size: A4 portrait; margin: 10mm 12mm; }
     * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body {
+      width: 100%;
+      max-width: 100%;
+      overflow-x: hidden;
+    }
     body {
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+      font-family: Arial, Helvetica, sans-serif;
       color: #0f172a;
       background: #ffffff;
-      padding: 12px;
+      padding: 8px;
       -webkit-print-color-adjust: exact;
       print-color-adjust: exact;
     }
+    table { width: 100%; max-width: 100%; border-collapse: collapse; }
     .challan-card {
       border: 2px solid #0f172a;
       border-radius: 4px;
-      padding: 20px 24px;
+      padding: 12px 10px;
       background: #ffffff;
-      max-width: 780px;
+      width: 100%;
+      max-width: 100%;
       margin: 0 auto;
     }
     .header-table {
       width: 100%;
+      border-collapse: collapse;
       border-bottom: 2px solid #0f172a;
-      padding-bottom: 12px;
       margin-bottom: 14px;
     }
     .company-title {
@@ -118,7 +136,7 @@ export const generateSettlementHtml = (trip: Trip, settlement: Settlement) => {
       padding: 8px 12px;
       text-align: right;
       border-radius: 4px;
-      min-width: 220px;
+      width: 100%;
     }
     .voucher-title {
       font-size: 13px;
@@ -156,27 +174,29 @@ export const generateSettlementHtml = (trip: Trip, settlement: Settlement) => {
     .info-table {
       width: 100%;
       border-collapse: collapse;
+      table-layout: fixed;
       margin-bottom: 14px;
       border: 1px solid #cbd5e1;
     }
     .info-table td {
-      padding: 6px 10px;
+      padding: 6px 8px;
       font-size: 11.5px;
       border: 1px solid #cbd5e1;
       vertical-align: middle;
+      word-wrap: break-word;
     }
     .info-label {
       background: #f8fafc;
       font-weight: 700;
       color: #475569;
-      width: 20%;
+      width: 22%;
       text-transform: uppercase;
-      font-size: 10.5px;
+      font-size: 10px;
     }
     .info-val {
       font-weight: 700;
       color: #0f172a;
-      width: 30%;
+      width: 28%;
     }
     .plate-box {
       display: inline-block;
@@ -188,51 +208,6 @@ export const generateSettlementHtml = (trip: Trip, settlement: Settlement) => {
       font-size: 12px;
       font-weight: 900;
       letter-spacing: 1px;
-    }
-    .grid-table {
-      width: 100%;
-      border-collapse: collapse;
-      margin-bottom: 14px;
-    }
-    .grid-table th {
-      background: #f1f5f9;
-      color: #0f172a;
-      font-size: 11px;
-      font-weight: 800;
-      text-transform: uppercase;
-      padding: 7px 8px;
-      border: 1px solid #cbd5e1;
-      letter-spacing: 0.3px;
-    }
-    .grid-table td {
-      padding: 6px 8px;
-      font-size: 11.5px;
-      border: 1px solid #cbd5e1;
-    }
-    .calc-box {
-      border: 1.5px solid #0f172a;
-      background: #fafafa;
-      margin-bottom: 14px;
-      border-radius: 4px;
-      overflow: hidden;
-    }
-    .calc-row {
-      display: flex;
-      justify-content: space-between;
-      padding: 7px 14px;
-      font-size: 12px;
-      border-bottom: 1px solid #e2e8f0;
-    }
-    .calc-row:last-child {
-      border-bottom: none;
-    }
-    .calc-row.highlight {
-      background: #f0fdf4;
-      font-weight: 900;
-      font-size: 14.5px;
-      color: #15803d;
-      border-top: 1.5px solid #0f172a;
-      padding: 10px 14px;
     }
     .discharge-box {
       border: 1.5px solid #16a34a;
@@ -270,7 +245,8 @@ export const generateSettlementHtml = (trip: Trip, settlement: Settlement) => {
       width: 50%;
     }
     .sig-line {
-      width: 200px;
+      width: 80%;
+      max-width: 200px;
       border-bottom: 1px solid #0f172a;
       margin-bottom: 6px;
     }
@@ -308,14 +284,14 @@ export const generateSettlementHtml = (trip: Trip, settlement: Settlement) => {
   <div class="challan-card">
     <table class="header-table" cellpadding="0" cellspacing="0">
       <tr>
-        <td style="vertical-align: top;">
+        <td style="vertical-align: top; width: 58%;">
           ${printBrandLockup('Fleet Logistics &amp; Transport Contractors')}
           <div class="company-meta">
             Head Office: Namakkal • Tamil Nadu<br />
             Fleet Operations &amp; Freight Settlement Dept.
           </div>
         </td>
-        <td style="vertical-align: top; text-align: right;" width="260">
+        <td style="vertical-align: top; text-align: right; width: 42%;">
           <div class="voucher-box">
             <div class="voucher-title">TRIP SETTLEMENT CHALLAN</div>
             <div class="voucher-meta">
@@ -352,6 +328,12 @@ export const generateSettlementHtml = (trip: Trip, settlement: Settlement) => {
         <td class="info-label">Settlement Mode</td>
         <td class="info-val">${settlement.payment_mode || (isFullySettled ? 'CASH' : 'PENDING')}</td>
       </tr>
+      <tr>
+        <td class="info-label">Trip Started By</td>
+        <td class="info-val">${tripStartedByLabel((settlement as any).trip_started_by_name || trip.created_by_name, (settlement as any).trip_started_by_role || trip.created_by_role) || '—'}</td>
+        <td class="info-label"></td>
+        <td class="info-val"></td>
+      </tr>
       ${((settlement as any).advance_given_by_name || settlement.settled_by_name) ? `
       <tr>
         <td class="info-label">Advance Given By</td>
@@ -362,92 +344,28 @@ export const generateSettlementHtml = (trip: Trip, settlement: Settlement) => {
       ` : ''}
     </table>
 
-    <div style="font-size: 11px; font-weight: 800; color: #0f172a; text-transform: uppercase; margin-bottom: 6px; letter-spacing: 0.3px;">
-      1. Driver Trip Expenses Breakdown
-    </div>
-    <table class="grid-table" cellpadding="0" cellspacing="0">
-      <thead>
-        <tr>
-          <th width="40">#</th>
-          <th>Expense Category</th>
-          <th>Description / Remarks</th>
-          <th width="120" style="text-align: right;">Amount</th>
-        </tr>
-      </thead>
-      <tbody>
-        ${expenseRows}
-        <tr style="background: #f8fafc; font-weight: 800;">
-          <td colspan="3" style="text-align: right; padding: 7px 8px; font-size: 11.5px; text-transform: uppercase;">Total Trip Expenses:</td>
-          <td style="text-align: right; padding: 7px 8px; font-size: 12.5px; color: #b45309;">${formatCurrency(settlement.total_expenses)}</td>
-        </tr>
-      </tbody>
-    </table>
-
-    <div style="font-size: 11px; font-weight: 800; color: #0f172a; text-transform: uppercase; margin-bottom: 6px; letter-spacing: 0.3px;">
-      2. Final Settlement Account Statement
-    </div>
-    <div class="calc-box">
-      ${(() => {
-        const tripAdvance = Math.round(Number((settlement as any).manager_advance ?? initialTripAdvance ?? 0));
-        const ownerAdvance = Math.round(Number((settlement as any).owner_given || 0));
-        const ownerApplied = Math.round(Number((settlement as any).owner_applied || 0));
-        const leftoverUsed = Math.round(Number((settlement as any).owner_leftover_used || 0));
-        const ownerBal = Math.round(Number((settlement as any).owner_balance || 0));
-        const ownerName = String((settlement as any).advance_owner_name || '').trim();
-        const givenBy = String((settlement as any).advance_given_by_name || '').trim();
-        const settledBy = String(settlement.settled_by_name || '').trim();
-        const mode = String(settlement.payment_mode || '').toUpperCase();
-        const isCash = ['CASH', 'UPI', 'BANK_TRANSFER'].includes(mode);
-        const laterAdj = paidAmount > 0 && !isCash;
-        const effectiveMgr = (settlement as any).effective_manager_advance != null
-          ? Math.round(Number((settlement as any).effective_manager_advance))
-          : Math.max(0, tripAdvance - priorDeficitDeduction);
-        const needToPay = ownerBal > 0 ? 0 : Math.max(0, totalExpenses - effectiveMgr - ownerAdvance - leftoverUsed - (isCash || laterAdj ? paidAmount : 0));
-        const inHand = ownerBal > 0 ? ownerBal : 0;
-        const row = (label: string, value: string, extra = '') =>
-          `<div class="calc-row"${extra}><span>${label}</span><strong>${value}</strong></div>`;
-        const alreadyInHand = Math.max(0, Math.round(Number((settlement as any).previous_driver_balance || leftoverUsed || 0)));
-        const withoutTrip = Math.max(0, Math.round(Number((settlement as any).without_trip_advance || 0)));
-        let html = row('Total Driver Expenses Incurred:', `<span style="color:#b45309">${formatCurrency(totalExpenses)}</span>`);
-        html += row('Advance Given:', `<span style="color:#1d4ed8">${formatCurrency(tripAdvance)}</span>`);
-        if (tripAdvance > 0 && priorDeficitDeduction <= 0 && givenBy) {
-          html += row(`Advance given by:`, givenBy);
-        }
-        html += row('Already Amount in Hand:', `<span style="color:#047857">${formatCurrency(alreadyInHand)}</span>`, ' style="background:#ecfdf5"');
-        html += row('Without Trip (Driver Balance):', `<span style="color:#b45309">${formatCurrency(withoutTrip)}</span>`, ' style="background:#fff7ed"');
-        if (tripAdvance > 0 && priorDeficitDeduction <= 0) {
-          html += row(`Less: Trip Advance${givenBy ? ` (given by ${givenBy})` : ''}:`, `<span style="color:#1d4ed8">(-) ${formatCurrency(tripAdvance)}</span>`);
-        } else if (tripAdvance > 0) {
-          html += row(`Trip Advance (given${givenBy ? ` by ${givenBy}` : ''}):`, `<span style="color:#1d4ed8">${formatCurrency(tripAdvance)}</span>`);
-        }
-        if (ownerAdvance > 0) {
-          html += row(`Advance from Owner${ownerName ? ` (${ownerName})` : ''}:`, `<span style="color:#6d28d9">${formatCurrency(ownerAdvance)}</span>`, ' style="background:#f5f3ff"');
-        }
-        if (priorDeficitDeduction > 0) {
-          html += row('Less: This trip advance adjusted to prior trip dues:', `<span style="color:#dc2626">(-) ${formatCurrency(priorDeficitDeduction)}</span>`, ' style="background:#fff7ed;color:#c2410c"');
-          html += row('Effective Advance Available for This Trip:', formatCurrency(effectiveAdvance), ' style="background:#f8fafc;font-weight:700"');
-        }
-        if (ownerApplied > 0) {
-          html += row('Less: Owner advance used on this trip:', `<span style="color:#c2410c">(-) ${formatCurrency(ownerApplied)}</span>`, ' style="background:#fff7ed;color:#c2410c"');
-        }
-        if (leftoverUsed > 0 && priorDeficitDeduction <= 0) {
-          html += row('Less: Previous surplus used on this trip:', `<span style="color:#c2410c">(-) ${formatCurrency(leftoverUsed)}</span>`, ' style="background:#fff7ed;color:#c2410c"');
-        }
-        if (laterAdj) {
-          html += row('Less: Adjusted from later trip advance:', `<span style="color:#c2410c">(-) ${formatCurrency(paidAmount)}</span>`, ' style="background:#fff7ed;color:#c2410c"');
-        }
-        if (isCash && paidAmount > 0) {
-          html += row(`Less: Paid to Driver (${mode})${settledBy ? ` — settled by ${settledBy}` : ''}:`, `<span style="color:#16a34a">(-) ${formatCurrency(paidAmount)}</span>`, ' style="background:#f0fdf4;color:#15803d"');
-        }
-        if (needToPay > 0 || inHand === 0) {
-          html += row('Need to Pay:', `<span style="color:#b91c1c">${formatCurrency(needToPay)}</span>`, ' style="background:#fef2f2;color:#b91c1c;font-weight:800;border-top:1.5px solid #fecaca"');
-        }
-        if (inHand > 0) {
-          html += `<div class="calc-row highlight" style="background:#ecfdf5;color:#047857"><span>Balance in Hand:</span><span>${formatCurrency(inHand)}</span></div>`;
-        }
-        return html;
-      })()}
-    </div>
+    ${settlementExpenseTableHtml(expenseBreak.rows, expenseBreak.total, formatCurrency)}
+    ${settlementAccountStatementHtml({
+      expenses: totalExpenses,
+      withTrip,
+      tripAdvance,
+      ownerAdvance,
+      advanceGivenBy: givenBy,
+      ownerName,
+      withoutTrip,
+      priorDeficit: priorDeficitDeduction,
+      effectiveAdvance,
+      ownerApplied: leftoverUsed > 0 ? 0 : ownerApplied,
+      leftoverUsed,
+      laterAdvanceAdjusted: laterAdj && !laterIsDuplicate,
+      laterPaid: paidAmount,
+      paidAmount,
+      isCashDisbursement: isCash,
+      mode,
+      settledBy,
+      needToPay: statementNeed,
+      inHand: statementInHand,
+    }, formatCurrency)}
 
     ${priorDeficitDeduction > 0 ? `
     <div style="background: #fffbeb; border: 1px solid #fde68a; border-radius: 4px; padding: 9px 12px; margin-bottom: 14px; font-size: 11px; color: #92400e; line-height: 1.45;">
@@ -688,7 +606,7 @@ export const generateTripHtml = (trip: Trip) => {
       padding: 8px 12px;
       text-align: right;
       border-radius: 4px;
-      min-width: 220px;
+      width: 100%;
     }
     .voucher-title {
       font-size: 13px;
@@ -904,6 +822,12 @@ export const generateTripHtml = (trip: Trip) => {
         <td class="info-label">Driver Contact</td>
         <td class="info-val">${trip.driver_mobile || '—'}</td>
       </tr>
+      <tr>
+        <td class="info-label">Trip Started By</td>
+        <td class="info-val">${tripStartedByLabel(trip.created_by_name, trip.created_by_role) || '—'}</td>
+        <td class="info-label"></td>
+        <td class="info-val"></td>
+      </tr>
       ${trip.owner_name ? `
       <tr>
         <td class="info-label">Truck Owner</td>
@@ -988,7 +912,8 @@ export type MasterPdfTab =
   | 'VEHICLES'
   | 'USERS'
   | 'DRIVER_ADVANCES'
-  | 'TRUCK_ADVANCES';
+  | 'TRUCK_ADVANCES'
+  | 'MANAGER_LEDGER';
 
 export interface MastersPdfData {
   tab: MasterPdfTab;
@@ -1008,6 +933,7 @@ export interface MastersPdfData {
   driverAdvances?: any[];
   driverSummaries?: any[];
   truckAdvances?: any[];
+  managers?: any[];
 }
 
 export const generateMastersPdfHtml = (data: MastersPdfData): string => {
@@ -1229,6 +1155,22 @@ export const generateMastersPdfHtml = (data: MastersPdfData): string => {
         Total Truck Advances: <span style="color:#b45309;font-size:13px;">${inr(totalAdv)}</span> &bull; (${data.truckAdvances?.length || 0} Entries)
       </div>
     `;
+  } else if (data.tab === 'MANAGER_LEDGER') {
+    const rows = (data.managers || []).map((m: any, i: number) => [
+      `${i + 1}`,
+      m.manager_name || '—',
+      inr(m.total_received),
+      inr(m.total_given),
+      `<strong style="color:${parseFloat(String(m.available_balance || 0)) >= 0 ? '#15803d' : '#b91c1c'}">${inr(m.available_balance)}</strong>`,
+    ]);
+    const rec = (data.managers || []).reduce((s: number, m: any) => s + (parseFloat(String(m.total_received || 0)) || 0), 0);
+    const given = (data.managers || []).reduce((s: number, m: any) => s + (parseFloat(String(m.total_given || 0)) || 0), 0);
+    bodyContent = `
+      ${tableWrap(['#', 'Manager', 'Received from Owner', 'Given to Drivers', 'Balance in Hand'], rows, 'No manager advance records found.')}
+      <div style="margin-top:10px;text-align:right;font-size:12px;font-weight:800;color:#0f172a;padding:8px 12px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:4px;">
+        Received: ${inr(rec)} &bull; Given: ${inr(given)} &bull; In Hand: ${inr(rec - given)}
+      </div>
+    `;
   }
 
   const recordCount = (() => {
@@ -1247,6 +1189,7 @@ export const generateMastersPdfHtml = (data: MastersPdfData): string => {
       USERS: (data.users||[]).length,
       DRIVER_ADVANCES: (data.driverAdvances||[]).length,
       TRUCK_ADVANCES: (data.truckAdvances||[]).length,
+      MANAGER_LEDGER: (data.managers||[]).length,
     };
     return m[data.tab] || 0;
   })();
@@ -1743,6 +1686,8 @@ export const generateReportsPdfHtml = (data: ReportsPdfData): string => {
   } else if (data.type === 'SETTLEMENTS') {
     const items = data.items || [];
     const sumFreight = items.reduce((acc, s) => acc + (parseFloat(String(s.total_freight)) || 0), 0);
+    const sumLoading = items.reduce((acc, s) => acc + settlementExpenseBreakdown(s).loading, 0);
+    const sumUnloading = items.reduce((acc, s) => acc + settlementExpenseBreakdown(s).unloading, 0);
     const sumExp = items.reduce((acc, s) => acc + (parseFloat(String(s.total_expenses)) || 0), 0);
     const sumAdv = items.reduce((acc, s) => acc + (parseFloat(String(s.advance_paid)) || 0), 0);
     const outcome = (s: any) => {
@@ -1763,21 +1708,26 @@ export const generateReportsPdfHtml = (data: ReportsPdfData): string => {
     const sumNeed = items.reduce((acc, s) => acc + outcome(s).needToPay, 0);
     const sumInHand = items.reduce((acc, s) => acc + outcome(s).inHand, 0);
 
-    const rows = items.map((s, i) => [
-      `${i + 1}`,
-      `#${s.id}`,
-      s.trip_id ? `Trip #${s.trip_id}` : '—',
-      s.trip_date ? formatDateDMY(s.trip_date) : s.created_at ? formatDateDMY(s.created_at) : '—',
-      `<strong style="color:#1e40af">${s.lorry_number || '—'}</strong>`,
-      s.owner_name ? `<span style="color:#6d28d9;font-weight:700">🏢 ${s.owner_name}</span>` : '—',
-      `<strong>${s.driver_name || '—'}</strong>`,
-      `<span>${inr(s.total_freight)}</span>`,
-      `<span style="color:#b45309">${inr(s.total_expenses)}</span>`,
-      `<span>${inr(s.advance_paid)}</span>`,
-      `<strong style="color:#b91c1c">${inr(outcome(s).needToPay)}</strong>`,
-      `<strong style="color:#047857">${inr(outcome(s).inHand)}</strong>`,
-      `<span class="badge ${s.settlement_status === 'SETTLED' ? 'b-settled' : 'b-pending'}">${s.settlement_status || 'SETTLED'}</span>`,
-    ]);
+    const rows = items.map((s, i) => {
+      const exp = settlementExpenseBreakdown(s);
+      return [
+        `${i + 1}`,
+        `#${s.id}`,
+        s.trip_id ? `Trip #${s.trip_id}` : '—',
+        s.trip_date ? formatDateDMY(s.trip_date) : s.created_at ? formatDateDMY(s.created_at) : '—',
+        `<strong style="color:#1e40af">${s.lorry_number || '—'}</strong>`,
+        s.owner_name ? `<span style="color:#6d28d9;font-weight:700">🏢 ${s.owner_name}</span>` : '—',
+        `<strong>${s.driver_name || '—'}</strong>`,
+        `<span>${inr(s.total_freight)}</span>`,
+        `<span style="color:#b45309">${inr(exp.loading)}</span>`,
+        `<span style="color:#b45309">${inr(exp.unloading)}</span>`,
+        `<span style="color:#9a3412;font-weight:700">${inr(exp.total)}</span>`,
+        `<span>${inr(s.advance_paid)}</span>`,
+        `<strong style="color:#b91c1c">${inr(outcome(s).needToPay)}</strong>`,
+        `<strong style="color:#047857">${inr(outcome(s).inHand)}</strong>`,
+        `<span class="badge ${s.settlement_status === 'SETTLED' ? 'b-settled' : 'b-pending'}">${s.settlement_status || 'SETTLED'}</span>`,
+      ];
+    });
 
     const footer = [
       'TOTAL',
@@ -1788,6 +1738,8 @@ export const generateReportsPdfHtml = (data: ReportsPdfData): string => {
       '',
       '',
       `<strong>${inr(sumFreight)}</strong>`,
+      `<strong>${inr(sumLoading)}</strong>`,
+      `<strong>${inr(sumUnloading)}</strong>`,
       `<strong>${inr(sumExp)}</strong>`,
       `<strong>${inr(sumAdv)}</strong>`,
       `<strong style="color:#b91c1c">${inr(sumNeed)}</strong>`,
@@ -1796,7 +1748,7 @@ export const generateReportsPdfHtml = (data: ReportsPdfData): string => {
     ];
 
     bodyContent = tableWrap(
-      ['#', 'Settlement ID', 'Trip ID', 'Trip Date', 'Lorry Number', 'Truck Owner', 'Driver Name', 'Freight', 'Expenses', 'Advance', 'Need to Pay', 'Balance in Hand', 'Status'],
+      ['#', 'Settlement ID', 'Trip ID', 'Trip Date', 'Lorry Number', 'Truck Owner', 'Driver Name', 'Freight', 'Loading', 'Unloading', 'Full Expenses', 'Advance', 'Need to Pay', 'Balance in Hand', 'Status'],
       rows,
       'No settlement records found for selected filters.',
       footer
@@ -2203,6 +2155,20 @@ export const downloadPaymentPdf = async (
   }
 };
 
+export const sharePaymentPdf = async (payment: any): Promise<void> => {
+  const html = generatePaymentVoucherHtml(payment);
+  const { uri } = await Print.printToFileAsync({ html });
+  if (await Sharing.isAvailableAsync()) {
+    await Sharing.shareAsync(uri, {
+      UTI: '.pdf',
+      mimeType: 'application/pdf',
+      dialogTitle: 'Share Payment Receipt',
+    });
+  } else {
+    await Print.printAsync({ html });
+  }
+};
+
 /* ─────────────────────────────────────────────────────────────
    Driver Advance, Expenses & Settlement Statement PDF
 ───────────────────────────────────────────────────────────── */
@@ -2279,7 +2245,10 @@ const printHtmlToFile = async (html: string) => {
   }
 };
 
-export const generateDriverStatementHtml = (data: DriverStatementPdfData): string => {
+export const generateDriverStatementHtml = (
+  data: DriverStatementPdfData,
+  options?: { tripId?: number }
+): string => {
   const esc = pdfSafeText;
 
   const formatCurrency = (val: number | string) => {
@@ -2328,9 +2297,12 @@ export const generateDriverStatementHtml = (data: DriverStatementPdfData): strin
   const tripExpenseItemsById = new Map<number, any[]>(
     (data.trips_and_expenses || []).map((t: any) => [Number(t.trip_id || t.id), Array.isArray(t.expense_items) ? t.expense_items : []])
   );
-  const tripStories = buildDriverTripStories(timeline);
+  const allStories = buildDriverTripStories(timeline);
+  const tripStories = options?.tripId
+    ? allStories.filter((s) => Number(s.tripId) === Number(options.tripId))
+    : allStories;
   const withoutTripTotal = Math.round(parseFloat(String(data.summary.without_trip_advance_total || 0)) || 0)
-    || tripStories.filter((s) => s.kind === 'DIRECT_ADVANCE').reduce((s, x) => s + Math.round(x.totalAdvance || 0), 0);
+    || allStories.filter((s) => s.kind === 'DIRECT_ADVANCE').reduce((s, x) => s + Math.round(x.totalAdvance || 0), 0);
   let tripNo = 0;
   const storiesHtml = tripStories.length > 0
     ? tripStories.map((story) => {
@@ -2348,17 +2320,6 @@ export const generateDriverStatementHtml = (data: DriverStatementPdfData): strin
           priorFromApplied,
           priorFromExp
         );
-        const priorTripLabel = (br.appliedTo || [])
-          .map((r) => (r.tripId ? `Trip #${r.tripId}` : r.label))
-          .filter(Boolean)
-          .join(', ') || 'previous trip';
-        const availableThisTrip = Math.max(0, Math.round(story.totalAdvance || 0) + Math.round(story.broughtForward || 0) - reducedPrior);
-        const calcNeed = Math.round(story.needToPay || 0);
-        const leftoverLater = laterPays.reduce((s, p) => s + Math.round(p.leftoverInHand || Math.max(0, (p.totalGiven || 0) - (p.thisTripPaid || 0))), 0);
-        const calcHand = calcNeed > 0.5 ? 0 : Math.max(0, Math.round(story.balanceInHand || 0), leftoverLater);
-        const resultLabel = calcNeed > 0.5 ? 'NEED TO PAY' : calcHand > 0.5 ? 'BALANCE IN HAND' : 'BALANCED';
-        const resultAmt = calcNeed > 0.5 ? calcNeed : calcHand;
-        const resultColor = calcNeed > 0.5 ? '#dc2626' : calcHand > 0.5 ? '#16a34a' : '#475569';
         tripNo += 1;
         const title = story.kind === 'DIRECT_ADVANCE'
           ? `Without trip · Direct advance${story.date ? ' - ' + formatDateDMY(story.date) : ''}`
@@ -2368,77 +2329,87 @@ export const generateDriverStatementHtml = (data: DriverStatementPdfData): strin
           ['Truck No', story.lorry],
           ['Owner', story.ownerName],
           ['Route', story.route ? String(story.route).replace(/→/g, 'to') : ''],
+          ['Trip Started By', tripStartedByLabel(story.startedByName, story.startedByRole)],
         ].filter(([, val]) => !!val)
           .map(([label, val]) => `<tr><td style="padding:2px 8px;width:90px;font-size:10px;font-weight:800;color:#64748b;">${esc(label)}</td><td style="padding:2px 8px;font-size:11px;font-weight:700;color:#0f172a;">${esc(val)}</td></tr>`)
           .join('');
-        const balAdv = storyBalanceAdvance(story);
         const cashSettles = storyCashSettlements(story);
         if (!cashSettles.length && br.paid > 0) cashSettles.push({ amount: br.paid, by: 'Admin' });
-        const nextTripLabel = (pay: { sourceTripId?: number | null; sourceLabel?: string }) =>
-          pay.sourceTripId ? `Trip #${pay.sourceTripId}` : (pay.sourceLabel || 'next trip');
-        const advRows = [
-          ...story.advances.map((adv: any) => {
-            const who = `${adv.given_by_role === 'Owner' ? 'Owner' : 'Manager'}: ${adv.given_by_name || (adv.given_by_role === 'Owner' ? 'Owner' : 'Manager')}`;
-            return `<tr><td style="padding:3px 8px;font-size:11px;">${esc(who)}</td><td style="padding:3px 8px;font-size:11px;font-weight:800;color:#1d4ed8;text-align:right;">${formatCurrency(adv.amount)}</td></tr>`;
-          }),
-          ...laterPays.map((pay) => {
-            const used = Math.round(pay.thisTripPaid || 0);
-            const left = Math.max(0, Math.round(pay.leftoverInHand || 0), laterPays.length === 1 ? calcHand : 0);
-            const full = Math.max(Math.round(pay.totalGiven || 0), used + left);
-            const owner = /Owner/i.test(String(pay.sourceLabel || ''));
-            const who = owner
-              ? String(pay.sourceLabel || 'Owner').replace(/^Advance from\s+/i, '')
-              : `Next trip (${nextTripLabel(pay)})`;
-            return `<tr><td style="padding:3px 8px;font-size:11px;font-weight:800;color:${owner ? '#6d28d9' : '#166534'};">${esc(who)} given</td><td style="padding:3px 8px;font-size:11px;font-weight:800;color:${owner ? '#6d28d9' : '#166534'};text-align:right;">${formatCurrency(full)}</td></tr>
-                    <tr><td style="padding:3px 8px;font-size:11px;font-weight:800;color:#c2410c;">Less: reduced to this trip dues</td><td style="padding:3px 8px;font-size:11px;font-weight:800;color:#c2410c;text-align:right;">(-) ${formatCurrency(used)}</td></tr>`;
-          }),
-          ...(reducedPrior > 0.5
-            ? [`<tr><td style="padding:3px 8px;font-size:11px;font-weight:800;color:#c2410c;">Less: given advance used for ${esc(priorTripLabel)}</td><td style="padding:3px 8px;font-size:11px;font-weight:800;color:#c2410c;text-align:right;">(-) ${formatCurrency(reducedPrior)}</td></tr>`]
-            : []),
-          ...(balAdv ? [`<tr><td style="padding:3px 8px;font-size:11px;color:#047857;">Owner Advance Bal: ${esc(balAdv.name)}</td><td style="padding:3px 8px;font-size:11px;font-weight:800;color:#047857;text-align:right;">${formatCurrency(balAdv.amount)}</td></tr>`] : []),
-        ].join('') || `<tr><td colspan="2" style="padding:3px 8px;font-size:11px;color:#94a3b8;">No advance recorded</td></tr>`;
-        const cm = br.cashMovement;
-        const showSettle = br.happened || br.stillToPay > 0 || br.remainingInHand > 0 || !!balAdv || cashSettles.length > 0;
-        const settleRows = showSettle ? `
-          <tr><td colspan="2" style="padding:6px 8px;background:#f0fdf4;font-size:10px;font-weight:800;color:#15803d;">4. SETTLEMENT / ADJUSTMENT</td></tr>
-          ${balAdv ? `<tr><td style="padding:3px 8px;font-size:11px;color:#c2410c;">Settlement done by adjustment</td><td style="padding:3px 8px;font-size:12px;font-weight:800;color:#c2410c;text-align:right;">${formatCurrency(balAdv.amount)}</td></tr>
-          <tr><td colspan="2" style="padding:2px 8px 4px;font-size:10px;color:#9a3412;">Owner Advance Bal (${esc(balAdv.name)})</td></tr>` : ''}
-          ${cashSettles.map((p) => `<tr><td style="padding:3px 8px;font-size:11px;color:#15803d;">Settlement done by ${esc(p.by)}</td><td style="padding:3px 8px;font-size:12px;font-weight:800;color:#15803d;text-align:right;">${formatCurrency(p.amount)}</td></tr>`).join('')}
-          ${laterPays.length === 0 && cm ? `
-            <tr><td style="padding:3px 8px;font-size:11px;color:#6d28d9;">${esc(cm.sourceLabel)} total</td><td style="padding:3px 8px;font-size:12px;font-weight:800;color:#6d28d9;text-align:right;">${formatCurrency(cm.totalGiven)}</td></tr>
-            <tr><td style="padding:3px 8px;font-size:11px;color:#166534;">Reduced previous trip due</td><td style="padding:3px 8px;font-size:12px;font-weight:800;color:#166534;text-align:right;">${formatCurrency(cm.reducedDue)}</td></tr>
-            <tr><td style="padding:3px 8px;font-size:11px;color:#047857;">Balance in hand after this</td><td style="padding:3px 8px;font-size:12px;font-weight:800;color:#047857;text-align:right;">${formatCurrency(cm.leftInHand)}</td></tr>
-          ` : ''}
-          ${!balAdv && laterPays.length === 0 && !cm ? br.sources.map((src) => `<tr><td style="padding:3px 8px;font-size:11px;color:#166534;">Adjusted leftover from ${esc(src.label)}</td><td style="padding:3px 8px;font-size:12px;font-weight:800;color:#166534;text-align:right;">${formatCurrency(src.amount)}</td></tr>`).join('') : ''}
-          ${!balAdv && laterPays.length === 0 && !cm && br.sources.length === 0 && br.adjusted > 0 ? `<tr><td style="padding:3px 8px;font-size:11px;color:#166534;">Adjusted leftover</td><td style="padding:3px 8px;font-size:12px;font-weight:800;color:#166534;text-align:right;">${formatCurrency(br.adjusted)}</td></tr>` : ''}
-          ${br.appliedTo.map((row, ri) => `<tr><td colspan="2" style="padding:2px 8px 2px 16px;font-size:10px;color:#334155;">${ri + 1}. Adjusted ${esc(row.label)}: ${formatCurrency(row.amount)}${row.remainingOnThatTrip > 0 ? ' (still ' + formatCurrency(row.remainingOnThatTrip) + ')' : ' (fully settled)'}</td></tr>`).join('')}
-          ${calcNeed > 0.5 ? `<tr><td style="padding:6px 8px;font-size:11px;font-weight:800;color:#b91c1c;">Need to pay</td><td style="padding:6px 8px;font-size:13px;font-weight:800;color:#b91c1c;text-align:right;">${formatCurrency(calcNeed)}</td></tr>` : ''}
-        ` : '';
-        return `<table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;border:1px solid #cbd5e1;margin:8px 0;">
-          <tr><td colspan="2" style="padding:8px;background:#f8fafc;font-size:12px;font-weight:800;color:#0f172a;">${esc(title)}</td></tr>
-          ${infoRows}
-          <tr><td colspan="2" style="padding:6px 8px 2px;font-size:10px;font-weight:800;color:#1d4ed8;">1. ADVANCE GIVEN</td></tr>
-          ${advRows}
-          <tr><td style="padding:3px 8px;font-size:11px;font-weight:800;color:#1d4ed8;">Advance given</td><td style="padding:3px 8px;font-size:12px;font-weight:800;color:#1d4ed8;text-align:right;">${formatCurrency(story.totalAdvance)}</td></tr>
-          <tr><td style="padding:3px 8px;font-size:11px;font-weight:800;color:#b45309;">Without trip</td><td style="padding:3px 8px;font-size:12px;font-weight:800;color:#b45309;text-align:right;">${formatCurrency(story.kind === 'DIRECT_ADVANCE' ? story.totalAdvance : 0)}</td></tr>
-          <tr><td style="padding:3px 8px;font-size:11px;font-weight:800;color:#16a34a;">Balance in hand</td><td style="padding:3px 8px;font-size:12px;font-weight:800;color:#16a34a;text-align:right;">${formatCurrency(calcHand)}</td></tr>
-          <tr><td colspan="2" style="padding:6px 8px 2px;font-size:10px;font-weight:800;color:#c2410c;">2. TRIP EXPENSES</td></tr>
-          ${(expenseDetailLines(story.tripId ? tripExpenseItemsById.get(Number(story.tripId)) : []).map((l) =>
-            `<tr><td style="padding:2px 8px;font-size:11px;font-weight:700;color:#92400e;">${esc(l.type)}${l.description ? ` — ${esc(l.description)}` : ''}</td><td style="padding:2px 8px;font-size:11px;font-weight:800;color:#b45309;text-align:right;">${formatCurrency(l.amount)}</td></tr>`
-          ).join('') || (story.totalExpenses > 0 ? `<tr><td style="padding:2px 8px;font-size:11px;font-weight:700;color:#92400e;">Trip expenses</td><td style="padding:2px 8px;font-size:11px;font-weight:800;color:#b45309;text-align:right;">${formatCurrency(story.totalExpenses)}</td></tr>` : ''))}
-          <tr><td colspan="2" style="padding:2px 8px 6px;font-size:13px;font-weight:800;color:#9a3412;">Total ${formatCurrency(story.totalExpenses)}</td></tr>
-          <tr><td colspan="2" style="padding:6px 8px;background:#f8fafc;font-size:10px;font-weight:800;color:#475569;">3. CALCULATION</td></tr>
-          ${story.broughtForward > 0 ? `<tr><td colspan="2" style="padding:2px 8px;font-size:11px;color:#047857;font-weight:700;">Previous in hand ${formatCurrency(story.broughtForward)}</td></tr>` : ''}
-          <tr><td colspan="2" style="padding:2px 8px;font-size:11px;color:#334155;">Advance ${formatCurrency(Math.max(availableThisTrip, laterCovered, Math.round(story.totalAdvance || 0)))}</td></tr>
-          ${reducedPrior > 0 ? `<tr><td colspan="2" style="padding:2px 8px;font-size:11px;font-weight:800;color:#c2410c;">Less: given advance used for ${esc(priorTripLabel)} (-) ${formatCurrency(reducedPrior)}</td></tr>` : ''}
-          <tr><td colspan="2" style="padding:2px 8px;font-size:11px;color:#334155;">Expenses ${formatCurrency(story.totalExpenses)}</td></tr>
-          ${story.inHandUsed > 0 ? `<tr><td colspan="2" style="padding:2px 8px;font-size:11px;font-weight:700;color:#b45309;">Balance in hand used ${formatCurrency(story.inHandUsed)}</td></tr>` : ''}
-          <tr>
-            <td style="padding:4px 8px 8px;font-size:11px;font-weight:800;color:${resultColor};">${resultLabel}</td>
-            <td style="padding:4px 8px 8px;font-size:14px;font-weight:800;color:${resultColor};text-align:right;">${formatCurrency(resultAmt)}</td>
-          </tr>
-          ${settleRows}
-        </table>`;
+        const cashPaid = cashSettles.reduce((s, p) => s + Math.round(p.amount || 0), 0);
+        const mgrAdv = story.advances.filter((a: any) => String(a.given_by_role || '') !== 'Owner');
+        const ownAdv = story.advances.filter((a: any) => String(a.given_by_role || '') === 'Owner');
+        const tripAdvance = story.kind === 'DIRECT_ADVANCE' ? 0 : mgrAdv.reduce((s: number, a: any) => s + Math.round(parseFloat(String(a.amount)) || 0), 0);
+        const ownerOnStory = ownAdv.reduce((s: number, a: any) => s + Math.round(parseFloat(String(a.amount)) || 0), 0);
+        const ownerAdvance = story.kind === 'DIRECT_ADVANCE'
+          ? (String(story.advances[0]?.given_by_role || '') === 'Owner' ? Math.round(story.totalAdvance || 0) : 0)
+          : Math.max(ownerOnStory, allStories.filter((s) => s.kind === 'DIRECT_ADVANCE' && s.advances.some((a: any) => String(a.given_by_role || '') === 'Owner')).reduce((s, x) => s + Math.round(x.totalAdvance || 0), 0));
+        const tripRow = story.kind === 'DIRECT_ADVANCE'
+          ? null
+          : (data.trips_and_expenses || []).find((t: any) => Number(t.trip_id || t.id) === Number(story.tripId));
+        const withTrip = story.kind === 'DIRECT_ADVANCE'
+          ? 0
+          : (tripRow && tripRow.manager_advance != null
+            ? Math.round(parseFloat(String(tripRow.manager_advance)) || 0)
+            : tripAdvance);
+        const withoutTrip = story.kind === 'DIRECT_ADVANCE'
+          ? Math.round(story.totalAdvance || 0)
+          : (tripRow && tripRow.without_trip_advance != null
+            ? Math.max(0, Math.round(parseFloat(String(tripRow.without_trip_advance)) || 0), Math.round(parseFloat(String(tripRow.owner_given || 0)) || 0))
+            : Math.max(withoutTripTotal, ownerAdvance));
+        const mgrName = mgrAdv.map((a: any) => a.given_by_name).filter(Boolean)[0] || '';
+        const ownName = ownAdv.map((a: any) => a.given_by_name).filter(Boolean)[0]
+          || allStories.flatMap((s) => s.advances).find((a: any) => String(a.given_by_role || '') === 'Owner')?.given_by_name
+          || '';
+        const exp = settlementExpenseBreakdown({
+          expense_items: story.tripId ? tripExpenseItemsById.get(Number(story.tripId)) : [],
+          total_expenses: story.totalExpenses,
+        });
+        const leftoverRaw = Math.round(story.inHandUsed || 0);
+        const leftoverUsed = leftoverRaw > 0 && (leftoverRaw === ownerAdvance || leftoverRaw === withoutTrip) ? 0 : leftoverRaw;
+        const expensesAmt = story.kind === 'DIRECT_ADVANCE' ? 0 : Math.round(exp.total || story.totalExpenses || 0);
+        const pool = withTrip + withoutTrip + leftoverUsed;
+        const stmtNeed = tripRow && tripRow.need_to_pay != null
+          ? Math.round(parseFloat(String(tripRow.need_to_pay)) || 0)
+          : Math.max(0, expensesAmt - pool - cashPaid);
+        const stmtInHand = stmtNeed > 0.5
+          ? 0
+          : (tripRow && tripRow.in_hand != null
+            ? Math.round(parseFloat(String(tripRow.in_hand)) || 0)
+            : Math.max(0, pool - expensesAmt));
+        const ownerUsed = Math.min(withoutTrip, Math.max(0, expensesAmt - withTrip));
+        const ownerApplied = leftoverUsed > 0 ? 0 : Math.max(Math.round(br.adjusted || 0), ownerUsed);
+        const laterPaidAmt = Math.round(laterCovered || 0);
+        const laterIsDuplicate = laterPaidAmt > 0 && (
+          Math.abs(laterPaidAmt - ownerApplied) < 1
+          || Math.abs(laterPaidAmt - leftoverUsed) < 1
+          || Math.abs(laterPaidAmt - ownerUsed) < 1
+        );
+        return `<div style="border:1px solid #cbd5e1;margin:10px 0;padding:10px 10px 4px;border-radius:4px;">
+          <div style="font-size:12px;font-weight:800;color:#0f172a;margin-bottom:8px;">${esc(title)}</div>
+          ${infoRows ? `<table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;margin-bottom:10px;">${infoRows}</table>` : ''}
+          ${settlementExpenseTableHtml(story.kind === 'DIRECT_ADVANCE' ? [] : exp.rows, story.kind === 'DIRECT_ADVANCE' ? 0 : exp.total, formatCurrency)}
+          ${settlementAccountStatementHtml({
+            expenses: expensesAmt,
+            withTrip,
+            tripAdvance,
+            ownerAdvance,
+            advanceGivenBy: mgrName,
+            ownerName: ownName,
+            withoutTrip,
+            priorDeficit: reducedPrior,
+            effectiveAdvance: Math.max(0, withTrip - reducedPrior),
+            ownerApplied: ownerApplied > leftoverUsed ? ownerApplied : 0,
+            leftoverUsed,
+            laterAdvanceAdjusted: laterPaidAmt > 0 && !laterIsDuplicate,
+            laterPaid: laterPaidAmt,
+            paidAmount: cashPaid,
+            isCashDisbursement: cashPaid > 0,
+            mode: cashSettles[0]?.by || 'CASH',
+            settledBy: cashSettles[0]?.by || '',
+            needToPay: stmtNeed,
+            inHand: stmtInHand,
+          }, formatCurrency)}
+        </div>`;
       }).join('')
     : `<div style="text-align:center;padding:16px;color:#94a3b8;font-size:12px;">No transactions recorded for this driver.</div>`;
 
@@ -2446,9 +2417,11 @@ export const generateDriverStatementHtml = (data: DriverStatementPdfData): strin
 <html>
 <head>
   <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Driver Statement - ${esc(data.driver.name)}</title>
   <style>
     ${PRINT_BRAND_CSS}
+    ${SETTLEMENT_ACCOUNT_CSS}
     @page { size: A4 portrait; margin: 10mm 12mm; }
     body { font-family: Arial, Helvetica, sans-serif; color: #0f172a; background: #ffffff; padding: 12px; }
     td { vertical-align: top; }
@@ -2653,6 +2626,8 @@ export interface DriverBalanceMasterPdfData {
     to_location?: string;
     total_advance_given: number;
     total_expenses_reported: number;
+    loading_expense?: number;
+    unloading_expense?: number;
     balance_in_hand: number;
     need_to_pay?: number;
     settlement_status?: string;
@@ -2660,6 +2635,8 @@ export interface DriverBalanceMasterPdfData {
   grandTotals: {
     total_advance_given: number;
     total_expenses_reported: number;
+    loading_expense?: number;
+    unloading_expense?: number;
     balance_in_hand: number;
     total_need_to_pay?: number;
   };
@@ -2677,6 +2654,9 @@ export const generateDriverBalanceMasterHtml = (data: DriverBalanceMasterPdfData
     .map((d, idx) => {
       const balInHand = Math.max(0, parseFloat(String(d.balance_in_hand ?? 0)));
       const needToPay = Math.max(0, parseFloat(String(d.need_to_pay ?? 0)));
+      const loading = Math.round(parseFloat(String(d.loading_expense || 0)) || 0);
+      const unloading = Math.round(parseFloat(String(d.unloading_expense || 0)) || 0);
+      const fullExp = Math.round(parseFloat(String(d.total_expenses_reported || 0)) || 0);
 
       return `
         <tr>
@@ -2690,6 +2670,15 @@ export const generateDriverBalanceMasterHtml = (data: DriverBalanceMasterPdfData
           </td>
           <td style="padding: 6px 8px; border: 1px solid #cbd5e1; font-size: 10.5px; color: #475569;">
             ${d.owner_name || '—'}
+          </td>
+          <td style="text-align: right; padding: 6px 8px; border: 1px solid #cbd5e1; font-size: 10.5px; color: #b45309;">
+            ${formatCurrency(loading)}
+          </td>
+          <td style="text-align: right; padding: 6px 8px; border: 1px solid #cbd5e1; font-size: 10.5px; color: #b45309;">
+            ${formatCurrency(unloading)}
+          </td>
+          <td style="text-align: right; padding: 6px 8px; border: 1px solid #cbd5e1; font-weight: 800; font-size: 11px; color: #9a3412;">
+            ${formatCurrency(fullExp)}
           </td>
           <td style="text-align: right; padding: 6px 8px; border: 1px solid #cbd5e1; font-weight: 800; font-size: 11px; color: #15803d; background: #f0fdf4;">
             ${formatCurrency(balInHand)}
@@ -2815,12 +2804,15 @@ export const generateDriverBalanceMasterHtml = (data: DriverBalanceMasterPdfData
   <table class="data-table">
     <thead>
       <tr>
-        <th style="width: 25px; text-align: center;">#</th>
-        <th style="width: 28%;">Driver Name</th>
-        <th style="width: 16%;">Lorry No</th>
-        <th style="width: 20%;">Owner</th>
-        <th style="width: 18%; text-align: right;">Cash in Hand (₹)</th>
-        <th style="width: 18%; text-align: right;">Need to Pay (₹)</th>
+        <th style="width: 22px; text-align: center;">#</th>
+        <th>Driver Name</th>
+        <th>Lorry No</th>
+        <th>Owner</th>
+        <th style="text-align: right;">Loading (₹)</th>
+        <th style="text-align: right;">Unloading (₹)</th>
+        <th style="text-align: right;">Full Expenses (₹)</th>
+        <th style="text-align: right;">Cash in Hand (₹)</th>
+        <th style="text-align: right;">Need to Pay (₹)</th>
       </tr>
     </thead>
     <tbody>
@@ -2829,6 +2821,15 @@ export const generateDriverBalanceMasterHtml = (data: DriverBalanceMasterPdfData
         <td style="text-align: center; padding: 7px 4px; border: 1px solid #cbd5e1;">TOTAL</td>
         <td colspan="3" style="padding: 7px 8px; border: 1px solid #cbd5e1;">
           Summary for ${data.drivers.length} Drivers
+        </td>
+        <td style="text-align: right; padding: 7px 8px; border: 1px solid #cbd5e1; color: #b45309;">
+          ${formatCurrency(data.grandTotals.loading_expense || 0)}
+        </td>
+        <td style="text-align: right; padding: 7px 8px; border: 1px solid #cbd5e1; color: #b45309;">
+          ${formatCurrency(data.grandTotals.unloading_expense || 0)}
+        </td>
+        <td style="text-align: right; padding: 7px 8px; border: 1px solid #cbd5e1; color: #9a3412;">
+          ${formatCurrency(data.grandTotals.total_expenses_reported)}
         </td>
         <td style="text-align: right; padding: 7px 8px; border: 1px solid #cbd5e1; color: #15803d; background: #ecfdf5;">
           ${formatCurrency(data.grandTotals.balance_in_hand)}

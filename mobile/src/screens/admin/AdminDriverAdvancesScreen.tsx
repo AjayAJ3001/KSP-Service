@@ -40,7 +40,9 @@ import {
 import { DriverAdvance, Driver, User, Vehicle, Owner, Trip } from '../../types';
 import { COLORS, SPACING, RADIUS, SHADOWS } from '../../constants/theme';
 import { formatDateDMY } from '../../utils/dateUtils';
-import { printMastersPdf, downloadMastersPdf } from '../../utils/pdfGenerator';
+import { tripStartedByLabel } from '../../utils/tripStartedBy';
+import { shareMastersPdf, downloadMastersPdf } from '../../utils/pdfGenerator';
+import { PdfExportButtons } from '../../components/PdfExportButtons';
 import { DatePickerModal, toDisplayDate } from '../../components/DatePickerModal';
 import { DetailsSheet } from '../../components/DetailsSheet';
 import { ViewChip } from '../../components/ViewChip';
@@ -94,7 +96,7 @@ export const AdminDriverAdvancesScreen: React.FC<{ navigation: any }> = ({ navig
   const [search, setSearch] = useState('');
   const [modeFilter, setModeFilter] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  const [pdfLoading, setPdfLoading] = useState<'print' | 'download' | null>(null);
+  const [pdfLoading, setPdfLoading] = useState<'share' | 'download' | null>(null);
 
   const [fromDate, setFromDate] = useState('');
   const [toDate, setToDate] = useState('');
@@ -289,14 +291,13 @@ export const AdminDriverAdvancesScreen: React.FC<{ navigation: any }> = ({ navig
     };
   };
 
-  const handlePrintPdf = async () => {
+  const handleSharePdf = async () => {
     if (pdfLoading) return;
     try {
-      setPdfLoading('print');
-      await printMastersPdf(await loadDriverAdvancePdfData());
+      setPdfLoading('share');
+      await shareMastersPdf(await loadDriverAdvancePdfData());
     } catch (err: any) {
-      console.error('Print driver advances PDF failed', err);
-      Alert.alert('Print Error', err.message || 'Failed to print driver advances.');
+      Alert.alert('Share Error', err.message || 'Failed to share driver advances.');
     } finally {
       setPdfLoading(null);
     }
@@ -338,37 +339,13 @@ export const AdminDriverAdvancesScreen: React.FC<{ navigation: any }> = ({ navig
             ) : null}
           </View>
 
-          <TouchableOpacity
-            style={[styles.pdfBtn, styles.printBtn, pdfLoading === 'print' && { opacity: 0.7 }]}
-            onPress={handlePrintPdf}
-            disabled={pdfLoading !== null || isLoading}
-            activeOpacity={0.8}
-          >
-            {pdfLoading === 'print' ? (
-              <ActivityIndicator size="small" color={COLORS.white} />
-            ) : (
-              <>
-                <Printer size={13} color={COLORS.white} />
-                <Text style={styles.pdfBtnText}>Print</Text>
-              </>
-            )}
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={[styles.pdfBtn, styles.downloadBtn, pdfLoading === 'download' && { opacity: 0.7 }]}
-            onPress={handleDownloadPdf}
-            disabled={pdfLoading !== null || isLoading}
-            activeOpacity={0.8}
-          >
-            {pdfLoading === 'download' ? (
-              <ActivityIndicator size="small" color={COLORS.white} />
-            ) : (
-              <>
-                <Download size={13} color={COLORS.white} />
-                <Text style={styles.pdfBtnText}>PDF</Text>
-              </>
-            )}
-          </TouchableOpacity>
+          <PdfExportButtons
+            compact
+            loading={pdfLoading}
+            disabled={isLoading}
+            onShare={handleSharePdf}
+            onDownload={handleDownloadPdf}
+          />
 
 
         </View>
@@ -572,9 +549,19 @@ export const AdminDriverAdvancesScreen: React.FC<{ navigation: any }> = ({ navig
                 </View>
                 <View style={{ alignItems: 'flex-end' }}>
                   <Text style={styles.amountText}>{formatCurrency(adv.amount)}</Text>
+                  <View style={[styles.modeBadge, { backgroundColor: adv.is_without_trip || !adv.trip_id ? '#fff7ed' : '#eff6ff' }]}>
+                    <Text style={[styles.modeText, { color: adv.is_without_trip || !adv.trip_id ? '#c2410c' : '#1d4ed8' }]}>
+                      {adv.is_without_trip || !adv.trip_id ? 'Without trip' : 'With trip'}
+                    </Text>
+                  </View>
                   <View style={styles.modeBadge}>
                     <Text style={styles.modeText}>{adv.payment_mode || 'CASH'}</Text>
                   </View>
+                  {Number(adv.settlement_paid_amount || 0) > 0.5 && String(adv.settlement_status || '').toUpperCase() === 'SETTLED' ? (
+                    <Text style={{ fontSize: 10, fontWeight: '800', color: '#047857', marginTop: 4 }}>
+                      Settlement paid {formatCurrency(Number(adv.settlement_paid_amount || 0))}
+                    </Text>
+                  ) : null}
                 </View>
               </View>
 
@@ -627,6 +614,11 @@ export const AdminDriverAdvancesScreen: React.FC<{ navigation: any }> = ({ navig
                   {(adv.from_location || adv.to_location) ? (
                     <Text style={styles.tripRouteText} numberOfLines={1}>
                       📍 Route: {adv.from_location || '—'} → {adv.to_location || '—'}
+                    </Text>
+                  ) : null}
+                  {tripStartedByLabel((adv as any).trip_started_by_name, (adv as any).trip_started_by_role) ? (
+                    <Text style={styles.tripRouteText} numberOfLines={1}>
+                      Started by {tripStartedByLabel((adv as any).trip_started_by_name, (adv as any).trip_started_by_role)}
                     </Text>
                   ) : null}
 

@@ -28,7 +28,8 @@ import {
   Download,
   RotateCcw,
 } from 'lucide-react-native';
-import { printMastersPdf, downloadMastersPdf } from '../../utils/pdfGenerator';
+import { shareMastersPdf, downloadMastersPdf } from '../../utils/pdfGenerator';
+import { PdfExportButtons } from '../../components/PdfExportButtons';
 import { adminUserService } from '../../services/adminService';
 import { User } from '../../types';
 import { useAuth } from '../../context/AuthContext';
@@ -45,7 +46,7 @@ export const AdminUsersScreen: React.FC<{ navigation: any }> = ({ navigation }) 
   const [roleFilter, setRoleFilter] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  const [pdfLoading, setPdfLoading] = useState<'print' | 'download' | null>(null);
+  const [pdfLoading, setPdfLoading] = useState<'share' | 'download' | null>(null);
 
   const hasActiveFilters = Boolean(search || roleFilter !== '');
 
@@ -211,17 +212,16 @@ export const AdminUsersScreen: React.FC<{ navigation: any }> = ({ navigation }) 
     setRole('MANAGER');
   };
 
-  const handlePrintPdf = async () => {
+  const handleSharePdf = async () => {
     try {
-      setPdfLoading('print');
-      await printMastersPdf({
+      setPdfLoading('share');
+      await shareMastersPdf({
         tab: 'USERS',
         tabLabel: 'User Accounts Directory',
         users,
       });
     } catch (err: any) {
-      console.error('Print users PDF failed', err);
-      Alert.alert('Print Error', err.message || 'Failed to print users directory.');
+      Alert.alert('Share Error', err.message || 'Failed to share users directory.');
     } finally {
       setPdfLoading(null);
     }
@@ -266,37 +266,13 @@ export const AdminUsersScreen: React.FC<{ navigation: any }> = ({ navigation }) 
             ) : null}
           </View>
 
-          <TouchableOpacity
-            style={[styles.pdfBtn, styles.printBtn, pdfLoading === 'print' && { opacity: 0.7 }]}
-            onPress={handlePrintPdf}
-            disabled={pdfLoading !== null || isLoading}
-            activeOpacity={0.8}
-          >
-            {pdfLoading === 'print' ? (
-              <ActivityIndicator size="small" color={COLORS.white} />
-            ) : (
-              <>
-                <Printer size={13} color={COLORS.white} />
-                <Text style={styles.pdfBtnText}>Print</Text>
-              </>
-            )}
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={[styles.pdfBtn, styles.downloadBtn, pdfLoading === 'download' && { opacity: 0.7 }]}
-            onPress={handleDownloadPdf}
-            disabled={pdfLoading !== null || isLoading}
-            activeOpacity={0.8}
-          >
-            {pdfLoading === 'download' ? (
-              <ActivityIndicator size="small" color={COLORS.white} />
-            ) : (
-              <>
-                <Download size={13} color={COLORS.white} />
-                <Text style={styles.pdfBtnText}>PDF</Text>
-              </>
-            )}
-          </TouchableOpacity>
+          <PdfExportButtons
+            compact
+            loading={pdfLoading}
+            disabled={isLoading}
+            onShare={handleSharePdf}
+            onDownload={handleDownloadPdf}
+          />
 
           {!isOwnerUser && (
           <TouchableOpacity

@@ -239,6 +239,17 @@ export const attachAdvanceBreakdown = async (rows: any[]): Promise<any[]> => {
   for (const row of unmatchedAdvRes.rows) {
     unmatchedByDriver.set(Number(row.driver_id), numAmt(row.amount));
   }
+  const ownerUnmatchedByDriver = new Map<number, number>();
+  const ownerUnmatchedRes = await query(
+    `SELECT driver_id, COALESCE(SUM(amount), 0) as amount
+     FROM owner_advances
+     WHERE driver_id = ANY($1::int[])
+     GROUP BY driver_id`,
+    [driverIds]
+  );
+  for (const row of ownerUnmatchedRes.rows) {
+    ownerUnmatchedByDriver.set(Number(row.driver_id), numAmt(row.amount));
+  }
 
   const ownerRes = await query(
     `SELECT oa.driver_id, oa.amount, oa.advance_date, oa.created_at, oa.owner_id, o.name as owner_name
@@ -415,13 +426,31 @@ export const attachAdvanceBreakdown = async (rows: any[]): Promise<any[]> => {
       ownerNames: [] as string[],
     };
     const { ownerNames, expenses: _expenses, ...rest } = rec;
+    let expenseItems = row.expense_items;
+    if (typeof expenseItems === 'string') {
+      try { expenseItems = JSON.parse(expenseItems); } catch { expenseItems = []; }
+    }
+    if (!Array.isArray(expenseItems)) expenseItems = [];
+    const payMode = String(row.payment_mode || row.settlement_payment_mode || '').toUpperCase();
+    const cashPaid = payMode === 'ADJUSTED_ADVANCE'
+      ? 0
+      : Math.round(numAmt(row.paid_amount ?? row.settlement_paid_amount));
+    const settled = String(row.settlement_status || '').toUpperCase() === 'SETTLED';
+    const rawNeed = Math.round(rec.need_to_pay);
+    const remainingNeed = settled ? 0 : Math.max(0, rawNeed - cashPaid);
     return {
       ...row,
+      expense_items: expenseItems,
       ...rest,
       owner_given: rec.owner_given,
       advance_given_total: Math.round(rec.manager_advance + rec.owner_given),
       advance_owner_name: ownerNames.filter(Boolean).join(' + '),
-      without_trip_advance: Math.round(unmatchedByDriver.get(Number(row.driver_id)) || 0),
+      without_trip_advance: Math.round(
+        (unmatchedByDriver.get(Number(row.driver_id)) || 0)
+        + (ownerUnmatchedByDriver.get(Number(row.driver_id)) || 0)
+      ),
+      need_to_pay: remainingNeed,
+      in_hand: remainingNeed > 0 ? 0 : Math.round(rec.in_hand),
     };
   });
 
@@ -536,6 +565,8 @@ export const getSettlements = asyncHandler(async (req: AuthRequest, res: Respons
             d.name as driver_name, d.mobile_number as driver_mobile,
             p.name as party_name, r.from_location, r.to_location,
             u.name as settled_by_name,
+            cu.name as trip_started_by_name,
+            cu.role as trip_started_by_role,
             (
               SELECT COALESCE(
                 json_agg(
@@ -550,6 +581,8 @@ export const getSettlements = asyncHandler(async (req: AuthRequest, res: Respons
               FROM driver_expenses de
               WHERE de.trip_id = t.id
             ) as expense_items,
+            COALESCE((SELECT SUM(de.amount) FROM driver_expenses de WHERE de.trip_id = t.id AND UPPER(TRIM(de.expense_type)) = 'LOADING'), 0) as loading_expense,
+            COALESCE((SELECT SUM(de.amount) FROM driver_expenses de WHERE de.trip_id = t.id AND UPPER(TRIM(de.expense_type)) = 'UNLOADING'), 0) as unloading_expense,
             (
               COALESCE((SELECT SUM(da.amount) FROM driver_advances da WHERE da.driver_id = d.id), 0) +
               COALESCE((SELECT SUM(oa.amount) FROM owner_advances oa WHERE oa.driver_id = d.id), 0) +
@@ -572,6 +605,7 @@ export const getSettlements = asyncHandler(async (req: AuthRequest, res: Respons
      JOIN parties p ON t.party_id = p.id
      JOIN routes r ON t.route_id = r.id
      LEFT JOIN users u ON s.settled_by = u.id
+     LEFT JOIN users cu ON t.created_by = cu.id
      WHERE ${where}
      ORDER BY s.created_at DESC LIMIT $${paramIdx} OFFSET $${paramIdx + 1}`,
     [...params, limit, offset]
@@ -603,6 +637,8 @@ export const getSettlementByTripId = asyncHandler(async (req: AuthRequest, res: 
             d.name as driver_name, d.mobile_number as driver_mobile,
             p.name as party_name, r.from_location, r.to_location,
             u.name as settled_by_name,
+            cu.name as trip_started_by_name,
+            cu.role as trip_started_by_role,
             (
               COALESCE((SELECT SUM(da.amount) FROM driver_advances da WHERE da.driver_id = d.id), 0) +
               COALESCE((SELECT SUM(oa.amount) FROM owner_advances oa WHERE oa.driver_id = d.id), 0) +
@@ -617,8 +653,12 @@ export const getSettlementByTripId = asyncHandler(async (req: AuthRequest, res: 
                 WHERE tr.driver_id = d.id AND tr.status NOT IN ('CANCELLED', 'DRAFT')
               ), 0)
             ) as driver_current_balance,
-            (SELECT json_agg(json_build_object('expense_type', de.expense_type, 'description', de.description, 'amount', de.amount))
-             FROM driver_expenses de WHERE de.trip_id = t.id) as expense_items,
+            COALESCE((
+              SELECT json_agg(json_build_object('expense_type', de.expense_type, 'description', de.description, 'amount', de.amount) ORDER BY de.id ASC)
+              FROM driver_expenses de WHERE de.trip_id = t.id
+            ), '[]'::json) as expense_items,
+            COALESCE((SELECT SUM(de.amount) FROM driver_expenses de WHERE de.trip_id = t.id AND UPPER(TRIM(de.expense_type)) = 'LOADING'), 0) as loading_expense,
+            COALESCE((SELECT SUM(de.amount) FROM driver_expenses de WHERE de.trip_id = t.id AND UPPER(TRIM(de.expense_type)) = 'UNLOADING'), 0) as unloading_expense,
             (SELECT json_agg(json_build_object('id', dsp.id, 'amount', dsp.amount, 'payment_mode', dsp.payment_mode, 'payment_date', dsp.payment_date, 'reference_no', dsp.reference_no, 'notes', dsp.notes, 'created_at', dsp.created_at, 'created_by_name', pu.name))
              FROM driver_settlement_payments dsp
              LEFT JOIN users pu ON pu.id = dsp.created_by
@@ -631,6 +671,7 @@ export const getSettlementByTripId = asyncHandler(async (req: AuthRequest, res: 
      JOIN parties p ON t.party_id = p.id
      JOIN routes r ON t.route_id = r.id
      LEFT JOIN users u ON s.settled_by = u.id
+     LEFT JOIN users cu ON t.created_by = cu.id
      WHERE s.trip_id = $1`,
     [trip_id]
   );
@@ -662,6 +703,8 @@ export const getSettlementById = asyncHandler(async (req: AuthRequest, res: Resp
             d.name as driver_name, d.mobile_number as driver_mobile,
             p.name as party_name, r.from_location, r.to_location,
             u.name as settled_by_name,
+            cu.name as trip_started_by_name,
+            cu.role as trip_started_by_role,
             (
               COALESCE((SELECT SUM(da.amount) FROM driver_advances da WHERE da.driver_id = d.id), 0) +
               COALESCE((SELECT SUM(oa.amount) FROM owner_advances oa WHERE oa.driver_id = d.id), 0) +
@@ -676,8 +719,12 @@ export const getSettlementById = asyncHandler(async (req: AuthRequest, res: Resp
                 WHERE tr.driver_id = d.id AND tr.status NOT IN ('CANCELLED', 'DRAFT')
               ), 0)
             ) as driver_current_balance,
-            (SELECT json_agg(json_build_object('expense_type', de.expense_type, 'description', de.description, 'amount', de.amount))
-             FROM driver_expenses de WHERE de.trip_id = t.id) as expense_items,
+            COALESCE((
+              SELECT json_agg(json_build_object('expense_type', de.expense_type, 'description', de.description, 'amount', de.amount) ORDER BY de.id ASC)
+              FROM driver_expenses de WHERE de.trip_id = t.id
+            ), '[]'::json) as expense_items,
+            COALESCE((SELECT SUM(de.amount) FROM driver_expenses de WHERE de.trip_id = t.id AND UPPER(TRIM(de.expense_type)) = 'LOADING'), 0) as loading_expense,
+            COALESCE((SELECT SUM(de.amount) FROM driver_expenses de WHERE de.trip_id = t.id AND UPPER(TRIM(de.expense_type)) = 'UNLOADING'), 0) as unloading_expense,
             (SELECT json_agg(json_build_object('id', dsp.id, 'amount', dsp.amount, 'payment_mode', dsp.payment_mode, 'payment_date', dsp.payment_date, 'reference_no', dsp.reference_no, 'notes', dsp.notes, 'created_at', dsp.created_at, 'created_by_name', pu.name))
              FROM driver_settlement_payments dsp
              LEFT JOIN users pu ON pu.id = dsp.created_by
@@ -690,6 +737,7 @@ export const getSettlementById = asyncHandler(async (req: AuthRequest, res: Resp
      JOIN parties p ON t.party_id = p.id
      JOIN routes r ON t.route_id = r.id
      LEFT JOIN users u ON s.settled_by = u.id
+     LEFT JOIN users cu ON t.created_by = cu.id
      WHERE s.id = $1`,
     [id]
   );

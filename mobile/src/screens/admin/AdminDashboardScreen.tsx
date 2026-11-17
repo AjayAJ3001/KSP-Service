@@ -47,6 +47,7 @@ import { adminDashboardService } from '../../services/adminService';
 import { useAuth } from '../../context/AuthContext';
 import { DashboardData, Trip } from '../../types';
 import { COLORS, SPACING, RADIUS, SHADOWS } from '../../constants/theme';
+import { tripStartedByLabel } from '../../utils/tripStartedBy';
 import { formatDateDMY } from '../../utils/dateUtils';
 import { ViewChip } from '../../components/ViewChip';
 
@@ -54,7 +55,7 @@ export const AdminDashboardScreen: React.FC<{ navigation: any }> = ({ navigation
   const { user } = useAuth();
   const isFullAdmin = user?.role === 'ADMIN';
   const isOwnerUser = user?.role === 'OWNER';
-  const isManagerUser = user?.role === 'MANAGER';
+  const isManagerUser = user?.role === 'MANAGER' || user?.role === 'TRANSPORT_USER';
 
   useLayoutEffect(() => {
     navigation.setOptions({
@@ -65,6 +66,7 @@ export const AdminDashboardScreen: React.FC<{ navigation: any }> = ({ navigation
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [selectedTrip, setSelectedTrip] = useState<Trip | null>(null);
+  const [managerWallet, setManagerWallet] = useState(0);
 
   // ── Animation values ───────────────────────────────────────
   const bannerFade = useRef(new Animated.Value(0)).current;
@@ -114,6 +116,9 @@ export const AdminDashboardScreen: React.FC<{ navigation: any }> = ({ navigation
     try {
       const res = await adminDashboardService.getAdminDashboard();
       setData(res.data);
+      if (user?.role === 'MANAGER' || user?.role === 'TRANSPORT_USER') {
+        setManagerWallet(Math.round(Number(res.data?.manager_available_balance || 0)));
+      }
     } catch (err: any) {
       console.error('Failed to load admin dashboard', err);
       Alert.alert('Dashboard Error', err.message || 'Could not fetch admin statistics.');
@@ -121,7 +126,7 @@ export const AdminDashboardScreen: React.FC<{ navigation: any }> = ({ navigation
       setIsLoading(false);
       setIsRefreshing(false);
     }
-  }, []);
+  }, [user?.role]);
 
   useEffect(() => {
     loadDashboard();
@@ -175,7 +180,7 @@ export const AdminDashboardScreen: React.FC<{ navigation: any }> = ({ navigation
               {isOwnerUser
                 ? 'Your trucks, advances, settlements & masters'
                 : isManagerUser
-                  ? 'Trips, settlements, driver advance balance & masters'
+                  ? 'Give driver advance from owner balance, or start trip without advance'
                   : 'Full access to operations, finances & masters'}
             </Text>
           </View>
@@ -247,6 +252,21 @@ export const AdminDashboardScreen: React.FC<{ navigation: any }> = ({ navigation
         </View>
       )}
 
+      {isManagerUser ? (
+      <View style={styles.givenAdvanceCard}>
+        <View style={styles.givenAdvanceHeader}>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.givenAdvanceTitle}>Balance from owner</Text>
+            <Text style={styles.givenAdvanceSub}>
+              Give this amount to drivers (with trip or without trip). You can still start a trip with ₹0.
+            </Text>
+          </View>
+        </View>
+        <Text style={[styles.financeMainAmt, { fontSize: 26, color: '#9a3412', marginTop: 4 }]}>
+          {formatCurrency(managerWallet)}
+        </Text>
+      </View>
+      ) : (
       <TouchableOpacity
         style={styles.givenAdvanceCard}
         onPress={() => navigation.navigate('AdminOwnerAdvances')}
@@ -271,6 +291,7 @@ export const AdminDashboardScreen: React.FC<{ navigation: any }> = ({ navigation
           <ChevronRight size={16} color="#c2410c" />
         </View>
       </TouchableOpacity>
+      )}
 
       {/* ── Animated KPI Stats Grid ── */}
       <Animated.View style={[styles.kpiGrid, { opacity: kpiFade, transform: [{ scale: kpiScale }] }]}>
@@ -336,13 +357,15 @@ export const AdminDashboardScreen: React.FC<{ navigation: any }> = ({ navigation
         <Text style={styles.sectionHeading}>Operations</Text>
       </View>
       <View style={styles.navGrid}>
-        {user?.role === 'ADMIN' || user?.role === 'OWNER' ? (
+        {isManagerUser || user?.role === 'ADMIN' || user?.role === 'OWNER' ? (
           <TouchableOpacity style={styles.navItem} onPress={() => navigation.navigate('GiveTruckAdvance')} activeOpacity={0.7}>
             <View style={[styles.navIconBox, { backgroundColor: '#eef2ff' }]}>
               <PlusCircle size={20} color="#4338ca" />
             </View>
             <Text style={styles.navItemTitle}>New Trip Entry</Text>
-            <Text style={styles.navItemSub}>Give advance, then start trip</Text>
+            <Text style={styles.navItemSub}>
+              {isManagerUser ? 'Give owner-balance advance, then start trip' : 'Give advance, then start trip'}
+            </Text>
           </TouchableOpacity>
         ) : null}
         <TouchableOpacity style={styles.navItem} onPress={() => navigation.navigate('AdminTrips')} activeOpacity={0.7}>
@@ -361,6 +384,7 @@ export const AdminDashboardScreen: React.FC<{ navigation: any }> = ({ navigation
           <Text style={styles.navItemSub}>Collect freight</Text>
         </TouchableOpacity>
 
+        {!isManagerUser ? (
         <TouchableOpacity style={styles.navItem} onPress={() => navigation.navigate('AdminOwnerAdvances')} activeOpacity={0.7}>
           <View style={[styles.navIconBox, { backgroundColor: '#fff7ed' }]}>
             <HandCoins size={20} color="#b45309" />
@@ -368,6 +392,7 @@ export const AdminDashboardScreen: React.FC<{ navigation: any }> = ({ navigation
           <Text style={styles.navItemTitle}>Owner Advances</Text>
           <Text style={styles.navItemSub}>Advance given details</Text>
         </TouchableOpacity>
+        ) : null}
 
         <TouchableOpacity style={styles.navItem} onPress={() => navigation.navigate('AdminManagerLedger')} activeOpacity={0.7}>
           <View style={[styles.navIconBox, { backgroundColor: '#eef2ff' }]}>
@@ -406,7 +431,9 @@ export const AdminDashboardScreen: React.FC<{ navigation: any }> = ({ navigation
         </TouchableOpacity>
       </View>
 
-      {/* Master Data Section - Matching Admin Panel */}
+      {/* Master Data Section - Matching Admin Panel (hidden for managers) */}
+      {!isManagerUser && (
+      <>
       <View style={styles.sectionHeadingRow}>
         <Text style={styles.sectionHeading}>Master Data</Text>
         <Text style={styles.sectionHeadingBadge}>Web Admin Parity</Text>
@@ -545,6 +572,8 @@ export const AdminDashboardScreen: React.FC<{ navigation: any }> = ({ navigation
           <Text style={styles.navItemSub}>Route Freight</Text>
         </TouchableOpacity>
       </View>
+      </>
+      )}
 
       {/* Analytics & Security Section */}
       <View style={styles.sectionHeadingRow}>
@@ -614,6 +643,11 @@ export const AdminDashboardScreen: React.FC<{ navigation: any }> = ({ navigation
                 <Text style={styles.tripRoute}>
                   {trip.from_location || 'Start'} → {trip.to_location || 'Dest'}
                 </Text>
+                {tripStartedByLabel(trip.created_by_name, trip.created_by_role) ? (
+                  <Text style={styles.tripRoute}>
+                    Started by {tripStartedByLabel(trip.created_by_name, trip.created_by_role)}
+                  </Text>
+                ) : null}
               </View>
 
               {/* Goods Weight Badge */}
@@ -714,6 +748,14 @@ export const AdminDashboardScreen: React.FC<{ navigation: any }> = ({ navigation
                       <View style={styles.detailRow}>
                         <Text style={styles.detailKey}>Driver</Text>
                         <Text style={styles.detailVal}>{selectedTrip.driver_name}</Text>
+                      </View>
+                    ) : null}
+                    {tripStartedByLabel(selectedTrip.created_by_name, selectedTrip.created_by_role) ? (
+                      <View style={styles.detailRow}>
+                        <Text style={styles.detailKey}>Trip Started By</Text>
+                        <Text style={styles.detailVal}>
+                          {tripStartedByLabel(selectedTrip.created_by_name, selectedTrip.created_by_role)}
+                        </Text>
                       </View>
                     ) : null}
                     <View style={styles.detailRow}>

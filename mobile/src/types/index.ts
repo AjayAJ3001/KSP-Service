@@ -255,6 +255,8 @@ export interface Settlement {
   trip_id: number;
   total_freight: number;
   total_expenses: number;
+  loading_expense?: number;
+  unloading_expense?: number;
   advance_paid: number;
   initial_trip_advance?: number;
   additional_advance_paid?: number;
@@ -286,6 +288,8 @@ export interface Settlement {
   prior_deficit_deduction?: number;
   reference_no?: string;
   settled_by_name?: string;
+  trip_started_by_name?: string;
+  trip_started_by_role?: string;
   advance_given_by_name?: string;
   advance_given_by_role?: string;
   created_at: string;
@@ -318,6 +322,10 @@ export interface DashboardData {
   };
   recent_trips: Trip[];
   compliance_alerts?: ComplianceAlertItem[];
+  owner_advance_credit?: number;
+  owner_advance_entries?: number;
+  truck_advance_used?: number;
+  manager_available_balance?: number;
 }
 
 export interface AuditLog {
@@ -457,6 +465,10 @@ export interface DriverAdvance {
   unit_abbreviation?: string;
   trip_advance_paid?: number | string;
   trip_driver_expenses?: number | string;
+  is_without_trip?: boolean;
+  settlement_paid_amount?: number | string;
+  settlement_status?: string;
+  given_by_role?: string;
   // Live balance & source
   driver_balance_in_hand?: number | string;
   source_type?: 'DIRECT_DRIVER_ADVANCE' | 'TRIP_TRUCK_ADVANCE' | string;

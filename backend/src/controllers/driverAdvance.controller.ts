@@ -4,7 +4,8 @@ import { AppError, asyncHandler } from '../middleware/errorHandler';
 import { AuthRequest } from '../middleware/auth';
 import { createAuditLog } from '../utils/auditLog';
 import { applyOwnerScope, assertOwnerOwner, assertOwnerVehicle, assertTripInOwnerScope, hasFleetWideAccess, isFleetScoped, isLinkedManager, isOwnerUser, sqlIsCompanyOperator, sqlSelfOrCompany } from '../utils/ownerScope';
-import { reconcileDriverPendingSettlements } from './settlement.controller';
+import { attachAdvanceBreakdown, reconcileDriverPendingSettlements } from './settlement.controller';
+import { assertManagerCanDisburse } from '../utils/managerWallet';
 
 // Helper to resolve advance date preserving local time
 const resolveAdvanceDate = (dateVal?: string | Date | null): string => {
@@ -252,10 +253,12 @@ export const getDriverAdvances = asyncHandler(async (req: AuthRequest, res: Resp
               WHEN da.trip_id IS NOT NULL THEN 'Trip #' || da.trip_id || ' Advance'
               ELSE 'Without Trip · ' || COALESCE(da.notes, 'Direct Advance')
             END as given_for,
-            -- Trip details for which the driver goes
-            COALESCE(tr.id, d_lt.id) as trip_id,
+            -- Keep unmatched advances unlinked. Latest-trip join is display context only.
+            da.trip_id as trip_id,
             COALESCE(tr.trip_date, d_lt.trip_date) as trip_date,
             COALESCE(tr.status, d_lt.status) as trip_status,
+            COALESCE(tr_starter.name, d_lt_starter.name) as trip_started_by_name,
+            COALESCE(tr_starter.role, d_lt_starter.role) as trip_started_by_role,
             COALESCE(p.name, d_lt_p.name) as party_name,
             COALESCE(r.from_location, d_lt_r.from_location) as from_location,
             COALESCE(r.to_location, d_lt_r.to_location) as to_location,
@@ -312,6 +315,7 @@ export const getDriverAdvances = asyncHandler(async (req: AuthRequest, res: Resp
      LEFT JOIN vehicles v ON da.vehicle_id = v.id
      LEFT JOIN users cb ON da.created_by = cb.id
      LEFT JOIN trips tr ON da.trip_id = tr.id
+     LEFT JOIN users tr_starter ON tr.created_by = tr_starter.id
      LEFT JOIN vehicles tr_v ON tr.vehicle_id = tr_v.id
      LEFT JOIN parties p ON tr.party_id = p.id
      LEFT JOIN routes r ON tr.route_id = r.id
@@ -323,6 +327,7 @@ export const getDriverAdvances = asyncHandler(async (req: AuthRequest, res: Resp
        ORDER BY t.trip_date DESC, t.id DESC
        LIMIT 1
      ) d_lt ON da.trip_id IS NULL
+     LEFT JOIN users d_lt_starter ON d_lt.created_by = d_lt_starter.id
      LEFT JOIN vehicles d_lt_v ON d_lt.vehicle_id = d_lt_v.id
      LEFT JOIN parties d_lt_p ON d_lt.party_id = d_lt_p.id
      LEFT JOIN routes d_lt_r ON d_lt.route_id = d_lt_r.id
@@ -675,7 +680,7 @@ export const getDriverAdvancesSummary = asyncHandler(async (req: AuthRequest, re
     ),
     direct_advance_rows AS (
       SELECT 
-        'DIRECT_' || da.id::text as row_key,
+        'DIRECT_' || da.src || '_' || da.id::text as row_key,
         NULL::integer as trip_id,
         da.advance_date as trip_date,
         'DIRECT_ADVANCE' as trip_status,
@@ -722,7 +727,15 @@ export const getDriverAdvancesSummary = asyncHandler(async (req: AuthRequest, re
         NULL::varchar as settlement_status,
         false as is_active_trip,
         da.created_at as sort_time
-      FROM driver_advances da
+      FROM (
+        SELECT id, driver_id, vehicle_id, amount, advance_date, created_at, 'DA' as src
+        FROM driver_advances
+        WHERE trip_id IS NULL
+        UNION ALL
+        SELECT id, driver_id, vehicle_id, amount, advance_date, created_at, 'TA' as src
+        FROM truck_advances
+        WHERE driver_id IS NOT NULL AND trip_id IS NULL
+      ) da
       JOIN drivers d ON da.driver_id = d.id
       LEFT JOIN vehicles v ON da.vehicle_id = v.id
       LEFT JOIN owners o ON v.owner_id = o.id
@@ -735,7 +748,7 @@ export const getDriverAdvancesSummary = asyncHandler(async (req: AuthRequest, re
       LEFT JOIN vehicles lt_v ON lt.vehicle_id = lt_v.id
       LEFT JOIN owners lt_o ON lt_v.owner_id = lt_o.id
       LEFT JOIN driver_overall d_ov ON d_ov.driver_id = d.id
-      WHERE da.trip_id IS NULL AND ${driverWhere} AND ${directAdvanceWhere}
+      WHERE ${driverWhere} AND ${directAdvanceWhere}
     ),
     owner_direct_advance_rows AS (
       SELECT 
@@ -944,7 +957,7 @@ export const getDriverAdvancesSummary = asyncHandler(async (req: AuthRequest, re
       manager_advance_given:     Math.round(sorted.filter((r: any) => !r.row_key?.startsWith('OWNER_DIRECT_')).reduce((s: number, r: any) => s + (parseFloat(r.total_advance_given) || 0), 0) * 100) / 100,
       owner_advance_given:       Math.round(sorted.filter((r: any) => r.row_key?.startsWith('OWNER_DIRECT_')).reduce((s: number, r: any) => s + (parseFloat(r.total_advance_given) || 0), 0) * 100) / 100,
       trip_advance_given:        Math.round(sorted.filter((r: any) => r.row_key?.startsWith('TRIP_')).reduce((s: number, r: any) => s + (parseFloat(r.total_advance_given) || 0), 0) * 100) / 100,
-      without_trip_advance_given:Math.round(sorted.filter((r: any) => r.row_key?.startsWith('DIRECT_')).reduce((s: number, r: any) => s + (parseFloat(r.total_advance_given) || 0), 0) * 100) / 100,
+      without_trip_advance_given:Math.round(sorted.filter((r: any) => r.row_key?.startsWith('DIRECT_') || r.row_key?.startsWith('OWNER_DIRECT_')).reduce((s: number, r: any) => s + (parseFloat(r.total_advance_given) || 0), 0) * 100) / 100,
       advance_count:             totalAdvCount,
       total_trip_advance_used:   Math.round(totalTripAdvUsed * 100) / 100,
       trip_count:                totalTripCount,
@@ -1080,6 +1093,7 @@ export const createDriverAdvance = asyncHandler(async (req: AuthRequest, res: Re
   if (isNaN(numAmount) || numAmount <= 0) {
     throw new AppError('Advance amount must be greater than 0.', 400);
   }
+  await assertManagerCanDisburse(req, numAmount);
 
   // Verify driver exists and is active
   const driverCheck = await query(`SELECT id, name FROM drivers WHERE id = $1 AND status = 'ACTIVE'`, [driver_id]);
@@ -1311,7 +1325,6 @@ export const getDriverStatement = asyncHandler(async (req: AuthRequest, res: Res
     ? `AND (
         EXISTS (SELECT 1 FROM vehicles dav WHERE dav.id = da.vehicle_id AND dav.owner_id = ANY($2::int[]))
         OR EXISTS (SELECT 1 FROM trips tda JOIN vehicles vda ON tda.vehicle_id = vda.id WHERE tda.id = da.trip_id AND vda.owner_id = ANY($2::int[]))
-        OR da.direct_owner_id = ANY($2::int[])
       )`
     : linked
       ? `AND (da.manager_id = $2::int OR EXISTS (SELECT 1 FROM vehicles dav WHERE dav.id = da.vehicle_id AND dav.owner_id = ANY($3::int[])))`
@@ -1484,6 +1497,8 @@ export const getDriverStatement = asyncHandler(async (req: AuthRequest, res: Res
        v.lorry_number,
        o.name as owner_name,
        mgr.name as manager_name,
+       mgr.name as trip_started_by_name,
+       mgr.role as trip_started_by_role,
        p.name as party_name,
        r.from_location,
        r.to_location,
@@ -1523,6 +1538,15 @@ export const getDriverStatement = asyncHandler(async (req: AuthRequest, res: Res
     tripStatementParams
   );
 
+  const tripsWithBreakdown = await attachAdvanceBreakdown(
+    tripsRes.rows.map((r: any) => ({
+      ...r,
+      driver_id: driver.id,
+      id: r.trip_id,
+      trip_id: r.trip_id,
+    }))
+  );
+
   // 3. Driver settlement payments
   const settlementPaymentsRes = await query(
     `SELECT 
@@ -1554,7 +1578,7 @@ export const getDriverStatement = asyncHandler(async (req: AuthRequest, res: Res
 
   // Totals
   const totalAdvanceGiven = advancesRes.rows.reduce((sum, r) => sum + parseFloat(r.amount || 0), 0);
-  const totalExpenses = tripsRes.rows.reduce((sum, r) => sum + parseFloat(r.total_expenses || 0), 0);
+  const totalExpenses = tripsWithBreakdown.reduce((sum, r) => sum + parseFloat(r.total_expenses || 0), 0);
   const totalSettledPaid = settlementPaymentsRes.rows
     .filter((r) => r.payment_mode !== 'ADJUSTED_ADVANCE')
     .reduce((sum, r) => sum + parseFloat(r.amount || 0), 0);
@@ -1569,18 +1593,12 @@ export const getDriverStatement = asyncHandler(async (req: AuthRequest, res: Res
     .filter((r) => r.given_by_role === 'OWNER' || r.source_type === 'OWNER_ADVANCE')
     .reduce((sum, r) => sum + parseFloat(r.amount || 0), 0);
 
-  // Advance breakdown by purpose (Trip Linked vs Without Trip)
+  // Same split as settlement: with-trip = linked trip_id; without-trip = unmatched (incl. truck).
   const tripAdvanceTotal = advancesRes.rows
-    .filter((r) => r.trip_id != null || r.source_type === 'TRIP_ADVANCE' || r.source_type === 'TRUCK_ADVANCE')
+    .filter((r) => r.trip_id != null || r.source_type === 'TRIP_ADVANCE')
     .reduce((sum, r) => sum + parseFloat(r.amount || 0), 0);
   const withoutTripAdvanceTotal = advancesRes.rows
-    .filter((r) =>
-      r.trip_id == null &&
-      r.source_type !== 'TRIP_ADVANCE' &&
-      r.source_type !== 'TRUCK_ADVANCE' &&
-      r.source_type !== 'OWNER_ADVANCE' &&
-      r.given_by_role !== 'OWNER'
-    )
+    .filter((r) => r.trip_id == null && r.source_type !== 'TRIP_ADVANCE')
     .reduce((sum, r) => sum + parseFloat(r.amount || 0), 0);
 
   const truckAdvanceTotal = advancesRes.rows
@@ -1626,7 +1644,7 @@ export const getDriverStatement = asyncHandler(async (req: AuthRequest, res: Res
     });
   }
 
-  for (const tr of tripsRes.rows) {
+  for (const tr of tripsWithBreakdown) {
     const exp = parseFloat(tr.total_expenses || 0);
     if (exp > 0) {
       const netDue = tr.net_balance_to_driver != null
@@ -1677,6 +1695,8 @@ export const getDriverStatement = asyncHandler(async (req: AuthRequest, res: Res
         from_location: tr.from_location,
         to_location: tr.to_location,
         expense_items: tr.expense_items || [],
+        trip_started_by_name: tr.trip_started_by_name || tr.manager_name || null,
+        trip_started_by_role: tr.trip_started_by_role || null,
       });
     }
   }
@@ -1794,7 +1814,7 @@ export const getDriverStatement = asyncHandler(async (req: AuthRequest, res: Res
         truck_advance_total: truckAdvanceTotal,
       },
       advances: advancesRes.rows,
-      trips_and_expenses: tripsRes.rows,
+      trips_and_expenses: tripsWithBreakdown,
       settlement_payments: settlementPaymentsRes.rows,
       timeline,
       chronological_timeline: rawEvents,

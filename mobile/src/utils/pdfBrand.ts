@@ -10,8 +10,8 @@ export const KSP_LOGO_HTML = `<svg class="ksp-logo" viewBox="0 0 72 72" xmlns="h
 </svg>`;
 
 export const PRINT_BRAND_CSS = `
-    .brand-lockup { display: flex; align-items: center; gap: 12px; text-align: left; }
-    .ksp-logo { width: 52px; height: 52px; display: block; flex-shrink: 0; }
+    .brand-lockup { width: auto; border-collapse: collapse; text-align: left; }
+    .ksp-logo { width: 52px; height: 52px; display: block; }
     .header, .header-bar, .ksp-header {
       display: flex; justify-content: space-between; align-items: center; gap: 16px;
       padding-bottom: 10px; margin-bottom: 12px;
@@ -40,13 +40,15 @@ export const PRINT_BRAND_CSS = `
 `;
 
 export function printBrandLockup(subtitle = 'Fleet Logistics &amp; Transport') {
-  return `<div class="brand-lockup">
-    ${KSP_LOGO_HTML}
-    <div>
-      <div class="company-title">KSP TRANSPORT</div>
-      <div class="company-sub">${subtitle}</div>
-    </div>
-  </div>`;
+  return `<table class="brand-lockup" cellpadding="0" cellspacing="0">
+    <tr>
+      <td style="width:56px;vertical-align:middle;padding-right:10px;">${KSP_LOGO_HTML}</td>
+      <td style="vertical-align:middle;">
+        <div class="company-title">KSP TRANSPORT</div>
+        <div class="company-sub">${subtitle}</div>
+      </td>
+    </tr>
+  </table>`;
 }
 
 export function printBrandAccent() {

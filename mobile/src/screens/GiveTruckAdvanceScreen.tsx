@@ -65,7 +65,7 @@ export const GiveTruckAdvanceScreen: React.FC<Props> = ({ navigation, route }) =
   const [error, setError] = useState('');
 
   // Advance Dispatch Mode: 'WITH_TRIP' = Manager gives advance & starts trip now; 'WITHOUT_TRIP' = Manager gives advance directly without trip
-  const [advanceMode, setAdvanceMode] = useState<'WITH_TRIP' | 'WITHOUT_TRIP'>('WITH_TRIP');
+  const [advanceMode, setAdvanceMode] = useState<'WITH_TRIP' | 'WITHOUT_TRIP' | 'NO_ADVANCE'>('WITH_TRIP');
 
   // Compliance Alert Modal State
   const [complianceModal, setComplianceModal] = useState<{
@@ -239,6 +239,14 @@ export const GiveTruckAdvanceScreen: React.FC<Props> = ({ navigation, route }) =
   // Advance will be officially linked & recorded when the trip slip is generated!
   const handleProceedToTrip = () => {
     setError('');
+    if (advanceMode === 'NO_ADVANCE') {
+      navigation.navigate('NewTrip', {
+        preselectedVehicleId: selectedVehicle?.id,
+        preselectedDriverId: selectedDriver?.id,
+        advancePaid: 0,
+      });
+      return;
+    }
     const numAmount = parseFloat(amount);
 
     if (!selectedVehicle) {
@@ -250,7 +258,11 @@ export const GiveTruckAdvanceScreen: React.FC<Props> = ({ navigation, route }) =
       return;
     }
     if (!isAdmin && numAmount > availableBalance) {
-      setError(`Amount exceeds your available balance of ${formatCurrency(availableBalance)}.`);
+      setError(
+        availableBalance <= 0
+          ? 'No balance from owner. Start trip without advance, or wait until the owner gives you advance.'
+          : `You can only give ${formatCurrency(availableBalance)} — remaining from the amount the owner gave you.`
+      );
       return;
     }
 
@@ -276,7 +288,11 @@ export const GiveTruckAdvanceScreen: React.FC<Props> = ({ navigation, route }) =
       return;
     }
     if (!isAdmin && numAmount > availableBalance) {
-      setError(`Amount exceeds your available balance of ${formatCurrency(availableBalance)}.`);
+      setError(
+        availableBalance <= 0
+          ? 'No balance from owner. Start trip without advance, or wait until the owner gives you advance.'
+          : `You can only give ${formatCurrency(availableBalance)} — remaining from the amount the owner gave you.`
+      );
       return;
     }
 
@@ -525,10 +541,10 @@ export const GiveTruckAdvanceScreen: React.FC<Props> = ({ navigation, route }) =
             </View>
             <View style={styles.balanceTextBlock}>
               <Text style={styles.balanceLabel}>
-                {isAdmin ? 'Office Advance' : 'Manager Available Balance'}
+                {isAdmin ? 'Office Advance' : 'Balance from owner (available)'}
               </Text>
               <Text style={styles.balanceValue}>
-                {isAdmin ? 'No wallet limit' : formatCurrency(availableBalance)}
+                {isAdmin ? 'Unlimited' : formatCurrency(availableBalance)}
               </Text>
             </View>
           </View>
@@ -553,7 +569,11 @@ export const GiveTruckAdvanceScreen: React.FC<Props> = ({ navigation, route }) =
         <View style={styles.formCard}>
           <View style={styles.formHeaderRow}>
             <Text style={styles.sectionTitle}>
-              {advanceMode === 'WITHOUT_TRIP' ? 'Direct Driver Advance' : 'Truck Advance Allocation'}
+              {advanceMode === 'WITHOUT_TRIP'
+                ? 'Direct Driver Advance'
+                : advanceMode === 'NO_ADVANCE'
+                ? 'Start Trip Without Advance'
+                : 'Advance With New Trip'}
             </Text>
             <View style={styles.techChip}>
               <View style={styles.techDot} />
@@ -563,14 +583,14 @@ export const GiveTruckAdvanceScreen: React.FC<Props> = ({ navigation, route }) =
 
           {/* Advance Dispatch Mode Switcher */}
           <View style={styles.modeCard}>
-            <Text style={styles.modeCardTitle}>HOW WILL THIS ADVANCE BE DISBURSED?</Text>
+            <Text style={styles.modeCardTitle}>HOW DO YOU WANT TO PROCEED?</Text>
             <View style={styles.modeToggleRow}>
               <TouchableOpacity
                 style={[
                   styles.modeBtn,
                   advanceMode === 'WITH_TRIP' && styles.modeBtnActiveTrip,
                 ]}
-                onPress={() => setAdvanceMode('WITH_TRIP')}
+                onPress={() => { setAdvanceMode('WITH_TRIP'); setError(''); }}
                 activeOpacity={0.8}
               >
                 <Zap size={16} color={advanceMode === 'WITH_TRIP' ? '#ffffff' : '#0284c7'} />
@@ -588,7 +608,7 @@ export const GiveTruckAdvanceScreen: React.FC<Props> = ({ navigation, route }) =
                       styles.modeBtnSub,
                       advanceMode === 'WITH_TRIP' && styles.modeBtnSubActive,
                     ]}
-                    numberOfLines={1}
+                    numberOfLines={2}
                   >
                     Advance with new trip
                   </Text>
@@ -623,9 +643,39 @@ export const GiveTruckAdvanceScreen: React.FC<Props> = ({ navigation, route }) =
                       styles.modeBtnSub,
                       advanceMode === 'WITHOUT_TRIP' && styles.modeBtnSubActive,
                     ]}
-                    numberOfLines={1}
+                    numberOfLines={2}
                   >
-                    Direct advance (no trip)
+                    Direct driver advance
+                  </Text>
+                </View>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[
+                  styles.modeBtn,
+                  advanceMode === 'NO_ADVANCE' && styles.modeBtnActiveNoAdv,
+                ]}
+                onPress={() => { setAdvanceMode('NO_ADVANCE'); setError(''); }}
+                activeOpacity={0.8}
+              >
+                <Truck size={16} color={advanceMode === 'NO_ADVANCE' ? '#ffffff' : '#4338ca' } />
+                <View style={{ marginLeft: 6, flex: 1 }}>
+                  <Text
+                    style={[
+                      styles.modeBtnTitle,
+                      advanceMode === 'NO_ADVANCE' && styles.modeBtnTitleActive,
+                    ]}
+                  >
+                    No Advance
+                  </Text>
+                  <Text
+                    style={[
+                      styles.modeBtnSub,
+                      advanceMode === 'NO_ADVANCE' && styles.modeBtnSubActive,
+                    ]}
+                    numberOfLines={2}
+                  >
+                    Start trip without advance
                   </Text>
                 </View>
               </TouchableOpacity>
@@ -777,6 +827,8 @@ export const GiveTruckAdvanceScreen: React.FC<Props> = ({ navigation, route }) =
             </>
           )}
 
+          {advanceMode !== 'NO_ADVANCE' ? (
+            <>
           {/* Amount Field */}
           <Text style={styles.fieldLabel}>Advance Amount (₹) *</Text>
           <View style={styles.amountInputWrapper}>
@@ -808,6 +860,14 @@ export const GiveTruckAdvanceScreen: React.FC<Props> = ({ navigation, route }) =
               onChangeText={setNotes}
             />
           </View>
+            </>
+          ) : (
+            <View style={{ backgroundColor: '#eef2ff', borderWidth: 1, borderColor: '#c7d2fe', borderRadius: 10, padding: 12, marginBottom: 8 }}>
+              <Text style={{ fontSize: 12.5, fontWeight: '700', color: '#3730a3', lineHeight: 18 }}>
+                No cash advance. Select truck if you want, then start the trip and upload the weighment bill.
+              </Text>
+            </View>
+          )}
 
           {/* Error display */}
           {!!error && (
@@ -818,7 +878,17 @@ export const GiveTruckAdvanceScreen: React.FC<Props> = ({ navigation, route }) =
           )}
 
           {/* Dynamic Submit Button Area */}
-          {advanceMode === 'WITH_TRIP' ? (
+          {advanceMode === 'NO_ADVANCE' ? (
+            <TouchableOpacity
+              style={styles.submitBtnNoAdv}
+              onPress={handleProceedToTrip}
+              activeOpacity={0.85}
+            >
+              <Truck size={20} color={COLORS.white} />
+              <Text style={styles.submitBtnText}>START TRIP WITHOUT ADVANCE</Text>
+              <ArrowRight size={18} color={COLORS.white} />
+            </TouchableOpacity>
+          ) : advanceMode === 'WITH_TRIP' ? (
             <>
               <TouchableOpacity
                 style={[styles.submitBtn, (!selectedVehicle || !amount) && styles.submitBtnDisabled]}
@@ -1569,6 +1639,19 @@ const styles = StyleSheet.create({
     shadowColor: '#059669',
     shadowOpacity: 0.35,
   },
+  submitBtnNoAdv: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 10,
+    backgroundColor: '#4338ca',
+    borderRadius: RADIUS.lg,
+    paddingVertical: 16,
+    marginTop: SPACING.xl,
+    ...SHADOWS.md,
+    shadowColor: '#4338ca',
+    shadowOpacity: 0.35,
+  },
   submitBtnDisabled: { opacity: 0.6 },
   submitBtnText: { fontSize: 16, fontWeight: '800', color: COLORS.white, letterSpacing: 0.5 },
 
@@ -1591,14 +1674,17 @@ const styles = StyleSheet.create({
   },
   modeToggleRow: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     gap: 8,
   },
   modeBtn: {
-    flex: 1,
+    flexGrow: 1,
+    flexBasis: '30%',
+    minWidth: '30%',
     flexDirection: 'row',
     alignItems: 'center',
     paddingVertical: 10,
-    paddingHorizontal: 10,
+    paddingHorizontal: 8,
     borderRadius: 12,
     borderWidth: 1.5,
     borderColor: '#e2e8f0',
@@ -1612,6 +1698,11 @@ const styles = StyleSheet.create({
   modeBtnActiveDirect: {
     backgroundColor: '#059669',
     borderColor: '#059669',
+    ...SHADOWS.sm,
+  },
+  modeBtnActiveNoAdv: {
+    backgroundColor: '#4338ca',
+    borderColor: '#4338ca',
     ...SHADOWS.sm,
   },
   modeBtnTitle: {

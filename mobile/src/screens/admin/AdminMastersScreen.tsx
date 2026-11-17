@@ -34,7 +34,8 @@ import {
   PlusCircle,
   ChevronRight,
 } from 'lucide-react-native';
-import { printMastersPdf, downloadMastersPdf, MastersPdfData } from '../../utils/pdfGenerator';
+import { shareMastersPdf, downloadMastersPdf, MastersPdfData } from '../../utils/pdfGenerator';
+import { PdfExportButtons } from '../../components/PdfExportButtons';
 import {
   adminUnitService,
   adminRouteService,
@@ -89,7 +90,7 @@ export const AdminMastersScreen: React.FC<{ navigation: any; route: any }> = ({ 
   const [activeTab, setActiveTab] = useState<MasterTab>(initial || 'UNITS');
   const [isLoading, setIsLoading] = useState(false);
   const [viewDetails, setViewDetails] = useState<{ title: string; rows: { label: string; value?: string | number | null }[] } | null>(null);
-  const [pdfLoading, setPdfLoading] = useState<'print' | 'download' | null>(null);
+  const [pdfLoading, setPdfLoading] = useState<'share' | 'download' | null>(null);
 
   // Data states
   const [units, setUnits] = useState<Unit[]>([]);
@@ -673,7 +674,13 @@ export const AdminMastersScreen: React.FC<{ navigation: any; route: any }> = ({ 
     setAdvVehicleId(adv.vehicle_id || null);
     setAdvAmount(String(adv.amount));
     setAdvDate(adv.advance_date ? adv.advance_date.split('T')[0] : new Date().toISOString().split('T')[0]);
-    setAdvMode((adv.payment_mode as any) || 'CASH');
+    setAdvMode((() => {
+      const u = String(adv.payment_mode || 'CASH').toUpperCase();
+      if (u === 'CHEQUE' || u === 'ATM') return 'ATM';
+      if (u === 'UPI') return 'UPI';
+      if (u === 'BANK_TRANSFER') return 'BANK_TRANSFER';
+      return 'CASH';
+    })());
     setAdvNotes(adv.notes || '');
     setIsAdvanceModalOpen(true);
   };
@@ -794,14 +801,13 @@ export const AdminMastersScreen: React.FC<{ navigation: any; route: any }> = ({ 
     };
   };
 
-  const handlePrintPdf = async () => {
+  const handleSharePdf = async () => {
     try {
-      setPdfLoading('print');
+      setPdfLoading('share');
       const data = await resolvePdfData();
-      await printMastersPdf(data);
+      await shareMastersPdf(data);
     } catch (err: any) {
-      console.error('Print master PDF failed', err);
-      Alert.alert('Print Error', err.message || 'Failed to print master report.');
+      Alert.alert('Share Error', err.message || 'Failed to share master report.');
     } finally {
       setPdfLoading(null);
     }
@@ -874,39 +880,13 @@ export const AdminMastersScreen: React.FC<{ navigation: any; route: any }> = ({ 
             <RefreshCw size={15} color={COLORS.textMuted} />
           </TouchableOpacity>
 
-          {/* Print PDF Button */}
-          <TouchableOpacity
-            style={[styles.pdfBtn, styles.printBtn, pdfLoading === 'print' && { opacity: 0.7 }]}
-            onPress={handlePrintPdf}
-            disabled={pdfLoading !== null || isLoading}
-            activeOpacity={0.8}
-          >
-            {pdfLoading === 'print' ? (
-              <ActivityIndicator size="small" color={COLORS.white} />
-            ) : (
-              <>
-                <Printer size={13} color={COLORS.white} />
-                <Text style={styles.pdfBtnText}>Print</Text>
-              </>
-            )}
-          </TouchableOpacity>
-
-          {/* Download PDF Button */}
-          <TouchableOpacity
-            style={[styles.pdfBtn, styles.downloadBtn, pdfLoading === 'download' && { opacity: 0.7 }]}
-            onPress={handleDownloadPdf}
-            disabled={pdfLoading !== null || isLoading}
-            activeOpacity={0.8}
-          >
-            {pdfLoading === 'download' ? (
-              <ActivityIndicator size="small" color={COLORS.white} />
-            ) : (
-              <>
-                <Download size={13} color={COLORS.white} />
-                <Text style={styles.pdfBtnText}>PDF</Text>
-              </>
-            )}
-          </TouchableOpacity>
+          <PdfExportButtons
+            compact
+            loading={pdfLoading}
+            disabled={isLoading}
+            onShare={handleSharePdf}
+            onDownload={handleDownloadPdf}
+          />
 
           <TouchableOpacity
             style={styles.addBtn}
@@ -1183,13 +1163,13 @@ export const AdminMastersScreen: React.FC<{ navigation: any; route: any }> = ({ 
                       )}
                     </Text>
                     <Text style={styles.itemSub}>
-                      Date: {formatDateDMY(adv.advance_date)} · Mode: {adv.payment_mode || 'CASH'}
+                      Date: {formatDateDMY(adv.advance_date)} · Mode: {String(adv.payment_mode || 'CASH').toUpperCase() === 'CHEQUE' ? 'ATM' : (adv.payment_mode === 'BANK_TRANSFER' ? 'Bank' : (adv.payment_mode || 'CASH'))}
                       {adv.created_by_name ? ` · Recorded by: ${adv.created_by_name}` : ''}
                     </Text>
                     {adv.notes ? <Text style={styles.itemSub}>Notes: {adv.notes}</Text> : null}
                   </View>
                   <View style={styles.cardActionsRow}>
-                    <ViewChip compact onPress={() => setViewDetails({ title: `Owner advance #${adv.id}`, rows: [{ label: 'Owner', value: adv.owner_name }, { label: 'Amount', value: `₹${Number(adv.amount || 0).toLocaleString('en-IN')}` }, { label: 'Given to', value: isDriver ? (adv.driver_name || 'Driver') : (adv.manager_name || 'Manager') }, { label: 'Date', value: formatDateDMY(adv.advance_date) }, { label: 'Mode', value: adv.payment_mode || 'CASH' }, { label: 'Notes', value: adv.notes || '—' }] })} />
+                    <ViewChip compact onPress={() => setViewDetails({ title: `Owner advance #${adv.id}`, rows: [{ label: 'Owner', value: adv.owner_name }, { label: 'Amount', value: `₹${Number(adv.amount || 0).toLocaleString('en-IN')}` }, { label: 'Given to', value: isDriver ? (adv.driver_name || 'Driver') : (adv.manager_name || 'Manager') }, { label: 'Date', value: formatDateDMY(adv.advance_date) }, { label: 'Mode', value: String(adv.payment_mode || 'CASH').toUpperCase() === 'CHEQUE' ? 'ATM' : (adv.payment_mode === 'BANK_TRANSFER' ? 'Bank' : (adv.payment_mode || 'CASH')) }, { label: 'Notes', value: adv.notes || '—' }] })} />
                     <TouchableOpacity style={styles.actionIconBtn} onPress={() => openEditAdvance(adv)}>
                       <Edit2 size={16} color="#2563eb" />
                     </TouchableOpacity>
@@ -1279,6 +1259,14 @@ export const AdminMastersScreen: React.FC<{ navigation: any; route: any }> = ({ 
                     <Text style={[styles.itemSub, { color: '#059669', fontWeight: '800' }]}>
                       Amount: ₹{parseFloat(String(d.amount)).toLocaleString('en-IN')} ({d.payment_mode || 'CASH'})
                     </Text>
+                    <Text style={{ fontSize: 10, fontWeight: '800', color: d.is_without_trip || !d.trip_id ? '#c2410c' : '#1d4ed8', marginTop: 2 }}>
+                      {d.is_without_trip || !d.trip_id ? 'Without trip' : 'With trip'}
+                    </Text>
+                    {Number(d.settlement_paid_amount || 0) > 0.5 && String(d.settlement_status || '').toUpperCase() === 'SETTLED' ? (
+                      <Text style={{ fontSize: 10, fontWeight: '800', color: '#047857', marginTop: 2 }}>
+                        Settlement paid ₹{Math.round(Number(d.settlement_paid_amount)).toLocaleString('en-IN')}
+                      </Text>
+                    ) : null}
                     <Text style={styles.itemSub}>
                       {d.lorry_number ? `Truck: ${d.lorry_number} • ` : ''}To: {d.manager_name || `Manager #${d.manager_id}`} • {formatDateDMY(d.advance_date)}
                     </Text>
@@ -1645,7 +1633,9 @@ export const AdminMastersScreen: React.FC<{ navigation: any; route: any }> = ({ 
                   style={[styles.partySelectChip, advMode === m && styles.partySelectChipActive, { flex: 1, alignItems: 'center' }]}
                   onPress={() => setAdvMode(m)}
                 >
-                  <Text style={[styles.partySelectText, advMode === m && styles.partySelectTextActive]}>{m}</Text>
+                  <Text style={[styles.partySelectText, advMode === m && styles.partySelectTextActive]}>
+                    {m === 'BANK_TRANSFER' ? 'Bank' : m === 'CASH' ? 'Cash' : m}
+                  </Text>
                 </TouchableOpacity>
               ))}
             </View>

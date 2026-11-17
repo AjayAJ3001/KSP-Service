@@ -3,8 +3,9 @@ import { query } from '../config/database';
 import { AppError, asyncHandler } from '../middleware/errorHandler';
 import { AuthRequest } from '../middleware/auth';
 import { createAuditLog } from '../utils/auditLog';
-import { applyVehicleScope, assertOwnerVehicle, hasFleetWideAccess, isLinkedManager, isOwnerUser, sqlIsCompanyOperator, sqlSelfOrCompany } from '../utils/ownerScope';
+import { applyVehicleScope, assertOwnerVehicle, hasFleetWideAccess, isLinkedManager, isManagerRole, isOwnerUser, sqlIsCompanyOperator, sqlSelfOrCompany } from '../utils/ownerScope';
 import { reconcileDriverPendingSettlements } from './settlement.controller';
+import { assertManagerCanDisburse } from '../utils/managerWallet';
 
 // ===== TRUCK ADVANCES =====
 
@@ -171,6 +172,8 @@ export const getTruckAdvances = asyncHandler(async (req: AuthRequest, res: Respo
             t.total_freight,
             t.freight_rate,
             t.status as trip_status,
+            tcu.name as trip_started_by_name,
+            tcu.role as trip_started_by_role,
             COALESCE(
               (SELECT s.total_expenses FROM settlements s WHERE s.trip_id = t.id LIMIT 1),
               (SELECT COALESCE(SUM(de.amount), 0) FROM driver_expenses de WHERE de.trip_id = t.id),
@@ -189,6 +192,7 @@ export const getTruckAdvances = asyncHandler(async (req: AuthRequest, res: Respo
      LEFT JOIN drivers d ON ta.driver_id = d.id
      LEFT JOIN users cb ON ta.created_by = cb.id
      LEFT JOIN trips t ON ta.trip_id = t.id AND t.status NOT IN ('CANCELLED', 'DRAFT')
+     LEFT JOIN users tcu ON t.created_by = tcu.id
      LEFT JOIN parties p ON t.party_id = p.id
      LEFT JOIN units un ON t.unit_id = un.id
      LEFT JOIN routes r ON t.route_id = r.id
@@ -240,7 +244,11 @@ export const getManagerAdvancesSummary = asyncHandler(async (req: AuthRequest, r
     }
   }
 
-  if (manager_id) {
+  if (isManagerRole(req) && req.user?.id && !manager_id) {
+    userCondition += ` AND u.id = $${paramIdx}`;
+    params.push(req.user.id);
+    paramIdx++;
+  } else if (manager_id) {
     userCondition += ` AND u.id = $${paramIdx}`;
     params.push(parseInt(manager_id));
     paramIdx++;
@@ -346,6 +354,7 @@ export const createTruckAdvance = asyncHandler(async (req: AuthRequest, res: Res
   if (isNaN(numAmount) || numAmount <= 0) {
     throw new AppError('Advance amount must be greater than 0.', 400);
   }
+  await assertManagerCanDisburse(req, numAmount);
 
   // Verify vehicle exists and is active
   const vehicleCheck = await query(`SELECT id, lorry_number FROM vehicles WHERE id = $1 AND status = 'ACTIVE'`, [vehicle_id]);

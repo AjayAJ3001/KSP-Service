@@ -23,11 +23,12 @@ import { StatCard } from '../components/Common/StatCard';
 import { StatusBadge } from '../components/Common/StatusBadge';
 import { Modal } from '../components/Common/Modal';
 import { formatDateDMY } from '../utils/dateUtils';
+import { tripStartedByLabel } from '../utils/tripStartedBy';
 
 export const DashboardPage: React.FC = () => {
   const { user } = useAuth();
   const isOwnerUser = user?.role === 'OWNER';
-  const isManagerUser = user?.role === 'MANAGER';
+  const isManagerUser = user?.role === 'MANAGER' || user?.role === 'TRANSPORT_USER';
   const [data, setData] = useState<DashboardData | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [selectedTrip, setSelectedTrip] = useState<Trip | null>(null);
@@ -197,12 +198,20 @@ export const DashboardPage: React.FC = () => {
       >
         <div>
           <div style={{ fontWeight: 800, color: '#9a3412', fontSize: '15px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <HandCoins size={18} /> Given Owner Advances
+            <HandCoins size={18} /> {isManagerUser ? 'Balance from owner' : 'Given Owner Advances'}
           </div>
           <div style={{ fontSize: '12.5px', color: '#9a3412', opacity: 0.85, marginTop: '2px' }}>
-            Click to view given advance details
+            {isManagerUser
+              ? 'Amount the owner gave you, minus advances you already gave to drivers'
+              : 'Click to view given advance details'}
           </div>
+          {isManagerUser && (
+            <div style={{ fontSize: '26px', fontWeight: 900, color: '#9a3412', marginTop: '8px' }}>
+              {formatCurrency(data?.manager_available_balance || 0)}
+            </div>
+          )}
         </div>
+        {!isManagerUser && (
         <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }} onClick={(e) => e.stopPropagation()}>
           <button
             onClick={() => navigate('/owner-advances?give=1')}
@@ -216,6 +225,7 @@ export const DashboardPage: React.FC = () => {
             <PlusCircle size={16} /> Give Advance
           </button>
         </div>
+        )}
       </div>
 
       {/* Primary KPI Stats Grid */}
@@ -356,6 +366,7 @@ export const DashboardPage: React.FC = () => {
                 <th>Unit / Destination</th>
                 <th>Goods Weight</th>
                 <th>Driver</th>
+                <th>Started By</th>
                 <th>Total Freight</th>
                 <th>Advance Paid</th>
                 <th>Status</th>
@@ -365,7 +376,7 @@ export const DashboardPage: React.FC = () => {
             <tbody>
               {(!data?.recent_trips || data.recent_trips.length === 0) ? (
                 <tr>
-                  <td colSpan={10} style={{ textAlign: 'center', padding: '32px', color: 'var(--text-muted)' }}>
+                  <td colSpan={11} style={{ textAlign: 'center', padding: '32px', color: 'var(--text-muted)' }}>
                     No trips recorded yet.
                   </td>
                 </tr>
@@ -392,6 +403,7 @@ export const DashboardPage: React.FC = () => {
                       </span>
                     </td>
                     <td>{trip.driver_name}</td>
+                    <td>{tripStartedByLabel(trip.created_by_name, trip.created_by_role) || '—'}</td>
                     <td style={{ fontWeight: 700 }}>{formatCurrency(trip.total_freight)}</td>
                     <td>{formatCurrency(trip.advance_paid)}</td>
                     <td><StatusBadge status={trip.status} /></td>
@@ -443,6 +455,10 @@ export const DashboardPage: React.FC = () => {
               <div className="slip-row">
                 <span>Driver:</span>
                 <strong>{selectedTrip.driver_name || '—'}</strong>
+              </div>
+              <div className="slip-row">
+                <span>Trip Started By:</span>
+                <strong>{tripStartedByLabel(selectedTrip.created_by_name, selectedTrip.created_by_role) || '—'}</strong>
               </div>
               <div className="slip-row">
                 <span>Party Name:</span>

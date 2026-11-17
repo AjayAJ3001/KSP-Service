@@ -47,10 +47,13 @@ import {
 import { Settlement, Trip, Owner, Vehicle, Party, Driver } from '../../types';
 import { useAuth } from '../../context/AuthContext';
 import { COLORS, SPACING, RADIUS, SHADOWS } from '../../constants/theme';
+import { settlementExpenseBreakdown } from '../../utils/expenseBreakdown';
 import { formatDateDMY } from '../../utils/dateUtils';
+import { tripStartedByLabel } from '../../utils/tripStartedBy';
 import { DatePickerModal, toDisplayDate } from '../../components/DatePickerModal';
 import { ViewChip } from '../../components/ViewChip';
 import { PdfPreviewSheet } from '../../components/PdfPreviewSheet';
+import { PdfExportButtons } from '../../components/PdfExportButtons';
 import { exportCSV } from '../../utils/exportUtils';
 import {
   downloadSettlementPdf,
@@ -78,19 +81,16 @@ const getNetBalance = (s: Settlement) => {
     : Math.max(0, managerGiven - priorDeficit);
   const ownerGiven = Math.round(Number(s.owner_given || 0));
   const leftoverUsed = Math.round(Number(s.owner_leftover_used || 0));
-  const priorInHand = leftoverUsed > 0
+  const withoutTrip = Math.max(0, Math.round(Number(s.without_trip_advance || 0)), ownerGiven);
+  const leftoverIsSameAsWithoutTrip = leftoverUsed > 0 && (leftoverUsed === ownerGiven || leftoverUsed === withoutTrip);
+  const priorInHand = leftoverIsSameAsWithoutTrip ? 0 : leftoverUsed > 0
     ? leftoverUsed
     : Math.round(Number(s.previous_driver_balance || 0));
-  const ownerBal = Math.round(Number(s.owner_balance || 0));
   const cashPaid = s.payment_mode !== 'ADJUSTED_ADVANCE' ? Math.round(Number(s.paid_amount || 0)) : 0;
-  if (s.owner_applied != null || s.owner_given != null || s.owner_balance != null || (s as any).effective_manager_advance != null) {
-    if (ownerBal > 0) return -ownerBal;
-    return Math.max(0, expenses - manager - ownerGiven - priorInHand - cashPaid);
-  }
-  if (s.net_balance_to_driver !== undefined && s.net_balance_to_driver !== null) {
-    return parseFloat(String(s.net_balance_to_driver)) || 0;
-  }
-  return parseFloat(String(s.balance_to_driver || 0)) || 0;
+  const totalAdvance = manager + withoutTrip + priorInHand;
+  const remaining = totalAdvance - expenses;
+  if (remaining > 0) return -remaining;
+  return Math.max(0, expenses - totalAdvance - cashPaid);
 };
 
 const getTripAdvancePaid = (s: Settlement) => {
@@ -345,7 +345,9 @@ export const AdminSettlementsScreen: React.FC<{ navigation: any }> = ({ navigati
         'From',
         'To',
         'Freight',
-        'Expenses',
+        'Loading',
+        'Unloading',
+        'Full Expenses',
         'Advance',
         'Owner Advance',
         'Advance Balance in Hand',
@@ -358,6 +360,8 @@ export const AdminSettlementsScreen: React.FC<{ navigation: any }> = ({ navigati
         const leftoverUsed = Math.round(parseFloat(String(s.owner_leftover_used ?? 0)) || 0);
         const ownerAdvance = Math.round(Number(s.owner_given || 0) || leftoverUsed);
         const ownerAdvanceBal = Math.round(parseFloat(String(s.owner_balance ?? 0)) || 0);
+        const exp = settlementExpenseBreakdown(s);
+        const net = getNetBalance(s);
         return [
           `SET-${s.id}`,
           s.trip_id,
@@ -369,12 +373,14 @@ export const AdminSettlementsScreen: React.FC<{ navigation: any }> = ({ navigati
           s.from_location || '',
           s.to_location || '',
           s.total_freight,
-          s.total_expenses,
+          exp.loading,
+          exp.unloading,
+          exp.total,
           manager,
           ownerAdvance,
           ownerAdvanceBal > 0 ? ownerAdvanceBal : leftoverUsed,
-          (() => { const n = getNetBalance(s); return n > 0 ? n : 0; })(),
-          (() => { const n = getNetBalance(s); return n < 0 ? Math.abs(n) : ownerAdvanceBal; })(),
+          net > 0 ? net : 0,
+          net < 0 ? Math.abs(net) : ownerAdvanceBal,
           s.settlement_status,
         ];
       });
@@ -390,37 +396,36 @@ export const AdminSettlementsScreen: React.FC<{ navigation: any }> = ({ navigati
     const manager = Math.round(parseFloat(String(s.manager_advance ?? s.initial_trip_advance ?? 0)) || 0);
     const leftoverUsed = Math.round(parseFloat(String(s.owner_leftover_used ?? s.previous_driver_balance ?? 0)) || 0);
     const ownerAdvance = Math.round(Number(s.owner_given || 0));
-    const ownerAdvanceBal = Math.round(parseFloat(String(s.owner_balance ?? 0)) || 0);
     const isOwnerLeftover = leftoverUsed > 0 && ownerAdvance <= 0 && manager <= 0;
-    const alreadyInHand = Math.round(parseFloat(String(s.previous_driver_balance ?? leftoverUsed)) || 0);
     const withoutTrip = Math.round(parseFloat(String(s.without_trip_advance ?? 0)) || 0);
-    const rows: { label: string; value: number; color: string; bg: string }[] = [
-      { label: 'Advance given', value: manager, color: '#1d4ed8', bg: '#eff6ff' },
-    ];
-    if (alreadyInHand > 0) {
-      rows.push({ label: 'Already in hand', value: alreadyInHand, color: '#047857', bg: '#ecfdf5' });
-    }
-    if (withoutTrip > 0) {
-      rows.push({ label: 'Without trip', value: withoutTrip, color: '#b45309', bg: '#fff7ed' });
-    }
+    const giverName = String((s as any).advance_given_by_name || '').trim();
+    const giverRole = String((s as any).advance_given_by_role || '').toUpperCase();
+    const giverTag = giverRole === 'ADMIN' ? 'Admin' : giverRole === 'OWNER' ? 'Owner' : giverRole === 'MANAGER' ? 'Manager' : 'Admin';
     const ownName = String(s.advance_owner_name || '').trim();
-    const ownAdvLabel = ownName ? `Owner Advance (${ownName})` : 'Owner Advance';
-    const ownBalLabel = ownName ? `Advance Balance in Hand (${ownName})` : 'Advance Balance in Hand';
+    const rows: { label: string; value: number; color: string; bg: string; sub?: string }[] = [
+      { label: 'With trip', value: manager, color: '#1d4ed8', bg: '#eff6ff', sub: giverName ? `${giverTag}: ${giverName}` : undefined },
+      { label: 'Without trip', value: Math.max(withoutTrip, ownerAdvance), color: '#c2410c', bg: '#fff7ed', sub: ownName ? `Owner: ${ownName}` : undefined },
+    ];
+    const cashPaid = s.payment_mode !== 'ADJUSTED_ADVANCE' ? Math.round(Number(s.paid_amount || 0)) : 0;
+    if (cashPaid > 0.5) {
+      rows.push({ label: 'Settlement paid', value: cashPaid, color: '#047857', bg: '#ecfdf5' });
+    }
+    const ownBalLabel = ownName ? `Balance in hand (${ownName})` : 'Balance in hand';
     const lessAmt = Math.round(Number(s.owner_applied || 0));
     const priorDeficit = Math.round(Number(s.prior_deficit_deduction || 0));
-    if (!isOwnerLeftover && ownerAdvance > 0) {
-      rows.push({ label: ownAdvLabel, value: ownerAdvance, color: '#6d28d9', bg: '#f5f3ff' });
-    }
     if (priorDeficit > 0) {
       rows.push({ label: 'Less (prior dues)', value: priorDeficit, color: '#c2410c', bg: '#fff7ed' });
     }
     if (!isOwnerLeftover && lessAmt > 0) {
       rows.push({ label: 'Less', value: lessAmt, color: '#c2410c', bg: '#fff7ed' });
     }
-    if (ownerAdvanceBal > 0) {
-      rows.push({ label: ownBalLabel, value: ownerAdvanceBal, color: '#047857', bg: '#ecfdf5' });
+    const leftoverIsSameAsWithoutTrip = leftoverUsed > 0 && (leftoverUsed === ownerAdvance || leftoverUsed === Math.max(withoutTrip, ownerAdvance));
+    const netBal = getNetBalance(s);
+    const inHand = netBal < 0 ? Math.abs(netBal) : 0;
+    if (inHand > 0) {
+      rows.push({ label: ownBalLabel, value: inHand, color: '#047857', bg: '#ecfdf5' });
     }
-    if (leftoverUsed > 0 && !isOwnerLeftover) {
+    if (leftoverUsed > 0 && !isOwnerLeftover && !leftoverIsSameAsWithoutTrip) {
       rows.push({ label: 'Prior advance', value: leftoverUsed, color: '#047857', bg: '#ecfdf5' });
     }
     if (isOwnerLeftover) {
@@ -429,9 +434,12 @@ export const AdminSettlementsScreen: React.FC<{ navigation: any }> = ({ navigati
     return (
       <View style={styles.advanceStack}>
         {rows.map((row) => (
-          <View key={row.label} style={[styles.advanceRow, { backgroundColor: row.bg }]}>
-            <Text style={[styles.advanceLabel, { color: row.color }]}>{row.label}</Text>
-            <Text style={[styles.advanceValue, { color: row.color }]}>{formatCurrency(row.value)}</Text>
+          <View key={row.label} style={[styles.advanceRow, { backgroundColor: row.bg, flexDirection: 'column', alignItems: 'stretch' }]}>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+              <Text style={[styles.advanceLabel, { color: row.color }]}>{row.label}</Text>
+              <Text style={[styles.advanceValue, { color: row.color }]}>{formatCurrency(row.value)}</Text>
+            </View>
+            {row.sub ? <Text style={[styles.advanceLabel, { color: row.color, marginTop: 2 }]}>{row.sub}</Text> : null}
           </View>
         ))}
       </View>
@@ -644,7 +652,7 @@ export const AdminSettlementsScreen: React.FC<{ navigation: any }> = ({ navigati
 
   const handleDownloadSlip = async (s: Settlement) => {
     try {
-      setPdfLoading(`dl_${s.id}`);
+      setPdfLoading(`download_${s.id}`);
       const res = await downloadSettlementPdf(toTrip(s), s);
       if (res.savedDirectly) {
         Alert.alert('Saved', `Settlement slip saved as:\n${res.filename}`);
@@ -658,7 +666,7 @@ export const AdminSettlementsScreen: React.FC<{ navigation: any }> = ({ navigati
 
   const handleShareSlip = async (s: Settlement) => {
     try {
-      setPdfLoading(`sh_${s.id}`);
+      setPdfLoading(`share_${s.id}`);
       await shareSettlementPdf(toTrip(s), s);
     } catch (err: any) {
       Alert.alert('Share Error', err.message || 'Could not share settlement PDF.');
@@ -949,62 +957,12 @@ export const AdminSettlementsScreen: React.FC<{ navigation: any }> = ({ navigati
         </View>
 
         <View style={styles.exportRow}>
-          <TouchableOpacity
-            style={[styles.exportBtn, styles.exportPdf]}
-            onPress={handleDownloadPdf}
-            disabled={pdfLoading === 'master_pdf'}
-          >
-            {pdfLoading === 'master_pdf' ? (
-              <ActivityIndicator size="small" color="#fff" />
-            ) : (
-              <>
-                <FileText size={13} color="#fff" />
-                <Text style={styles.exportBtnWhite}>PDF</Text>
-              </>
-            )}
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.exportBtn, styles.exportShare]}
-            onPress={handleSharePdf}
-            disabled={pdfLoading === 'master_share'}
-          >
-            {pdfLoading === 'master_share' ? (
-              <ActivityIndicator size="small" color="#047857" />
-            ) : (
-              <>
-                <Share2 size={13} color="#047857" />
-                <Text style={styles.exportBtnGreen}>Share</Text>
-              </>
-            )}
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.exportBtn, styles.exportPrint]}
-            onPress={handlePrintPdf}
-            disabled={pdfLoading === 'master_print'}
-          >
-            {pdfLoading === 'master_print' ? (
-              <ActivityIndicator size="small" color="#1d4ed8" />
-            ) : (
-              <>
-                <Printer size={13} color="#1d4ed8" />
-                <Text style={styles.exportBtnBlue}>Print</Text>
-              </>
-            )}
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.exportBtn, styles.exportCsv]}
-            onPress={handleDownloadCsv}
-            disabled={isExporting}
-          >
-            {isExporting ? (
-              <ActivityIndicator size="small" color="#fff" />
-            ) : (
-              <>
-                <Download size={13} color="#fff" />
-                <Text style={styles.exportBtnWhite}>Download</Text>
-              </>
-            )}
-          </TouchableOpacity>
+          <PdfExportButtons
+            compact
+            loading={pdfLoading}
+            onShare={handleSharePdf}
+            onDownload={handleDownloadPdf}
+          />
         </View>
       </View>
 
@@ -1053,6 +1011,9 @@ export const AdminSettlementsScreen: React.FC<{ navigation: any }> = ({ navigati
                 </Text>
                 <Text style={styles.metaLine}>
                   Trip #{s.trip_id}
+                  {tripStartedByLabel((s as any).trip_started_by_name, (s as any).trip_started_by_role)
+                    ? ` · Started by ${tripStartedByLabel((s as any).trip_started_by_name, (s as any).trip_started_by_role)}`
+                    : ''}
                 </Text>
                 <Text style={styles.metaLine}>Date: {formatDateDMY(s.trip_date || s.created_at)}</Text>
 
@@ -1071,48 +1032,13 @@ export const AdminSettlementsScreen: React.FC<{ navigation: any }> = ({ navigati
                 {renderPayable(s)}
 
                 <View style={styles.slipActionRow}>
-                  <TouchableOpacity
-                    style={styles.slipDownloadBtn}
-                    onPress={() => handleDownloadSlip(s)}
+                  <PdfExportButtons
+                    compact
+                    loading={pdfLoading?.includes(String(s.id)) ? pdfLoading : null}
                     disabled={!!pdfLoading}
-                  >
-                    {pdfLoading === `dl_${s.id}` ? (
-                      <ActivityIndicator size="small" color="#fff" />
-                    ) : (
-                      <>
-                        <Download size={13} color="#fff" />
-                        <Text style={styles.slipDownloadText}>Download</Text>
-                      </>
-                    )}
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={styles.slipShareBtn}
-                    onPress={() => handleShareSlip(s)}
-                    disabled={!!pdfLoading}
-                  >
-                    {pdfLoading === `sh_${s.id}` ? (
-                      <ActivityIndicator size="small" color="#047857" />
-                    ) : (
-                      <>
-                        <Share2 size={13} color="#047857" />
-                        <Text style={styles.slipShareText}>Share</Text>
-                      </>
-                    )}
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={styles.pdfBtn}
-                    onPress={() => handlePrintSlip(s)}
-                    disabled={!!pdfLoading}
-                  >
-                    {pdfLoading === `pr_${s.id}` ? (
-                      <ActivityIndicator size="small" color="#b91c1c" />
-                    ) : (
-                      <>
-                        <Printer size={13} color="#b91c1c" />
-                        <Text style={styles.pdfBtnText}>PDF</Text>
-                      </>
-                    )}
-                  </TouchableOpacity>
+                    onShare={() => handleShareSlip(s)}
+                    onDownload={() => handleDownloadSlip(s)}
+                  />
                 </View>
 
                 <View style={styles.actionRow}>
@@ -1529,8 +1455,8 @@ const styles = StyleSheet.create({
   statusText: { fontSize: 10, fontWeight: '800' },
   partyText: { fontSize: 14, fontWeight: '800', color: COLORS.text, marginBottom: 2 },
   metaLine: { fontSize: 12, color: COLORS.textMuted, marginBottom: 2 },
-  metrics: { flexDirection: 'row', marginTop: 8, marginBottom: 8, gap: 8 },
-  metric: { flex: 1, backgroundColor: '#f8fafc', borderRadius: 8, padding: 8 },
+  metrics: { flexDirection: 'row', flexWrap: 'wrap', marginTop: 8, marginBottom: 8, gap: 8 },
+  metric: { flexGrow: 1, minWidth: '22%', backgroundColor: '#f8fafc', borderRadius: 8, padding: 8 },
   metricLabel: { fontSize: 10, fontWeight: '700', color: COLORS.textMuted },
   metricVal: { fontSize: 13, fontWeight: '800', color: COLORS.text, marginTop: 2 },
   advanceStack: { gap: 4, marginBottom: 10 },

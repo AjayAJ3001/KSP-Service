@@ -36,6 +36,8 @@ export type DriverTripStory = {
   ownerName: string;
   partyName: string;
   route: string;
+  startedByName: string;
+  startedByRole: string;
   advances: any[];
   expenses: any[];
   settlements: any[];
@@ -192,6 +194,8 @@ export const buildDriverTripStories = (timeline: any[] = []): DriverTripStory[] 
         ownerName: item.owner_name || '',
         partyName: item.party_name || '',
         route: '',
+        startedByName: item.trip_started_by_name || '',
+        startedByRole: item.trip_started_by_role || '',
         advances: [item],
         expenses: [],
         settlements: [],
@@ -214,6 +218,8 @@ export const buildDriverTripStories = (timeline: any[] = []): DriverTripStory[] 
         ownerName: item.owner_name || '',
         partyName: item.party_name || '',
         route: item.from_location && item.to_location ? `${item.from_location} → ${item.to_location}` : '',
+        startedByName: item.trip_started_by_name || item.created_by_name || '',
+        startedByRole: item.trip_started_by_role || item.created_by_role || '',
         advances: [],
         expenses: [],
         settlements: [],
@@ -230,6 +236,10 @@ export const buildDriverTripStories = (timeline: any[] = []): DriverTripStory[] 
     } else if (!story.route && item.subtitle && String(item.subtitle).includes('→')) {
       story.route = String(item.subtitle);
     }
+    if (item.trip_started_by_name) story.startedByName = item.trip_started_by_name;
+    if (item.trip_started_by_role) story.startedByRole = item.trip_started_by_role;
+    if (!story.startedByName && item.created_by_name) story.startedByName = item.created_by_name;
+    if (!story.startedByRole && item.created_by_role) story.startedByRole = item.created_by_role;
     if (item.type === 'ADVANCE') story.advances.push(item);
     else if (item.type === 'EXPENSE') story.expenses.push(item);
     else if (item.type === 'SETTLEMENT') story.settlements.push(item);

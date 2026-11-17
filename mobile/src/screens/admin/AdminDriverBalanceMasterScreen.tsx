@@ -38,6 +38,8 @@ import {
   Check,
   Building,
   Zap,
+  ChevronDown,
+  ChevronUp,
 } from 'lucide-react-native';
 import {
   adminDriverAdvanceService,
@@ -47,7 +49,9 @@ import {
   adminOwnerService,
   adminVehicleService,
   adminTripService,
+  adminSettlementService,
 } from '../../services/adminService';
+import { mobileDashboardService } from '../../services/mobileService';
 import {
   printDriverBalanceMasterPdf,
   downloadDriverBalanceMasterPdf,
@@ -58,15 +62,38 @@ import {
   DriverBalanceMasterPdfData,
   DriverStatementPdfData,
 } from '../../utils/pdfGenerator';
-import { Driver, User, Owner, Vehicle, DriverAdvanceSummary, Trip } from '../../types';
+import { Driver, User, Owner, Vehicle, DriverAdvanceSummary, Trip, Settlement } from '../../types';
 import { COLORS, SPACING, RADIUS, SHADOWS } from '../../constants/theme';
 import { formatDateDMY } from '../../utils/dateUtils';
 import { DatePickerModal, toDisplayDate } from '../../components/DatePickerModal';
 import { useAuth } from '../../context/AuthContext';
 import { ViewChip } from '../../components/ViewChip';
+import { PdfExportButtons } from '../../components/PdfExportButtons';
 import { PdfPreviewSheet } from '../../components/PdfPreviewSheet';
+import { driverSummaryExpense } from '../../utils/expenseBreakdown';
 
 const DRIVER_DOC_VIEW = 5;
+
+const getNetBalance = (s: Settlement) => {
+  const expenses = Math.round(Number(s.total_expenses || 0));
+  const managerGiven = Math.round(Number(s.manager_advance ?? s.initial_trip_advance ?? 0));
+  const priorDeficit = Math.round(Number(s.prior_deficit_deduction || 0));
+  const manager = (s as any).effective_manager_advance != null
+    ? Math.round(Number((s as any).effective_manager_advance))
+    : Math.max(0, managerGiven - priorDeficit);
+  const ownerGiven = Math.round(Number(s.owner_given || 0));
+  const leftoverUsed = Math.round(Number(s.owner_leftover_used || 0));
+  const withoutTrip = Math.max(0, Math.round(Number(s.without_trip_advance || 0)), ownerGiven);
+  const leftoverIsSameAsWithoutTrip = leftoverUsed > 0 && (leftoverUsed === ownerGiven || leftoverUsed === withoutTrip);
+  const priorInHand = leftoverIsSameAsWithoutTrip ? 0 : leftoverUsed > 0
+    ? leftoverUsed
+    : Math.round(Number(s.previous_driver_balance || 0));
+  const cashPaid = s.payment_mode !== 'ADJUSTED_ADVANCE' ? Math.round(Number(s.paid_amount || 0)) : 0;
+  const totalAdvance = manager + withoutTrip + priorInHand;
+  const remaining = totalAdvance - expenses;
+  if (remaining > 0) return -remaining;
+  return Math.max(0, expenses - totalAdvance - cashPaid);
+};
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -81,6 +108,8 @@ interface DriverBalanceRow {
   owner_name?: string;
   // Financials
   total_advance_given: number;
+  trip_advance_given: number;
+  without_trip_advance_given: number;
   total_expenses_reported: number;
   loading_expense: number;
   unloading_expense: number;
@@ -130,6 +159,8 @@ export const AdminDriverBalanceMasterScreen: React.FC<{ navigation: any }> = ({ 
   // PDF Action Loading states
   const [pdfActionLoading, setPdfActionLoading] = useState<'print' | 'download' | 'share' | null>(null);
   const [driverSlipLoading, setDriverSlipLoading] = useState<{ [driverId: number]: 'print' | 'download' | 'share' | null }>({});
+  const [expandedDriverId, setExpandedDriverId] = useState<number | null>(null);
+  const [expandedDetails, setExpandedDetails] = useState<Record<number, { trips: Trip[]; settlements: Settlement[]; loading: boolean }>>({});
 
   // Add Advance Modal
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -144,6 +175,7 @@ export const AdminDriverBalanceMasterScreen: React.FC<{ navigation: any }> = ({ 
   const [selectedVehicleId, setSelectedVehicleId] = useState<number | null>(null);
   const [selectedTripId, setSelectedTripId] = useState<number | null>(null);
   const [driverTrips, setDriverTrips] = useState<Trip[]>([]);
+  const [managerAvailableBalance, setManagerAvailableBalance] = useState(0);
   const [amount, setAmount] = useState('');
   const [advanceDate, setAdvanceDate] = useState('');
   const [paymentMode, setPaymentMode] = useState<'CASH' | 'UPI' | 'BANK_TRANSFER' | 'ATM'>('CASH');
@@ -161,14 +193,17 @@ export const AdminDriverBalanceMasterScreen: React.FC<{ navigation: any }> = ({ 
   const loadLookups = useCallback(async () => {
     try {
       const [uRes, oRes, dRes, vRes] = await Promise.all([
-        adminUserService.getUsers({ limit: 200, status: 'ACTIVE', for_advance: true }),
-        adminOwnerService.getOwners({ limit: 100 }),
-        adminDriverService.getDrivers({ limit: 500, status: 'ACTIVE' }),
-        adminVehicleService.getVehicles({ limit: 100 }),
+        isManagerLogin
+          ? Promise.resolve({ data: { items: [] as User[] } })
+          : adminUserService.getUsers({ limit: 200, status: 'ACTIVE', for_advance: true }).catch(() => ({ data: { items: [] as User[] } })),
+        adminOwnerService.getOwners({ limit: 100 }).catch(() => ({ data: { items: [] as Owner[] } })),
+        adminDriverService.getDrivers({ limit: 500, status: 'ACTIVE' }).catch(() => ({ data: { items: [] as Driver[] } })),
+        adminVehicleService.getVehicles({ limit: 100 }).catch(() => ({ data: { items: [] as Vehicle[] } })),
       ]);
       const mgrs = (uRes.data.items || []).filter((u) => u.role === 'MANAGER' || u.role === 'ADMIN');
       setManagers(mgrs);
-      if (mgrs.length > 0) setSelectedManagerId(mgrs[0].id);
+      if (isManagerLogin && authUser) setSelectedManagerId(authUser.id);
+      else if (mgrs.length > 0) setSelectedManagerId(mgrs[0].id);
       setOwners(oRes.data.items || []);
       if (oRes.data.items?.length > 0) setSelectedOwnerId(oRes.data.items[0].id);
       setAllDrivers(dRes.data.items || []);
@@ -176,7 +211,7 @@ export const AdminDriverBalanceMasterScreen: React.FC<{ navigation: any }> = ({ 
     } catch (err) {
       console.error('Failed to load lookups', err);
     }
-  }, []);
+  }, [isManagerLogin, authUser]);
 
   // ── Load driver balance summary ───────────────────────────────────────────
   const loadDriverBalances = useCallback(async () => {
@@ -200,6 +235,8 @@ export const AdminDriverBalanceMasterScreen: React.FC<{ navigation: any }> = ({ 
         owner_id: r.owner_id,
         owner_name: r.owner_name,
         total_advance_given: Math.max(0, parseFloat(String(r.total_advance_given || 0))),
+        trip_advance_given: Math.max(0, parseFloat(String(r.trip_advance_given || 0))),
+        without_trip_advance_given: Math.max(0, parseFloat(String(r.without_trip_advance_given || 0))),
         total_expenses_reported: Math.max(0, parseFloat(String(r.total_expenses_reported || 0))),
         loading_expense: Math.max(0, parseFloat(String(r.loading_expense || 0))),
         unloading_expense: Math.max(0, parseFloat(String(r.unloading_expense || 0))),
@@ -234,6 +271,14 @@ export const AdminDriverBalanceMasterScreen: React.FC<{ navigation: any }> = ({ 
         setTripDrivers(unique);
       }
       setGrandTotals(res.data.grand_totals || {});
+      if (isManagerLogin) {
+        try {
+          const dash = await mobileDashboardService.getDashboard();
+          setManagerAvailableBalance(Math.round(Number(dash.data?.manager_available_balance || 0)));
+        } catch {
+          setManagerAvailableBalance(0);
+        }
+      }
     } catch (err: any) {
       console.error('Failed to load driver balances', err);
       Alert.alert('Error', err.message || 'Could not fetch driver balances.');
@@ -241,7 +286,7 @@ export const AdminDriverBalanceMasterScreen: React.FC<{ navigation: any }> = ({ 
       setIsLoading(false);
       setIsRefreshing(false);
     }
-  }, [search, selectedOwnerFilter, selectedVehicleFilter, selectedDriverFilter]);
+  }, [search, selectedOwnerFilter, selectedVehicleFilter, selectedDriverFilter, isManagerLogin]);
 
   useEffect(() => { loadLookups(); }, [loadLookups]);
   useEffect(() => { loadDriverBalances(); }, [loadDriverBalances]);
@@ -285,15 +330,22 @@ export const AdminDriverBalanceMasterScreen: React.FC<{ navigation: any }> = ({ 
   // Dynamic totals of filtered
   const filteredTotals = useMemo(() => {
     return filteredDrivers.reduce(
-      (acc, d) => ({
-        total_advance_given: acc.total_advance_given + d.total_advance_given,
-        total_expenses_reported: acc.total_expenses_reported + d.total_expenses_reported,
-        balance_in_hand: acc.balance_in_hand + Math.max(0, d.balance_in_hand),
-        total_need_to_pay: acc.total_need_to_pay + Math.max(0, d.need_to_pay),
-      }),
+      (acc, d) => {
+        const exp = driverSummaryExpense(d);
+        return {
+          total_advance_given: acc.total_advance_given + d.total_advance_given,
+          total_expenses_reported: acc.total_expenses_reported + exp.total,
+          loading_expense: acc.loading_expense + exp.loading,
+          unloading_expense: acc.unloading_expense + exp.unloading,
+          balance_in_hand: acc.balance_in_hand + Math.max(0, d.balance_in_hand),
+          total_need_to_pay: acc.total_need_to_pay + Math.max(0, d.need_to_pay),
+        };
+      },
       {
         total_advance_given: 0,
         total_expenses_reported: 0,
+        loading_expense: 0,
+        unloading_expense: 0,
         balance_in_hand: 0,
         total_need_to_pay: 0,
       }
@@ -367,6 +419,15 @@ export const AdminDriverBalanceMasterScreen: React.FC<{ navigation: any }> = ({ 
       Alert.alert('Required', 'Please enter a valid amount greater than 0.');
       return;
     }
+    if (isManagerLogin && numAmount > managerAvailableBalance) {
+      Alert.alert(
+        'Advance Limit',
+        managerAvailableBalance <= 0
+          ? 'No balance from owner. You can still start a trip without advance.'
+          : `You can only give ₹${managerAvailableBalance.toLocaleString('en-IN')} — remaining from the amount the owner gave you.`
+      );
+      return;
+    }
 
     try {
       setIsSubmitting(true);
@@ -426,6 +487,8 @@ export const AdminDriverBalanceMasterScreen: React.FC<{ navigation: any }> = ({ 
       grandTotals: {
         total_advance_given: filteredTotals.total_advance_given,
         total_expenses_reported: filteredTotals.total_expenses_reported,
+        loading_expense: filteredTotals.loading_expense,
+        unloading_expense: filteredTotals.unloading_expense,
         balance_in_hand: filteredTotals.balance_in_hand,
         total_need_to_pay: filteredTotals.total_need_to_pay,
       },
@@ -535,6 +598,95 @@ export const AdminDriverBalanceMasterScreen: React.FC<{ navigation: any }> = ({ 
     }
   };
 
+  const toggleExpandDriver = async (driverId: number) => {
+    if (expandedDriverId === driverId) {
+      setExpandedDriverId(null);
+      return;
+    }
+    setExpandedDriverId(driverId);
+    if (expandedDetails[driverId] && !expandedDetails[driverId].loading) return;
+    setExpandedDetails((prev) => ({
+      ...prev,
+      [driverId]: { trips: prev[driverId]?.trips || [], settlements: prev[driverId]?.settlements || [], loading: true },
+    }));
+    try {
+      const [tripRes, settleRes] = await Promise.all([
+        adminTripService.getTrips({ driver_id: String(driverId), limit: 200 }),
+        adminSettlementService.getSettlements({ driver_id: driverId, limit: 200 }),
+      ]);
+      setExpandedDetails((prev) => ({
+        ...prev,
+        [driverId]: {
+          trips: tripRes.data?.items || [],
+          settlements: settleRes.data?.items || [],
+          loading: false,
+        },
+      }));
+    } catch {
+      setExpandedDetails((prev) => ({
+        ...prev,
+        [driverId]: { trips: [], settlements: [], loading: false },
+      }));
+    }
+  };
+
+  const renderTripStatement = (trip: Trip, settlements: Settlement[]) => {
+    const s = settlements.find((x) => Number(x.trip_id) === Number(trip.id));
+    const manager = Math.round(Number(s?.manager_advance ?? (trip as any).initial_trip_advance ?? trip.advance_paid ?? 0));
+    const ownerAdvance = Math.round(Number(s?.owner_given || 0));
+    const withoutTrip = Math.max(0, Math.round(Number((s as any)?.without_trip_advance || 0)), ownerAdvance);
+    const tripAny = trip as any;
+    const payMode = String(s?.payment_mode || tripAny.settlement_payment_mode || '').toUpperCase();
+    const cashPaid = payMode === 'ADJUSTED_ADVANCE'
+      ? 0
+      : Math.round(Number(s?.paid_amount ?? tripAny.settlement_paid_amount ?? 0));
+    const expenses = Math.round(Number(s?.total_expenses ?? tripAny.total_expenses ?? 0));
+    const net = s ? getNetBalance(s) : expenses - manager - withoutTrip - cashPaid;
+    const settled = String(s?.settlement_status || tripAny.settlement_status || '').toUpperCase() === 'SETTLED';
+    const needPay = settled ? 0 : Math.max(0, net);
+    const inHand = net < 0 ? Math.abs(net) : 0;
+    const giver = String((s as any)?.advance_given_by_name || '').trim();
+    const ownName = String((s as any)?.advance_owner_name || trip.owner_name || '').trim();
+    const statusLabel = settled
+      ? (cashPaid > 0.5 ? 'Settled' : payMode === 'ADJUSTED_ADVANCE' ? 'Settled · Adjusted' : 'Settled')
+      : needPay > 0.5
+        ? 'Need to Pay'
+        : inHand > 0.5
+          ? 'Cash in Hand'
+          : 'Pending';
+    const chip = (label: string, value: number, color: string, bg: string, sub?: string) => (
+      <View key={label} style={{ backgroundColor: bg, borderRadius: 6, paddingHorizontal: 8, paddingVertical: 5, marginBottom: 4 }}>
+        <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+          <Text style={{ fontSize: 11, fontWeight: '800', color }}>{label}</Text>
+          <Text style={{ fontSize: 11, fontWeight: '800', color }}>{formatCurrency(value)}</Text>
+        </View>
+        {sub ? <Text style={{ fontSize: 10, fontWeight: '700', color, marginTop: 1 }}>{sub}</Text> : null}
+      </View>
+    );
+    return (
+      <View key={trip.id} style={styles.tripBlock}>
+        <Text style={styles.tripBlockTitle}>
+          Trip #{trip.id} · {formatDateDMY(trip.trip_date)}
+        </Text>
+        <Text style={styles.tripBlockMeta} numberOfLines={2}>
+          {trip.lorry_number || '—'}
+          {trip.party_name ? ` · ${trip.party_name}` : ''}
+          {trip.from_location || trip.to_location ? ` · ${trip.from_location || '—'} → ${trip.to_location || '—'}` : ''}
+        </Text>
+        {chip('With trip', manager, '#1d4ed8', '#eff6ff', giver ? `Admin: ${giver}` : undefined)}
+        {chip('Without trip', withoutTrip, '#c2410c', '#fff7ed', ownName ? `Owner: ${ownName}` : undefined)}
+        {cashPaid > 0.5 ? chip('Settlement paid', cashPaid, '#047857', '#ecfdf5') : null}
+        <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 2 }}>
+          <Text style={{ fontSize: 10, fontWeight: '700', color: '#b45309' }}>Expenses {formatCurrency(expenses)}</Text>
+          <Text style={{ fontSize: 10, fontWeight: '800', color: needPay > 0.5 ? '#dc2626' : inHand > 0.5 ? '#059669' : '#64748b' }}>
+            {statusLabel}
+            {needPay > 0.5 ? ` ${formatCurrency(needPay)}` : inHand > 0.5 ? ` ${formatCurrency(inHand)}` : ''}
+          </Text>
+        </View>
+      </View>
+    );
+  };
+
   const handleDownloadDriverSlip = async (driver: DriverBalanceRow) => {
     try {
       setDriverSlipLoading((prev) => ({ ...prev, [driver.driver_id]: 'download' }));
@@ -605,54 +757,13 @@ export const AdminDriverBalanceMasterScreen: React.FC<{ navigation: any }> = ({ 
           </TouchableOpacity>
         </View>
 
-        {/* Master PDF Export Bar */}
         <View style={styles.pdfToolbar}>
-          <TouchableOpacity
-            style={styles.pdfToolBtn}
-            onPress={handlePrintMasterPdf}
-            disabled={pdfActionLoading !== null}
-          >
-            {pdfActionLoading === 'print' ? (
-              <ActivityIndicator size="small" color="#2563eb" />
-            ) : (
-              <>
-                <Printer size={13} color="#2563eb" />
-                <Text style={styles.pdfToolBtnText}>Print PDF</Text>
-              </>
-            )}
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={styles.pdfToolBtn}
-            onPress={handleDownloadMasterPdf}
-            disabled={pdfActionLoading !== null}
-          >
-            {pdfActionLoading === 'download' ? (
-              <ActivityIndicator size="small" color="#16a34a" />
-            ) : (
-              <>
-                <Download size={13} color="#16a34a" />
-                <Text style={[styles.pdfToolBtnText, { color: '#16a34a' }]}>Download</Text>
-              </>
-            )}
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={styles.pdfToolBtn}
-            onPress={handleShareMasterPdf}
-            disabled={pdfActionLoading !== null}
-          >
-            {pdfActionLoading === 'share' ? (
-              <ActivityIndicator size="small" color="#7c3aed" />
-            ) : (
-              <>
-                <Share2 size={13} color="#7c3aed" />
-                <Text style={[styles.pdfToolBtnText, { color: '#7c3aed' }]}>Share</Text>
-              </>
-            )}
-          </TouchableOpacity>
-
-
+          <PdfExportButtons
+            compact
+            loading={pdfActionLoading}
+            onShare={handleShareMasterPdf}
+            onDownload={handleDownloadMasterPdf}
+          />
         </View>
 
         {/* Quick Filter Chips */}
@@ -785,7 +896,7 @@ export const AdminDriverBalanceMasterScreen: React.FC<{ navigation: any }> = ({ 
             return (
               <View key={driver.driver_id} style={styles.driverCard}>
                 {/* Card Top: Driver Info & Status */}
-                <View style={styles.cardHeader}>
+                <TouchableOpacity style={styles.cardHeader} onPress={() => toggleExpandDriver(driver.driver_id)} activeOpacity={0.8}>
                   <View style={styles.driverInfo}>
                     <View style={styles.driverAvatarRow}>
                       <View style={styles.driverAvatar}>
@@ -832,7 +943,10 @@ export const AdminDriverBalanceMasterScreen: React.FC<{ navigation: any }> = ({ 
                       <Text style={[styles.balanceStatus, { color: '#64748b' }]}>Settled ✓</Text>
                     </View>
                   )}
-                </View>
+                  {expandedDriverId === driver.driver_id
+                    ? <ChevronUp size={16} color="#0f172a" style={{ marginTop: 6 }} />
+                    : <ChevronDown size={16} color="#64748b" style={{ marginTop: 6 }} />}
+                </TouchableOpacity>
 
 
 
@@ -851,8 +965,11 @@ export const AdminDriverBalanceMasterScreen: React.FC<{ navigation: any }> = ({ 
                     <Text style={[styles.statValue, { color: '#1e40af' }]}>
                       {formatCurrency(driver.total_advance_given)}
                     </Text>
-                    <Text style={{ fontSize: 9, color: COLORS.textMuted, marginTop: 1 }}>
-                      {driver.advance_count} advance{driver.advance_count === 1 ? '' : 's'}
+                    <Text style={{ fontSize: 9, color: '#1d4ed8', fontWeight: '700', marginTop: 1 }}>
+                      With trip {formatCurrency(driver.trip_advance_given)}
+                    </Text>
+                    <Text style={{ fontSize: 9, color: '#c2410c', fontWeight: '700', marginTop: 1 }}>
+                      Without trip {formatCurrency(driver.without_trip_advance_given)}
                     </Text>
                   </View>
                   <View style={styles.statDivider} />
@@ -893,54 +1010,29 @@ export const AdminDriverBalanceMasterScreen: React.FC<{ navigation: any }> = ({ 
                   </View>
                 </View>
 
+                {expandedDriverId === driver.driver_id ? (
+                  <View style={styles.expandBox}>
+                    {expandedDetails[driver.driver_id]?.loading ? (
+                      <ActivityIndicator size="small" color={COLORS.accent} />
+                    ) : (expandedDetails[driver.driver_id]?.trips || []).length === 0 ? (
+                      <Text style={styles.tripBlockMeta}>No trips for this driver</Text>
+                    ) : (
+                      (expandedDetails[driver.driver_id]?.trips || []).map((tr) =>
+                        renderTripStatement(tr, expandedDetails[driver.driver_id]?.settlements || [])
+                      )
+                    )}
+                  </View>
+                ) : null}
+
                 {/* Card Action Buttons */}
                 <View style={styles.cardActions}>
                   <ViewChip compact onPress={() => openDriverPdfView(driver)} />
-
-                  <TouchableOpacity
-                    style={styles.slipBtn}
-                    onPress={() => handlePrintDriverSlip(driver)}
-                    disabled={slipLoading !== undefined && slipLoading !== null}
-                  >
-                    {slipLoading === 'print' ? (
-                      <ActivityIndicator size="small" color="#2563eb" />
-                    ) : (
-                      <>
-                        <Printer size={13} color="#2563eb" />
-                        <Text style={styles.slipBtnText}>Print</Text>
-                      </>
-                    )}
-                  </TouchableOpacity>
-
-                  <TouchableOpacity
-                    style={styles.slipBtn}
-                    onPress={() => handleDownloadDriverSlip(driver)}
-                    disabled={slipLoading !== undefined && slipLoading !== null}
-                  >
-                    {slipLoading === 'download' ? (
-                      <ActivityIndicator size="small" color="#16a34a" />
-                    ) : (
-                      <>
-                        <Download size={13} color="#16a34a" />
-                        <Text style={[styles.slipBtnText, { color: '#16a34a' }]}>PDF</Text>
-                      </>
-                    )}
-                  </TouchableOpacity>
-
-                  <TouchableOpacity
-                    style={styles.slipBtn}
-                    onPress={() => handleShareDriverSlip(driver)}
-                    disabled={slipLoading !== undefined && slipLoading !== null}
-                  >
-                    {slipLoading === 'share' ? (
-                      <ActivityIndicator size="small" color="#7c3aed" />
-                    ) : (
-                      <>
-                        <Share2 size={13} color="#7c3aed" />
-                        <Text style={[styles.slipBtnText, { color: '#7c3aed' }]}>Share</Text>
-                      </>
-                    )}
-                  </TouchableOpacity>
+                  <PdfExportButtons
+                    compact
+                    loading={slipLoading}
+                    onShare={() => handleShareDriverSlip(driver)}
+                    onDownload={() => handleDownloadDriverSlip(driver)}
+                  />
                 </View>
               </View>
             );
@@ -1257,6 +1349,11 @@ export const AdminDriverBalanceMasterScreen: React.FC<{ navigation: any }> = ({ 
             </ScrollView>
 
             {/* Amount */}
+            {isManagerLogin ? (
+              <Text style={[styles.label, { color: '#047857' }]}>
+                Available from owner: ₹{managerAvailableBalance.toLocaleString('en-IN')}
+              </Text>
+            ) : null}
             <Text style={styles.label}>Advance Amount (₹) *</Text>
             <TextInput
               style={styles.input}
@@ -1509,6 +1606,22 @@ const styles = StyleSheet.create({
     borderColor: COLORS.border,
     ...SHADOWS.sm,
   },
+  expandBox: {
+    marginBottom: 8,
+    padding: 8,
+    backgroundColor: '#f8fafc',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+  },
+  tripBlock: {
+    marginBottom: 10,
+    paddingBottom: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: '#e2e8f0',
+  },
+  tripBlockTitle: { fontSize: 12, fontWeight: '800', color: '#1d4ed8', marginBottom: 2 },
+  tripBlockMeta: { fontSize: 10, color: '#64748b', fontWeight: '600', marginBottom: 6 },
   cardHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -1558,13 +1671,13 @@ const styles = StyleSheet.create({
     backgroundColor: '#f8fafc',
     borderRadius: RADIUS.md,
     padding: 8,
-    alignItems: 'center',
+    alignItems: 'flex-start',
     marginBottom: 8,
   },
   statItem: { flex: 1, alignItems: 'center' },
   statLabel: { fontSize: 9.5, color: COLORS.textMuted, fontWeight: '600' },
   statValue: { fontSize: 12, fontWeight: '800', marginTop: 1 },
-  statDivider: { width: 1, height: 20, backgroundColor: COLORS.border },
+  statDivider: { width: 1, height: 52, backgroundColor: COLORS.border, marginTop: 8 },
 
   activeTripRow: {
     flexDirection: 'row',
