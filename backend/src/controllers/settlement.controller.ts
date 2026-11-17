@@ -215,8 +215,33 @@ const numAmt = (val: any) => Math.round(parseFloat(String(val || 0)) || 0);
 
 export const attachAdvanceBreakdown = async (rows: any[]): Promise<any[]> => {
   if (!rows.length) return rows;
-  const driverIds = [...new Set(rows.map((r) => Number(r.driver_id || r.d_id)).filter((id) => id > 0))];
-  if (!driverIds.length) return rows;
+  let driverIds = [...new Set(rows.map((r) => Number(r.driver_id || r.d_id)).filter((id) => id > 0))];
+  const rowTripIds = [...new Set(rows.map((r) => Number(r.trip_id || r.id)).filter((id) => id > 0))];
+  if (!driverIds.length && rowTripIds.length) {
+    const fromTrips = await query(
+      `SELECT DISTINCT driver_id FROM trips WHERE id = ANY($1::int[]) AND driver_id IS NOT NULL`,
+      [rowTripIds]
+    );
+    driverIds = fromTrips.rows.map((r: any) => Number(r.driver_id)).filter((id: number) => id > 0);
+    for (const row of rows) {
+      if (!Number(row.driver_id)) {
+        const match = fromTrips.rows[0];
+        if (match) row.driver_id = Number(match.driver_id);
+      }
+    }
+    if (fromTrips.rows.length > 1) {
+      const byTrip = await query(
+        `SELECT id, driver_id FROM trips WHERE id = ANY($1::int[])`,
+        [rowTripIds]
+      );
+      const driverByTrip = new Map(byTrip.rows.map((r: any) => [Number(r.id), Number(r.driver_id)]));
+      for (const row of rows) {
+        const did = driverByTrip.get(Number(row.trip_id || row.id));
+        if (did) row.driver_id = did;
+      }
+      driverIds = [...new Set([...driverIds, ...byTrip.rows.map((r: any) => Number(r.driver_id)).filter((id: number) => id > 0)])];
+    }
+  }
 
   const tripsRes = await query(
     `SELECT t.id, t.driver_id, t.trip_date, t.created_at,
@@ -441,7 +466,7 @@ export const attachAdvanceBreakdown = async (rows: any[]): Promise<any[]> => {
     }
   }
 
-  const mapped = rows.map((row) => {
+  let mapped = rows.map((row) => {
     const rec = byTrip.get(Number(row.trip_id || row.id)) || {
       manager_advance: numAmt(row.initial_trip_advance),
       effective_manager_advance: numAmt(row.initial_trip_advance),
@@ -476,17 +501,65 @@ export const attachAdvanceBreakdown = async (rows: any[]): Promise<any[]> => {
       owner_given: rec.owner_given,
       advance_given_total: Math.round(rec.manager_advance + rec.owner_given),
       advance_owner_name: ownerNames.filter(Boolean).join(' + '),
-      without_trip_advance: Math.round(
-        (unmatchedByDriver.get(Number(row.driver_id)) || 0)
-        + (ownerUnmatchedByDriver.get(Number(row.driver_id)) || 0)
-      ) || Math.round(numAmt(row.without_trip_advance) || numAmt(row.sql_without_trip_advance)),
+      without_trip_advance: Math.max(
+        Math.round(
+          (unmatchedByDriver.get(Number(row.driver_id)) || 0)
+          + (ownerUnmatchedByDriver.get(Number(row.driver_id)) || 0)
+        ),
+        Math.round(numAmt(row.without_trip_advance) || numAmt(row.sql_without_trip_advance))
+      ),
       need_to_pay: remainingNeed,
       in_hand: remainingNeed > 0 ? 0 : Math.round(rec.in_hand),
     };
   });
 
-  const tripIds = [...new Set(mapped.map((r) => Number(r.trip_id)).filter((id) => id > 0))];
+  const tripIds = [...new Set(mapped.map((r) => Number(r.trip_id || r.id)).filter((id) => id > 0))];
   if (!tripIds.length) return mapped;
+
+  const expenseLinesRes = await query(
+    `SELECT trip_id, expense_type, description, amount
+     FROM driver_expenses
+     WHERE trip_id = ANY($1::int[])
+     ORDER BY id ASC`,
+    [tripIds]
+  );
+  const expensesByTrip = new Map<number, any[]>();
+  const expSumsByTrip = new Map<number, { loading: number; unloading: number; bata: number; cleaning: number; other: number }>();
+  for (const e of expenseLinesRes.rows) {
+    const tripId = Number(e.trip_id);
+    if (!expensesByTrip.has(tripId)) expensesByTrip.set(tripId, []);
+    expensesByTrip.get(tripId)!.push({
+      expense_type: e.expense_type,
+      description: e.description,
+      amount: numAmt(e.amount),
+    });
+    if (!expSumsByTrip.has(tripId)) {
+      expSumsByTrip.set(tripId, { loading: 0, unloading: 0, bata: 0, cleaning: 0, other: 0 });
+    }
+    const sums = expSumsByTrip.get(tripId)!;
+    const key = String(e.expense_type || '').toUpperCase().trim();
+    const amt = numAmt(e.amount);
+    if (key === 'LOADING') sums.loading += amt;
+    else if (key === 'UNLOADING') sums.unloading += amt;
+    else if (key === 'DRIVER_BATA' || key === 'DRIVER_BETA') sums.bata += amt;
+    else if (key === 'CLEANING_CHARGE' || key === 'CLEANING') sums.cleaning += amt;
+    else sums.other += amt;
+  }
+  mapped = mapped.map((row) => {
+    const tripId = Number(row.trip_id || row.id);
+    const lines = expensesByTrip.get(tripId) || [];
+    const sums = expSumsByTrip.get(tripId);
+    const existing = Array.isArray(row.expense_items) ? row.expense_items : [];
+    return {
+      ...row,
+      expense_items: lines.length ? lines : existing,
+      loading_expense: Math.round(sums?.loading ?? numAmt(row.loading_expense)),
+      unloading_expense: Math.round(sums?.unloading ?? numAmt(row.unloading_expense)),
+      bata_expense: Math.round(sums?.bata ?? numAmt(row.bata_expense)),
+      cleaning_expense: Math.round(sums?.cleaning ?? numAmt(row.cleaning_expense)),
+      other_expense: Math.round(sums?.other ?? numAmt(row.other_expense)),
+    };
+  });
 
   const giverRes = await query(
     `SELECT g.trip_id, g.amount, g.given_by_name, g.given_by_role
@@ -616,6 +689,9 @@ export const getSettlements = asyncHandler(async (req: AuthRequest, res: Respons
             ) as expense_items,
             COALESCE((SELECT SUM(de.amount) FROM driver_expenses de WHERE de.trip_id = t.id AND UPPER(TRIM(de.expense_type)) = 'LOADING'), 0) as loading_expense,
             COALESCE((SELECT SUM(de.amount) FROM driver_expenses de WHERE de.trip_id = t.id AND UPPER(TRIM(de.expense_type)) = 'UNLOADING'), 0) as unloading_expense,
+            COALESCE((SELECT SUM(de.amount) FROM driver_expenses de WHERE de.trip_id = t.id AND UPPER(TRIM(de.expense_type)) IN ('DRIVER_BATA','DRIVER_BETA')), 0) as bata_expense,
+            COALESCE((SELECT SUM(de.amount) FROM driver_expenses de WHERE de.trip_id = t.id AND UPPER(TRIM(de.expense_type)) IN ('CLEANING_CHARGE','CLEANING')), 0) as cleaning_expense,
+            COALESCE((SELECT SUM(de.amount) FROM driver_expenses de WHERE de.trip_id = t.id AND UPPER(TRIM(de.expense_type)) NOT IN ('LOADING','UNLOADING','DRIVER_BATA','DRIVER_BETA','CLEANING_CHARGE','CLEANING')), 0) as other_expense,
             (
               COALESCE((SELECT SUM(da.amount) FROM driver_advances da WHERE da.driver_id = d.id), 0) +
               COALESCE((SELECT SUM(oa.amount) FROM owner_advances oa WHERE oa.driver_id = d.id), 0) +
@@ -694,6 +770,9 @@ export const getSettlementByTripId = asyncHandler(async (req: AuthRequest, res: 
             ), '[]'::json) as expense_items,
             COALESCE((SELECT SUM(de.amount) FROM driver_expenses de WHERE de.trip_id = t.id AND UPPER(TRIM(de.expense_type)) = 'LOADING'), 0) as loading_expense,
             COALESCE((SELECT SUM(de.amount) FROM driver_expenses de WHERE de.trip_id = t.id AND UPPER(TRIM(de.expense_type)) = 'UNLOADING'), 0) as unloading_expense,
+            COALESCE((SELECT SUM(de.amount) FROM driver_expenses de WHERE de.trip_id = t.id AND UPPER(TRIM(de.expense_type)) IN ('DRIVER_BATA','DRIVER_BETA')), 0) as bata_expense,
+            COALESCE((SELECT SUM(de.amount) FROM driver_expenses de WHERE de.trip_id = t.id AND UPPER(TRIM(de.expense_type)) IN ('CLEANING_CHARGE','CLEANING')), 0) as cleaning_expense,
+            COALESCE((SELECT SUM(de.amount) FROM driver_expenses de WHERE de.trip_id = t.id AND UPPER(TRIM(de.expense_type)) NOT IN ('LOADING','UNLOADING','DRIVER_BATA','DRIVER_BETA','CLEANING_CHARGE','CLEANING')), 0) as other_expense,
             (SELECT json_agg(json_build_object('id', dsp.id, 'amount', dsp.amount, 'payment_mode', dsp.payment_mode, 'payment_date', dsp.payment_date, 'reference_no', dsp.reference_no, 'notes', dsp.notes, 'created_at', dsp.created_at, 'created_by_name', pu.name))
              FROM driver_settlement_payments dsp
              LEFT JOIN users pu ON pu.id = dsp.created_by
@@ -762,6 +841,9 @@ export const getSettlementById = asyncHandler(async (req: AuthRequest, res: Resp
             ), '[]'::json) as expense_items,
             COALESCE((SELECT SUM(de.amount) FROM driver_expenses de WHERE de.trip_id = t.id AND UPPER(TRIM(de.expense_type)) = 'LOADING'), 0) as loading_expense,
             COALESCE((SELECT SUM(de.amount) FROM driver_expenses de WHERE de.trip_id = t.id AND UPPER(TRIM(de.expense_type)) = 'UNLOADING'), 0) as unloading_expense,
+            COALESCE((SELECT SUM(de.amount) FROM driver_expenses de WHERE de.trip_id = t.id AND UPPER(TRIM(de.expense_type)) IN ('DRIVER_BATA','DRIVER_BETA')), 0) as bata_expense,
+            COALESCE((SELECT SUM(de.amount) FROM driver_expenses de WHERE de.trip_id = t.id AND UPPER(TRIM(de.expense_type)) IN ('CLEANING_CHARGE','CLEANING')), 0) as cleaning_expense,
+            COALESCE((SELECT SUM(de.amount) FROM driver_expenses de WHERE de.trip_id = t.id AND UPPER(TRIM(de.expense_type)) NOT IN ('LOADING','UNLOADING','DRIVER_BATA','DRIVER_BETA','CLEANING_CHARGE','CLEANING')), 0) as other_expense,
             (SELECT json_agg(json_build_object('id', dsp.id, 'amount', dsp.amount, 'payment_mode', dsp.payment_mode, 'payment_date', dsp.payment_date, 'reference_no', dsp.reference_no, 'notes', dsp.notes, 'created_at', dsp.created_at, 'created_by_name', pu.name))
              FROM driver_settlement_payments dsp
              LEFT JOIN users pu ON pu.id = dsp.created_by

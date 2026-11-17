@@ -763,6 +763,7 @@ export const AdminDriverBalanceMasterScreen: React.FC<{ navigation: any }> = ({ 
             loading={pdfActionLoading}
             onShare={handleShareMasterPdf}
             onDownload={handleDownloadMasterPdf}
+            onPrint={handlePrintMasterPdf}
           />
         </View>
 
@@ -1032,6 +1033,7 @@ export const AdminDriverBalanceMasterScreen: React.FC<{ navigation: any }> = ({ 
                     loading={slipLoading}
                     onShare={() => handleShareDriverSlip(driver)}
                     onDownload={() => handleDownloadDriverSlip(driver)}
+                    onPrint={() => handlePrintDriverSlip(driver)}
                   />
                 </View>
               </View>

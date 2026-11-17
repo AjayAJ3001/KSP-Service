@@ -2,7 +2,7 @@ import { formatDateDMY } from './dateUtils';
 import { tripStartedByLabel } from './tripStartedBy';
 import { buildDriverTripStories, getSettlementBreakdown, storyBalanceAdvance, storyCashSettlements } from './driverTripStories';
 import { PRINT_BRAND_CSS, printBrandLockup } from './printBrand';
-import { settlementExpenseBreakdown } from './expenseBreakdown';
+import { normalizeExpenseItems, settlementExpenseBreakdown } from './expenseBreakdown';
 import {
   SETTLEMENT_ACCOUNT_CSS,
   settlementAccountStatementHtml,
@@ -117,7 +117,7 @@ export const generateDriverStatementHtml = (data: DriverStatementPdfData, option
     }
   });
   const tripExpenseItemsById = new Map<number, any[]>(
-    (data.trips_and_expenses || []).map((t: any) => [Number(t.trip_id || t.id), Array.isArray(t.expense_items) ? t.expense_items : []])
+    (data.trips_and_expenses || []).map((t: any) => [Number(t.trip_id || t.id), normalizeExpenseItems(t.expense_items)])
   );
   const tripStories = options?.tripId
     ? allStories.filter((s) => Number(s.tripId) === Number(options.tripId))
@@ -329,9 +329,16 @@ export const generateDriverStatementHtml = (data: DriverStatementPdfData, option
         const ownName = ownAdv.map((a: any) => a.given_by_name).filter(Boolean)[0]
           || allStories.flatMap((s) => s.advances).find((a: any) => String(a.given_by_role || '') === 'Owner')?.given_by_name
           || '';
+        const fromTrip = story.tripId ? (tripExpenseItemsById.get(Number(story.tripId)) || []) : [];
+        const fromStory = (story.expenses || []).flatMap((e: any) => normalizeExpenseItems(e.expense_items));
         const exp = settlementExpenseBreakdown({
-          expense_items: story.tripId ? tripExpenseItemsById.get(Number(story.tripId)) : [],
+          expense_items: fromTrip.length ? fromTrip : fromStory,
           total_expenses: story.totalExpenses,
+          loading_expense: tripRow?.loading_expense,
+          unloading_expense: tripRow?.unloading_expense,
+          bata_expense: tripRow?.bata_expense,
+          cleaning_expense: tripRow?.cleaning_expense,
+          other_expense: tripRow?.other_expense,
         });
         const leftoverRaw = Math.round(story.inHandUsed || 0);
         const leftoverUsed = leftoverRaw > 0 && (leftoverRaw === ownerAdvance || leftoverRaw === withoutTrip) ? 0 : leftoverRaw;

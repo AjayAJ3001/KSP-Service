@@ -27,6 +27,7 @@ const EXPENSE_TYPE_LABELS: Record<string, string> = {
   LOADING: 'Loading',
   UNLOADING: 'Unloading',
   CLEANING_CHARGE: 'Cleaning',
+  CLEANING: 'Cleaning',
   DRIVER_BATA: 'Driver bata',
   DRIVER_BETA: 'Driver bata',
   FREIGHT_BASED: 'Freight based',
@@ -79,10 +80,6 @@ export function expenseLinesFromSummary(s: {
     .map(([label, amount]) => ({ label: String(label), amount: Number(amount) }));
 }
 
-function expenseTypeKey(type?: string | null): string {
-  return String(type || '').toUpperCase().trim();
-}
-
 export type SettlementExpenseRow = { type: string; description: string; amount: number };
 
 export function settlementExpenseBreakdown(s: {
@@ -90,6 +87,9 @@ export function settlementExpenseBreakdown(s: {
   total_expenses?: number | string;
   loading_expense?: number | string;
   unloading_expense?: number | string;
+  bata_expense?: number | string;
+  cleaning_expense?: number | string;
+  other_expense?: number | string;
 }): {
   rows: SettlementExpenseRow[];
   loading: number;
@@ -98,34 +98,43 @@ export function settlementExpenseBreakdown(s: {
 } {
   const items = normalizeExpenseItems(s.expense_items);
   const toRow = (it: any): SettlementExpenseRow => ({
-    type: formatExpenseType(it.expense_type),
-    description: String(it.description || '').trim(),
+    type: formatExpenseType(it.expense_type || it.type),
+    description: String(it.description || it.type || '').trim(),
     amount: Number(it.amount || 0),
   });
 
-  const loadingItems = items.filter((it) => expenseTypeKey(it.expense_type) === 'LOADING');
-  const unloadingItems = items.filter((it) => expenseTypeKey(it.expense_type) === 'UNLOADING');
-  const otherItems = items.filter((it) => {
-    const key = expenseTypeKey(it.expense_type);
-    return key !== 'LOADING' && key !== 'UNLOADING';
-  });
+  const rows: SettlementExpenseRow[] = items
+    .map(toRow)
+    .filter((row) => Number(row.amount || 0) > 0);
 
   const loading = Math.round(
-    loadingItems.reduce((sum, it) => sum + Number(it.amount || 0), 0) || Number(s.loading_expense || 0)
+    rows.filter((r) => r.type === 'Loading').reduce((sum, r) => sum + Number(r.amount || 0), 0)
+    || Number(s.loading_expense || 0)
   );
   const unloading = Math.round(
-    unloadingItems.reduce((sum, it) => sum + Number(it.amount || 0), 0) || Number(s.unloading_expense || 0)
+    rows.filter((r) => r.type === 'Unloading').reduce((sum, r) => sum + Number(r.amount || 0), 0)
+    || Number(s.unloading_expense || 0)
   );
 
-  const rows: SettlementExpenseRow[] = [];
-  if (loadingItems.length) rows.push(...loadingItems.map(toRow));
-  else rows.push({ type: 'Loading', description: 'Loading charge', amount: loading });
-  if (unloadingItems.length) rows.push(...unloadingItems.map(toRow));
-  else rows.push({ type: 'Unloading', description: 'Unloading charge', amount: unloading });
-  rows.push(...otherItems.map(toRow));
+  if (!items.length) {
+    const catalog: Array<[string, string, number]> = [
+      ['Loading', 'Loading charge', Math.round(Number(s.loading_expense || 0))],
+      ['Unloading', 'Unloading charge', Math.round(Number(s.unloading_expense || 0))],
+      ['Driver bata', 'Driver bata', Math.round(Number(s.bata_expense || 0))],
+      ['Cleaning', 'Cleaning charge', Math.round(Number(s.cleaning_expense || 0))],
+      ['Other', 'Other trip expenses', Math.round(Number(s.other_expense || 0))],
+    ];
+    for (const [type, description, amount] of catalog) {
+      if (amount > 0) rows.push({ type, description, amount });
+    }
+  }
 
   const itemsTotal = Math.round(rows.reduce((sum, row) => sum + Number(row.amount || 0), 0));
   const total = Math.round(Number(s.total_expenses || 0)) || itemsTotal;
+  const remainder = Math.round(total - itemsTotal);
+  if (remainder > 0) {
+    rows.push({ type: 'Other', description: 'Other trip expenses', amount: remainder });
+  }
   return { rows, loading, unloading, total };
 }
 

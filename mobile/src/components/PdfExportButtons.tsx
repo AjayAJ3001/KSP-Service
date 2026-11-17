@@ -7,11 +7,12 @@ import {
   StyleSheet,
   ViewStyle,
 } from 'react-native';
-import { Share2, Download } from 'lucide-react-native';
+import { Share2, Download, Printer } from 'lucide-react-native';
 
 type Props = {
   onShare: () => void;
   onDownload: () => void;
+  onPrint?: () => void;
   loading?: string | null;
   disabled?: boolean;
   compact?: boolean;
@@ -21,12 +22,21 @@ type Props = {
 const isShareLoading = (loading?: string | null) =>
   Boolean(loading && /share/i.test(loading));
 
+const isPrintLoading = (loading?: string | null) =>
+  Boolean(loading && /(^|_)print|_pr_|pr_/i.test(String(loading)));
+
 const isDownloadLoading = (loading?: string | null) =>
-  Boolean(loading && /download|pdf|challan/i.test(loading) && !/share/i.test(loading));
+  Boolean(
+    loading
+    && /download|pdf|challan/i.test(loading)
+    && !/share/i.test(loading)
+    && !isPrintLoading(loading)
+  );
 
 export const PdfExportButtons: React.FC<Props> = ({
   onShare,
   onDownload,
+  onPrint,
   loading = null,
   disabled,
   compact,
@@ -35,6 +45,7 @@ export const PdfExportButtons: React.FC<Props> = ({
   const busy = Boolean(loading) || Boolean(disabled);
   const shareBusy = isShareLoading(loading);
   const downloadBusy = isDownloadLoading(loading);
+  const printBusy = isPrintLoading(loading);
   const iconSize = compact ? 13 : 15;
 
   return (
@@ -69,6 +80,23 @@ export const PdfExportButtons: React.FC<Props> = ({
           </>
         )}
       </TouchableOpacity>
+      {onPrint ? (
+        <TouchableOpacity
+          style={[styles.btn, styles.print, compact && styles.btnCompact, printBusy && { opacity: 0.7 }]}
+          onPress={onPrint}
+          disabled={busy}
+          activeOpacity={0.8}
+        >
+          {printBusy ? (
+            <ActivityIndicator size="small" color="#fff" />
+          ) : (
+            <>
+              <Printer size={iconSize} color="#fff" />
+              <Text style={[styles.text, compact && styles.textCompact]}>Print</Text>
+            </>
+          )}
+        </TouchableOpacity>
+      ) : null}
     </View>
   );
 };
@@ -77,6 +105,7 @@ const styles = StyleSheet.create({
   row: {
     flexDirection: 'row',
     alignItems: 'center',
+    flexWrap: 'wrap',
     gap: 8,
   },
   rowCompact: {
@@ -103,6 +132,9 @@ const styles = StyleSheet.create({
   },
   download: {
     backgroundColor: '#0f172a',
+  },
+  print: {
+    backgroundColor: '#1d4ed8',
   },
   text: {
     color: '#fff',

@@ -541,8 +541,8 @@ export const getDriverAdvancesSummary = asyncHandler(async (req: AuthRequest, re
         COALESCE(SUM(CASE WHEN de.expense_type = 'LOADING' THEN de.amount ELSE 0 END), 0) as loading_expense,
         COALESCE(SUM(CASE WHEN de.expense_type = 'UNLOADING' THEN de.amount ELSE 0 END), 0) as unloading_expense,
         COALESCE(SUM(CASE WHEN de.expense_type IN ('DRIVER_BATA', 'DRIVER_BETA') THEN de.amount ELSE 0 END), 0) as bata_expense,
-        COALESCE(SUM(CASE WHEN de.expense_type = 'CLEANING_CHARGE' THEN de.amount ELSE 0 END), 0) as cleaning_expense,
-        COALESCE(SUM(CASE WHEN de.expense_type NOT IN ('LOADING', 'UNLOADING', 'DRIVER_BATA', 'DRIVER_BETA', 'CLEANING_CHARGE') THEN de.amount ELSE 0 END), 0) as other_expense
+        COALESCE(SUM(CASE WHEN de.expense_type IN ('CLEANING_CHARGE', 'CLEANING') THEN de.amount ELSE 0 END), 0) as cleaning_expense,
+        COALESCE(SUM(CASE WHEN de.expense_type NOT IN ('LOADING', 'UNLOADING', 'DRIVER_BATA', 'DRIVER_BETA', 'CLEANING_CHARGE', 'CLEANING') THEN de.amount ELSE 0 END), 0) as other_expense
       FROM driver_expenses de
       GROUP BY de.trip_id
     ),

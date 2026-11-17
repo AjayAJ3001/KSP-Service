@@ -962,6 +962,7 @@ export const AdminSettlementsScreen: React.FC<{ navigation: any }> = ({ navigati
             loading={pdfLoading}
             onShare={handleSharePdf}
             onDownload={handleDownloadPdf}
+            onPrint={handlePrintPdf}
           />
         </View>
       </View>
@@ -1038,6 +1039,7 @@ export const AdminSettlementsScreen: React.FC<{ navigation: any }> = ({ navigati
                     disabled={!!pdfLoading}
                     onShare={() => handleShareSlip(s)}
                     onDownload={() => handleDownloadSlip(s)}
+                    onPrint={() => handlePrintSlip(s)}
                   />
                 </View>
 
