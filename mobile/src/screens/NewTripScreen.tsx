@@ -194,15 +194,15 @@ export const NewTripScreen: React.FC<Props> = ({ navigation, route }) => {
         mobileLookupService.getFreightRates(),
       ]);
 
-      setVehicles(vRes.data.items);
-      setDrivers(dRes.data.items);
-      setParties(pRes.data.items);
-      setRoutes(rRes.data.items);
-      setUnits(uRes.data);
+      setVehicles(vRes.data?.items || []);
+      setDrivers(dRes.data?.items || []);
+      setParties(pRes.data?.items || []);
+      setRoutes(rRes.data?.items || []);
+      setUnits(uRes.data || []);
       if (uRes.data && uRes.data.length > 0) {
         setSelectedUnitId(uRes.data[0].id);
       }
-      setFreightRates(frRes.data.items);
+      setFreightRates(frRes.data?.items || []);
       if (isManagerWallet) {
         try {
           const dash = await mobileDashboardService.getDashboard();
@@ -784,7 +784,11 @@ export const NewTripScreen: React.FC<Props> = ({ navigation, route }) => {
 
       setDraftTripId(res.data.id);
       const fullTripRes = await mobileTripService.getTripById(res.data.id);
-      navigation.navigate('PartyPayment', { trip: fullTripRes.data, draftTripId: res.data.id });
+      const createdTrip = fullTripRes.data?.id ? fullTripRes.data : (fullTripRes.data as any)?.data || res.data;
+      if (!createdTrip?.id) {
+        throw new Error('Trip was saved but could not be opened. Please open it from Trips.');
+      }
+      navigation.navigate('PartyPayment', { trip: createdTrip, draftTripId: res.data.id });
     } catch (err: any) {
       const msg = err.message || 'Failed to create trip.';
       setError(msg);

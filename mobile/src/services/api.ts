@@ -3,7 +3,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 
 export const API_PORT = 5000;
 /** PC Wi‑Fi IP for this LAN. USB phones also reach the PC via adb reverse on localhost. */
-export const CURRENT_WIFI_IP = '192.168.1.11';
+export const CURRENT_WIFI_IP = '189.72.146.91';
 const EXTRA_WIFI_IPS = ['192.168.1.11'];
 
 const SAVED_URL_KEY = 'ksp_server_base_url';

@@ -228,12 +228,14 @@ export const GiveTruckAdvanceScreen: React.FC<Props> = ({ navigation, route }) =
     }
   };
 
-  const filteredVehicles = vehicles.filter(
-    (v) =>
-      v.lorry_number.toLowerCase().includes(vehicleSearch.toLowerCase()) ||
-      (v.owner_name ?? '').toLowerCase().includes(vehicleSearch.toLowerCase()) ||
-      (v.vehicle_type ?? '').toLowerCase().includes(vehicleSearch.toLowerCase())
-  );
+  const filteredVehicles = vehicles.filter((v) => {
+    const q = vehicleSearch.toLowerCase();
+    return (
+      String(v.lorry_number || '').toLowerCase().includes(q)
+      || String(v.owner_name || '').toLowerCase().includes(q)
+      || String(v.vehicle_type || '').toLowerCase().includes(q)
+    );
+  });
 
   // Option 1: Proceed to Trip Dispatch with preselected Truck, Driver, and Advance Amount
   // Advance will be officially linked & recorded when the trip slip is generated!

@@ -5,6 +5,31 @@ import { AuthRequest } from '../middleware/auth';
 import { applyOwnerScope, applyVehicleScope, assertOwnerOwner, assertOwnerVehicle, hasFleetWideAccess, isCompanyOperatorUserId, isFleetScoped, sqlManagerVisibleTrip } from '../utils/ownerScope';
 import { createAuditLog } from '../utils/auditLog';
 
+/** Same unmatched cash as Driver Balance Master (DIRECT_ + OWNER_DIRECT_). */
+const WITHOUT_TRIP_ADVANCE_SQL = `
+  (
+    COALESCE((
+      SELECT SUM(da.amount) FROM driver_advances da
+      WHERE da.driver_id = d.id
+        AND (
+          da.trip_id IS NULL
+          OR da.trip_id IN (SELECT id FROM trips WHERE status IN ('CANCELLED', 'DRAFT'))
+        )
+    ), 0)
+    + COALESCE((
+      SELECT SUM(ta.amount) FROM truck_advances ta
+      WHERE ta.driver_id = d.id
+        AND (
+          ta.trip_id IS NULL
+          OR ta.trip_id IN (SELECT id FROM trips WHERE status IN ('CANCELLED', 'DRAFT'))
+        )
+    ), 0)
+    + COALESCE((
+      SELECT SUM(oa.amount) FROM owner_advances oa
+      WHERE oa.driver_id = d.id
+    ), 0)
+  )`;
+
 /**
  * Auto-reconcile PENDING settlements for a driver when subsequent advances have covered the deficit.
  * If driver's total advances cover all trip expenses (net overall >= 0 or prior deficit is reduced),
@@ -190,7 +215,7 @@ const numAmt = (val: any) => Math.round(parseFloat(String(val || 0)) || 0);
 
 export const attachAdvanceBreakdown = async (rows: any[]): Promise<any[]> => {
   if (!rows.length) return rows;
-  const driverIds = [...new Set(rows.map((r) => Number(r.driver_id)).filter((id) => id > 0))];
+  const driverIds = [...new Set(rows.map((r) => Number(r.driver_id || r.d_id)).filter((id) => id > 0))];
   if (!driverIds.length) return rows;
 
   const tripsRes = await query(
@@ -224,13 +249,19 @@ export const attachAdvanceBreakdown = async (rows: any[]): Promise<any[]> => {
        SELECT da.driver_id, da.amount
        FROM driver_advances da
        WHERE da.driver_id = ANY($1::int[])
-         AND da.trip_id IS NULL
+         AND (
+           da.trip_id IS NULL
+           OR da.trip_id IN (SELECT id FROM trips WHERE status IN ('CANCELLED', 'DRAFT'))
+         )
        UNION ALL
        SELECT ta.driver_id, ta.amount
        FROM truck_advances ta
        WHERE ta.driver_id = ANY($1::int[])
          AND ta.driver_id IS NOT NULL
-         AND ta.trip_id IS NULL
+         AND (
+           ta.trip_id IS NULL
+           OR ta.trip_id IN (SELECT id FROM trips WHERE status IN ('CANCELLED', 'DRAFT'))
+         )
      ) u
      GROUP BY driver_id`,
     [driverIds]
@@ -448,7 +479,7 @@ export const attachAdvanceBreakdown = async (rows: any[]): Promise<any[]> => {
       without_trip_advance: Math.round(
         (unmatchedByDriver.get(Number(row.driver_id)) || 0)
         + (ownerUnmatchedByDriver.get(Number(row.driver_id)) || 0)
-      ),
+      ) || Math.round(numAmt(row.without_trip_advance) || numAmt(row.sql_without_trip_advance)),
       need_to_pay: remainingNeed,
       in_hand: remainingNeed > 0 ? 0 : Math.round(rec.in_hand),
     };
@@ -563,6 +594,8 @@ export const getSettlements = asyncHandler(async (req: AuthRequest, res: Respons
             COALESCE(s.prior_deficit_deduction, t.prior_deficit_deduction, 0) as prior_deficit_deduction,
             v.lorry_number, v.owner_id, o.name as owner_name, o.mobile_number as owner_mobile,
             d.name as driver_name, d.mobile_number as driver_mobile,
+            d.id as driver_id,
+            ${WITHOUT_TRIP_ADVANCE_SQL} as without_trip_advance,
             p.name as party_name, r.from_location, r.to_location,
             u.name as settled_by_name,
             cu.name as trip_started_by_name,
@@ -635,6 +668,8 @@ export const getSettlementByTripId = asyncHandler(async (req: AuthRequest, res: 
             COALESCE(s.prior_deficit_deduction, t.prior_deficit_deduction, 0) as prior_deficit_deduction,
             v.lorry_number, v.owner_id, o.name as owner_name, o.mobile_number as owner_mobile,
             d.name as driver_name, d.mobile_number as driver_mobile,
+            d.id as driver_id,
+            ${WITHOUT_TRIP_ADVANCE_SQL} as without_trip_advance,
             p.name as party_name, r.from_location, r.to_location,
             u.name as settled_by_name,
             cu.name as trip_started_by_name,
@@ -701,6 +736,8 @@ export const getSettlementById = asyncHandler(async (req: AuthRequest, res: Resp
             COALESCE(s.prior_deficit_deduction, t.prior_deficit_deduction, 0) as prior_deficit_deduction,
             v.lorry_number, v.owner_id, o.name as owner_name, o.mobile_number as owner_mobile,
             d.name as driver_name, d.mobile_number as driver_mobile,
+            d.id as driver_id,
+            ${WITHOUT_TRIP_ADVANCE_SQL} as without_trip_advance,
             p.name as party_name, r.from_location, r.to_location,
             u.name as settled_by_name,
             cu.name as trip_started_by_name,

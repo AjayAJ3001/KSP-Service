@@ -8,29 +8,32 @@ import {
   ActivityIndicator,
   Alert,
 } from 'react-native';
-import { FileText } from 'lucide-react-native';
+import { FileText, ArrowLeft, ArrowRight } from 'lucide-react-native';
 import api from '../services/api';
 import { adminPaymentService } from '../services/adminService';
 import { Trip, TripPayment } from '../types';
 import { COLORS, SPACING, RADIUS, SHADOWS } from '../constants/theme';
 import { formatDateDMY } from '../utils/dateUtils';
 import { tripStartedByLabel } from '../utils/tripStartedBy';
-import { shareTripPdf, downloadTripPdf } from '../utils/pdfGenerator';
+import { shareTripPdf, downloadTripPdf, printTripPdf } from '../utils/pdfGenerator';
 import { PdfExportButtons } from '../components/PdfExportButtons';
 
 export const PartyPaymentScreen: React.FC<{ route: any; navigation: any }> = ({
   route,
   navigation,
 }) => {
-  const { trip, viewOnly } = route.params as { trip: Trip; viewOnly?: boolean };
+  const trip = ((route?.params?.trip || {}) as Trip);
+  const viewOnly = route?.params?.viewOnly as boolean | undefined;
 
   const [ownerName, setOwnerName] = useState<string>(trip.owner_name || '');
   const [ownerMobile, setOwnerMobile] = useState<string>(trip.owner_mobile || '');
   const [pdfAction, setPdfAction] = useState<'print' | 'share' | 'download' | null>(null);
   const [payments, setPayments] = useState<TripPayment[]>([]);
   const [receivedTotal, setReceivedTotal] = useState(Number(trip.total_received || 0));
+  const openingFreight = Number(trip.total_freight || 0);
+  const openingReceived = Number(trip.total_received || 0);
   const [balanceDue, setBalanceDue] = useState(
-    Number(trip.balance_due ?? Math.max(0, Number(trip.total_freight || 0) - Number(trip.total_received || 0)))
+    trip.balance_due != null ? Number(trip.balance_due) : Math.max(0, openingFreight - openingReceived)
   );
 
   useEffect(() => {
