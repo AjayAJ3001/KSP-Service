@@ -5,31 +5,6 @@ import { AuthRequest } from '../middleware/auth';
 import { applyOwnerScope, applyVehicleScope, assertOwnerOwner, assertOwnerVehicle, hasFleetWideAccess, isCompanyOperatorUserId, isFleetScoped, sqlManagerVisibleTrip } from '../utils/ownerScope';
 import { createAuditLog } from '../utils/auditLog';
 
-/** Same unmatched cash as Driver Balance Master (DIRECT_ + OWNER_DIRECT_). */
-const WITHOUT_TRIP_ADVANCE_SQL = `
-  (
-    COALESCE((
-      SELECT SUM(da.amount) FROM driver_advances da
-      WHERE da.driver_id = d.id
-        AND (
-          da.trip_id IS NULL
-          OR da.trip_id IN (SELECT id FROM trips WHERE status IN ('CANCELLED', 'DRAFT'))
-        )
-    ), 0)
-    + COALESCE((
-      SELECT SUM(ta.amount) FROM truck_advances ta
-      WHERE ta.driver_id = d.id
-        AND (
-          ta.trip_id IS NULL
-          OR ta.trip_id IN (SELECT id FROM trips WHERE status IN ('CANCELLED', 'DRAFT'))
-        )
-    ), 0)
-    + COALESCE((
-      SELECT SUM(oa.amount) FROM owner_advances oa
-      WHERE oa.driver_id = d.id
-    ), 0)
-  )`;
-
 /**
  * Auto-reconcile PENDING settlements for a driver when subsequent advances have covered the deficit.
  * If driver's total advances cover all trip expenses (net overall >= 0 or prior deficit is reduced),
@@ -243,7 +218,7 @@ export const attachAdvanceBreakdown = async (rows: any[]): Promise<any[]> => {
     }
   }
 
-  const tripsRes = await query(
+  const tripsRes = !driverIds.length ? { rows: [] as any[] } : await query(
     `SELECT t.id, t.driver_id, t.trip_date, t.created_at,
             (
               COALESCE((SELECT SUM(ta.amount) FROM truck_advances ta WHERE ta.trip_id = t.id), 0)
@@ -268,7 +243,7 @@ export const attachAdvanceBreakdown = async (rows: any[]): Promise<any[]> => {
     [driverIds]
   );
 
-  const unmatchedAdvRes = await query(
+  const unmatchedAdvRes = !driverIds.length ? { rows: [] as any[] } : await query(
     `SELECT driver_id, COALESCE(SUM(amount), 0) as amount
      FROM (
        SELECT da.driver_id, da.amount
@@ -276,7 +251,10 @@ export const attachAdvanceBreakdown = async (rows: any[]): Promise<any[]> => {
        WHERE da.driver_id = ANY($1::int[])
          AND (
            da.trip_id IS NULL
-           OR da.trip_id IN (SELECT id FROM trips WHERE status IN ('CANCELLED', 'DRAFT'))
+           OR EXISTS (
+             SELECT 1 FROM trips cx
+             WHERE cx.id = da.trip_id AND cx.status IN ('CANCELLED', 'DRAFT')
+           )
          )
        UNION ALL
        SELECT ta.driver_id, ta.amount
@@ -285,7 +263,10 @@ export const attachAdvanceBreakdown = async (rows: any[]): Promise<any[]> => {
          AND ta.driver_id IS NOT NULL
          AND (
            ta.trip_id IS NULL
-           OR ta.trip_id IN (SELECT id FROM trips WHERE status IN ('CANCELLED', 'DRAFT'))
+           OR EXISTS (
+             SELECT 1 FROM trips cx
+             WHERE cx.id = ta.trip_id AND cx.status IN ('CANCELLED', 'DRAFT')
+           )
          )
      ) u
      GROUP BY driver_id`,
@@ -296,7 +277,7 @@ export const attachAdvanceBreakdown = async (rows: any[]): Promise<any[]> => {
     unmatchedByDriver.set(Number(row.driver_id), numAmt(row.amount));
   }
   const ownerUnmatchedByDriver = new Map<number, number>();
-  const ownerUnmatchedRes = await query(
+  const ownerUnmatchedRes = !driverIds.length ? { rows: [] as any[] } : await query(
     `SELECT driver_id, COALESCE(SUM(amount), 0) as amount
      FROM owner_advances
      WHERE driver_id = ANY($1::int[])
@@ -307,7 +288,7 @@ export const attachAdvanceBreakdown = async (rows: any[]): Promise<any[]> => {
     ownerUnmatchedByDriver.set(Number(row.driver_id), numAmt(row.amount));
   }
 
-  const ownerRes = await query(
+  const ownerRes = !driverIds.length ? { rows: [] as any[] } : await query(
     `SELECT oa.driver_id, oa.amount, oa.advance_date, oa.created_at, oa.owner_id, o.name as owner_name
      FROM owner_advances oa
      LEFT JOIN owners o ON o.id = oa.owner_id
@@ -668,7 +649,6 @@ export const getSettlements = asyncHandler(async (req: AuthRequest, res: Respons
             v.lorry_number, v.owner_id, o.name as owner_name, o.mobile_number as owner_mobile,
             d.name as driver_name, d.mobile_number as driver_mobile,
             d.id as driver_id,
-            ${WITHOUT_TRIP_ADVANCE_SQL} as without_trip_advance,
             p.name as party_name, r.from_location, r.to_location,
             u.name as settled_by_name,
             cu.name as trip_started_by_name,
@@ -745,7 +725,6 @@ export const getSettlementByTripId = asyncHandler(async (req: AuthRequest, res: 
             v.lorry_number, v.owner_id, o.name as owner_name, o.mobile_number as owner_mobile,
             d.name as driver_name, d.mobile_number as driver_mobile,
             d.id as driver_id,
-            ${WITHOUT_TRIP_ADVANCE_SQL} as without_trip_advance,
             p.name as party_name, r.from_location, r.to_location,
             u.name as settled_by_name,
             cu.name as trip_started_by_name,
@@ -816,7 +795,6 @@ export const getSettlementById = asyncHandler(async (req: AuthRequest, res: Resp
             v.lorry_number, v.owner_id, o.name as owner_name, o.mobile_number as owner_mobile,
             d.name as driver_name, d.mobile_number as driver_mobile,
             d.id as driver_id,
-            ${WITHOUT_TRIP_ADVANCE_SQL} as without_trip_advance,
             p.name as party_name, r.from_location, r.to_location,
             u.name as settled_by_name,
             cu.name as trip_started_by_name,
